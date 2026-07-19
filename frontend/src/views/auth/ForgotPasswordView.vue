@@ -71,6 +71,7 @@
           <TurnstileWidget
             ref="turnstileRef"
             :site-key="turnstileSiteKey"
+            theme="dark"
             @verify="onTurnstileVerify"
             @expire="onTurnstileExpire"
             @error="onTurnstileError"
