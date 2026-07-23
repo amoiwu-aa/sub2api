@@ -1,141 +1,178 @@
-<template>
-  <div
-    class="galaxy pointer-events-none absolute inset-0 overflow-hidden"
-    :class="{ 'galaxy--auth': variant === 'auth' }"
-    aria-hidden="true"
-  >
-    <div class="galaxy__sky"></div>
-    <div class="galaxy__nebula galaxy__nebula--a" :class="{ 'is-static': reduceMotion }"></div>
-    <div class="galaxy__nebula galaxy__nebula--b" :class="{ 'is-static': reduceMotion }"></div>
-    <div class="galaxy__nebula galaxy__nebula--c" :class="{ 'is-static': reduceMotion }"></div>
-    <div class="galaxy__far-galaxy galaxy__far-galaxy--1" :class="{ 'is-static': reduceMotion }"></div>
-    <div class="galaxy__far-galaxy galaxy__far-galaxy--2" :class="{ 'is-static': reduceMotion }"></div>
-    <div class="galaxy__ring" :class="{ 'is-static': reduceMotion }"></div>
-    <div class="galaxy__dust" :class="{ 'is-static': reduceMotion }"></div>
-    <canvas ref="canvasRef" class="galaxy__canvas"></canvas>
-    <div class="galaxy__vignette"></div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = withDefaults(
   defineProps<{
     variant?: 'home' | 'auth'
   }>(),
-  { variant: 'home' }
+  {
+    variant: 'home'
+  }
 )
 
-type Star = {
-  x: number
-  y: number
-  z: number
-  r: number
-  twinkle: number
-  twinkleSpeed: number
-  baseAlpha: number
-}
-
-type ShootingStar = {
-  x: number
-  y: number
-  len: number
-  speed: number
-  life: number
-  maxLife: number
-  angle: number
-}
-
-type QuantumTrail = {
-  points: { x: number; y: number }[]
-  t: number
-  speed: number
-  width: number
-  alpha: number
-}
-
+const rootRef = ref<HTMLElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
-const reduceMotion = ref(false)
 
 let rafId = 0
 let resizeObserver: ResizeObserver | null = null
-let stars: Star[] = []
-let trails: QuantumTrail[] = []
-let shooting: ShootingStar | null = null
 let width = 0
 let height = 0
 let dpr = 1
-let running = false
-let lastTs = 0
-let spawnCooldown = 900
-let mediaQuery: MediaQueryList | null = null
-let onMotionChange: ((event: MediaQueryListEvent) => void) | null = null
+let stars: Star[] = []
+let spiralStars: SpiralStar[] = []
+let dust: Dust[] = []
+let flares: Flare[] = []
+let trails: Trail[] = []
+let t0 = 0
 
-function prefersReducedMotion(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+interface Star {
+  x: number
+  y: number
+  r: number
+  base: number
+  tw: number
+  ph: number
+  tone: number
 }
 
-function starCountForSize(w: number, h: number): number {
-  const area = w * h
-  const boost = props.variant === 'auth' ? 1.35 : 1
-  if (area < 500_000) return Math.floor(90 * boost)
-  if (area < 1_200_000) return Math.floor(140 * boost)
-  return Math.floor(190 * boost)
+interface SpiralStar {
+  a: number
+  dist: number
+  r: number
+  base: number
+  tw: number
+  ph: number
+  arm: number
+  warm: number
+  jitterR: number
+  jitterA: number
 }
 
-function seedStars(count: number) {
-  stars = Array.from({ length: count }, () => {
-    const z = Math.random()
+interface Dust {
+  x: number
+  y: number
+  r: number
+  a: number
+  drift: number
+  ph: number
+}
+
+interface Flare {
+  x: number
+  y: number
+  r: number
+  a: number
+  tw: number
+  ph: number
+}
+
+interface Trail {
+  x: number
+  y: number
+  len: number
+  ang: number
+  speed: number
+  a: number
+  w: number
+}
+
+const isAuth = computed(() => props.variant === 'auth')
+
+const shootingStars = computed(() =>
+  isAuth.value
+    ? [
+        { top: '14%', delay: '1s', duration: '7.2s' },
+        { top: '28%', delay: '4.2s', duration: '8.4s' },
+        { top: '46%', delay: '7.8s', duration: '6.8s' },
+        { top: '62%', delay: '11s', duration: '9s' },
+        { top: '78%', delay: '14.5s', duration: '7.6s' }
+      ]
+    : [
+        { top: '18%', delay: '0.8s', duration: '6.5s' },
+        { top: '42%', delay: '3.6s', duration: '7.8s' },
+        { top: '68%', delay: '6.4s', duration: '6.2s' }
+      ]
+)
+
+function rand(min: number, max: number) {
+  return min + Math.random() * (max - min)
+}
+
+function seedField() {
+  const area = Math.max(1, width * height)
+  const starCount = Math.min(isAuth.value ? 520 : 360, Math.floor(area / (isAuth.value ? 2200 : 3200)))
+  const dustCount = Math.min(isAuth.value ? 90 : 48, Math.floor(area / (isAuth.value ? 14000 : 22000)))
+  const flareCount = isAuth.value ? 18 : 8
+  const trailCount = isAuth.value ? 10 : 0
+  const spiralCount = Math.min(isAuth.value ? 1400 : 700, Math.floor(area / (isAuth.value ? 900 : 1600)))
+
+  stars = Array.from({ length: starCount }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    r: rand(0.35, isAuth.value ? 1.9 : 1.45),
+    base: rand(0.2, isAuth.value ? 0.95 : 0.78),
+    tw: rand(0.45, 1.8),
+    ph: rand(0, Math.PI * 2),
+    tone: Math.random()
+  }))
+
+  dust = Array.from({ length: dustCount }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    r: rand(isAuth.value ? 28 : 18, isAuth.value ? 100 : 70),
+    a: rand(0.02, isAuth.value ? 0.1 : 0.055),
+    drift: rand(0.01, 0.05),
+    ph: rand(0, Math.PI * 2)
+  }))
+
+  flares = Array.from({ length: flareCount }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    r: rand(1.2, 3.4),
+    a: rand(0.35, 0.85),
+    tw: rand(0.35, 1.1),
+    ph: rand(0, Math.PI * 2)
+  }))
+
+  trails = Array.from({ length: trailCount }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    len: rand(40, 120),
+    ang: rand(-0.55, -0.2),
+    speed: rand(0.35, 1.1),
+    a: rand(0.08, 0.28),
+    w: rand(0.6, 1.5)
+  }))
+
+  spiralStars = Array.from({ length: spiralCount }, (_, i) => {
+    const arm = i % 4
+    // denser near core, uneven along arms
+    const dist = Math.pow(Math.random(), 0.55) * Math.min(width, height) * (isAuth.value ? 0.62 : 0.45)
+    const armWidth = 0.22 + dist * 0.00055
     return {
-      x: Math.random() * width,
-      y: Math.random() * height,
-      z,
-      r: 0.35 + z * 1.7 + Math.random() * 0.55,
-      twinkle: Math.random() * Math.PI * 2,
-      twinkleSpeed: 0.015 + Math.random() * 0.04,
-      baseAlpha: 0.35 + z * 0.55
+      a: (arm * Math.PI) / 2 + dist * 0.016 + rand(-armWidth, armWidth),
+      dist: dist * rand(0.88, 1.12),
+      r: rand(0.25, isAuth.value ? 1.85 : 1.2),
+      base: rand(0.12, isAuth.value ? 0.9 : 0.65) * (0.55 + Math.random() * 0.45),
+      tw: rand(0.35, 1.5),
+      ph: rand(0, Math.PI * 2),
+      arm,
+      warm: Math.random(),
+      jitterR: rand(-18, 18),
+      jitterA: rand(-0.08, 0.08)
     }
   })
 }
 
-function seedTrails() {
-  if (props.variant !== 'auth') {
-    trails = []
-    return
-  }
-  const count = width < 700 ? 8 : 14
-  trails = Array.from({ length: count }, () => {
-    const x0 = Math.random() * width
-    const y0 = Math.random() * height
-    const x1 = x0 + (Math.random() - 0.5) * width * 0.55
-    const y1 = y0 + (Math.random() - 0.5) * height * 0.4
-    const x2 = x1 + (Math.random() - 0.5) * width * 0.35
-    const y2 = y1 + (Math.random() - 0.5) * height * 0.3
-    return {
-      points: [
-        { x: x0, y: y0 },
-        { x: x1, y: y1 },
-        { x: x2, y: y2 }
-      ],
-      t: Math.random(),
-      speed: 0.00035 + Math.random() * 0.00055,
-      width: 0.6 + Math.random() * 0.9,
-      alpha: 0.08 + Math.random() * 0.12
-    }
-  })
-}
-
-function resizeCanvas() {
+function resize() {
+  const el = rootRef.value
   const canvas = canvasRef.value
-  if (!canvas) return
-  const parent = canvas.parentElement
-  if (!parent) return
+  if (!el || !canvas) return
 
-  const rect = parent.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
   width = Math.max(1, Math.floor(rect.width))
   height = Math.max(1, Math.floor(rect.height))
-  dpr = Math.min(window.devicePixelRatio || 1, 1.75)
+  dpr = Math.min(window.devicePixelRatio || 1, 2)
 
   canvas.width = Math.floor(width * dpr)
   canvas.height = Math.floor(height * dpr)
@@ -145,380 +182,484 @@ function resizeCanvas() {
   const ctx = canvas.getContext('2d')
   if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  const target = starCountForSize(width, height)
-  if (Math.abs(stars.length - target) > 8) {
-    seedStars(target)
-  }
-  seedTrails()
+  seedField()
 }
 
-function spawnShootingStar() {
-  const fromTop = Math.random() > 0.35
-  shooting = {
-    x: Math.random() * width * 0.85,
-    y: fromTop ? Math.random() * height * 0.35 : Math.random() * height * 0.2,
-    len: 70 + Math.random() * 110,
-    speed: 8 + Math.random() * 7,
-    life: 0,
-    maxLife: 42 + Math.random() * 28,
-    angle: Math.PI / 5 + Math.random() * 0.35
-  }
+function drawMilkyBand(ctx: CanvasRenderingContext2D, time: number) {
+  const cx = width * 0.52
+  const cy = height * (isAuth.value ? 0.44 : 0.48)
+  const bandW = Math.max(width, height) * (isAuth.value ? 1.35 : 1.1)
+  const bandH = Math.min(width, height) * (isAuth.value ? 0.42 : 0.28)
+
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.rotate(-0.48 + Math.sin(time * 0.015) * 0.012)
+
+  const g = ctx.createLinearGradient(-bandW / 2, 0, bandW / 2, 0)
+  g.addColorStop(0, 'rgba(8, 18, 42, 0)')
+  g.addColorStop(0.18, 'rgba(56, 120, 190, 0.16)')
+  g.addColorStop(0.36, 'rgba(170, 210, 255, 0.34)')
+  g.addColorStop(0.5, 'rgba(255, 248, 235, 0.42)')
+  g.addColorStop(0.64, 'rgba(140, 190, 255, 0.32)')
+  g.addColorStop(0.82, 'rgba(70, 110, 190, 0.14)')
+  g.addColorStop(1, 'rgba(8, 18, 42, 0)')
+
+  ctx.globalCompositeOperation = 'screen'
+  ctx.fillStyle = g
+  ctx.beginPath()
+  ctx.ellipse(0, 0, bandW / 2, bandH / 2, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  // denser luminous core of the band
+  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, bandH * 0.55)
+  core.addColorStop(0, 'rgba(255, 250, 240, 0.28)')
+  core.addColorStop(0.35, 'rgba(180, 210, 255, 0.16)')
+  core.addColorStop(1, 'rgba(40, 80, 160, 0)')
+  ctx.fillStyle = core
+  ctx.beginPath()
+  ctx.ellipse(0, 0, bandW * 0.28, bandH * 0.55, 0, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.restore()
 }
 
-function drawStars(ctx: CanvasRenderingContext2D, alphaScale = 1) {
-  for (const star of stars) {
-    const alpha = Math.max(
-      0.08,
-      Math.min(1, (star.baseAlpha + 0.35 * Math.sin(star.twinkle)) * alphaScale)
-    )
+function drawSpiral(ctx: CanvasRenderingContext2D, time: number) {
+  const cx = width * 0.52
+  const cy = height * (isAuth.value ? 0.44 : 0.48)
+  const rot = time * 0.01
+  const scale = Math.min(width, height)
+
+  ctx.globalCompositeOperation = 'screen'
+
+  // bright galactic nucleus + dusty halo
+  const coreR = scale * (isAuth.value ? 0.28 : 0.18)
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR)
+  core.addColorStop(0, 'rgba(255, 252, 245, 0.72)')
+  core.addColorStop(0.08, 'rgba(255, 236, 200, 0.42)')
+  core.addColorStop(0.22, 'rgba(170, 205, 255, 0.22)')
+  core.addColorStop(0.45, 'rgba(80, 130, 220, 0.1)')
+  core.addColorStop(1, 'rgba(20, 40, 90, 0)')
+  ctx.fillStyle = core
+  ctx.beginPath()
+  ctx.arc(cx, cy, coreR, 0, Math.PI * 2)
+  ctx.fill()
+
+  // soft continuous arm dust (not just dots)
+  for (let arm = 0; arm < 4; arm++) {
+    const baseAng = (arm * Math.PI) / 2 + rot
+    const warmArm = arm % 2 === 1
+    for (let k = 0; k < 14; k++) {
+      const dist = (k + 0.6) * scale * 0.042
+      const ang = baseAng + dist * 0.016
+      const x = cx + Math.cos(ang) * dist
+      const y = cy + Math.sin(ang) * dist * 0.58
+      const radius = 28 + dist * 0.42
+      const wash = ctx.createRadialGradient(x, y, 0, x, y, radius)
+      const a0 = (isAuth.value ? 0.16 : 0.09) * (1 - k / 16)
+      wash.addColorStop(
+        0,
+        warmArm
+          ? `rgba(255, 220, 175, ${a0})`
+          : `rgba(170, 210, 255, ${a0})`
+      )
+      wash.addColorStop(0.45, warmArm ? `rgba(255, 190, 140, ${a0 * 0.35})` : `rgba(110, 160, 240, ${a0 * 0.35})`)
+      wash.addColorStop(1, 'rgba(40,70,140,0)')
+      ctx.fillStyle = wash
+      ctx.beginPath()
+      ctx.arc(x, y, radius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  for (const s of spiralStars) {
+    const ang = s.a + rot + s.jitterA
+    const dist = s.dist + s.jitterR
+    const x = cx + Math.cos(ang) * dist
+    const y = cy + Math.sin(ang) * dist * 0.58
+    if (x < -30 || y < -30 || x > width + 30 || y > height + 30) continue
+
+    const pulse = 0.5 + 0.5 * Math.sin(time * s.tw + s.ph)
+    const alpha = Math.min(1, s.base * pulse * (isAuth.value ? 1.05 : 0.8))
+    const tone =
+      s.warm > 0.72
+        ? `rgba(255, ${210 + Math.floor(s.warm * 35)}, ${170 + Math.floor(s.warm * 40)}, ${alpha})`
+        : s.warm > 0.4
+          ? `rgba(${190 + Math.floor(s.warm * 40)}, ${220 + Math.floor(s.warm * 20)}, 255, ${alpha})`
+          : `rgba(210, 230, 255, ${alpha})`
+
     ctx.beginPath()
-    ctx.fillStyle = `rgba(236, 252, 255, ${alpha})`
-    ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2)
+    ctx.fillStyle = tone
+    ctx.arc(x, y, s.r, 0, Math.PI * 2)
     ctx.fill()
 
-    if (star.z > 0.78) {
+    // soft bloom for brighter stars only — keep sparse
+    if (s.r > 1.25 && alpha > 0.45 && isAuth.value) {
       ctx.beginPath()
-      ctx.fillStyle = `rgba(165, 243, 252, ${alpha * 0.35})`
-      ctx.arc(star.x, star.y, star.r * 2.4, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(255, 245, 230, ${alpha * 0.18})`
+      ctx.arc(x, y, s.r * 2.6, 0, Math.PI * 2)
       ctx.fill()
     }
   }
 }
 
-function drawTrails(ctx: CanvasRenderingContext2D) {
-  for (const trail of trails) {
-    const [p0, p1, p2] = trail.points
-    const grad = ctx.createLinearGradient(p0.x, p0.y, p2.x, p2.y)
-    grad.addColorStop(0, `rgba(34, 211, 238, 0)`)
-    grad.addColorStop(0.45, `rgba(125, 211, 252, ${trail.alpha})`)
-    grad.addColorStop(1, `rgba(45, 212, 191, 0)`)
-    ctx.strokeStyle = grad
-    ctx.lineWidth = trail.width
-    ctx.beginPath()
-    ctx.moveTo(p0.x, p0.y)
-    ctx.quadraticCurveTo(p1.x, p1.y, p2.x, p2.y)
-    ctx.stroke()
-
-    const t = trail.t
-    const ox = (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * p1.x + t * t * p2.x
-    const oy = (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * p1.y + t * t * p2.y
-    ctx.beginPath()
-    ctx.fillStyle = `rgba(224, 255, 255, ${Math.min(0.9, trail.alpha * 4)})`
-    ctx.arc(ox, oy, 1.2, 0, Math.PI * 2)
-    ctx.fill()
-  }
-}
-
-function drawShootingStar(ctx: CanvasRenderingContext2D) {
-  if (!shooting) return
-  const t = shooting.life / shooting.maxLife
-  const fade = t < 0.2 ? t / 0.2 : t > 0.7 ? (1 - t) / 0.3 : 1
-  const dx = Math.cos(shooting.angle) * shooting.len
-  const dy = Math.sin(shooting.angle) * shooting.len
-  const grad = ctx.createLinearGradient(
-    shooting.x,
-    shooting.y,
-    shooting.x - dx,
-    shooting.y - dy
-  )
-  grad.addColorStop(0, `rgba(255, 255, 255, ${0.9 * fade})`)
-  grad.addColorStop(0.35, `rgba(165, 243, 252, ${0.45 * fade})`)
-  grad.addColorStop(1, 'rgba(56, 189, 248, 0)')
-  ctx.strokeStyle = grad
-  ctx.lineWidth = 2
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.moveTo(shooting.x, shooting.y)
-  ctx.lineTo(shooting.x - dx, shooting.y - dy)
-  ctx.stroke()
-}
-
-function drawStaticScene(ctx: CanvasRenderingContext2D) {
-  ctx.clearRect(0, 0, width, height)
-  if (!stars.length) seedStars(starCountForSize(width, height))
-  drawStars(ctx, 0.85)
-  if (props.variant === 'auth') drawTrails(ctx)
-}
-
-function drawFrame(ts: number) {
-  if (!running) return
+function drawFrame(time: number) {
   const canvas = canvasRef.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const dt = Math.min(32, ts - (lastTs || ts))
-  lastTs = ts
   ctx.clearRect(0, 0, width, height)
+  ctx.globalCompositeOperation = 'source-over'
 
-  for (const star of stars) {
-    star.twinkle += star.twinkleSpeed * (dt / 16)
-    const drift = (0.012 + star.z * 0.04) * (dt / 16)
-    star.x += drift
-    star.y += drift * 0.18
-    if (star.x > width + 4) star.x = -4
-    if (star.y > height + 4) star.y = -4
+  drawMilkyBand(ctx, time)
+  drawSpiral(ctx, time)
+
+  ctx.globalCompositeOperation = 'screen'
+  for (const d of dust) {
+    const ox = Math.cos(time * d.drift + d.ph) * 10
+    const oy = Math.sin(time * d.drift * 0.8 + d.ph) * 7
+    const g = ctx.createRadialGradient(d.x + ox, d.y + oy, 0, d.x + ox, d.y + oy, d.r)
+    g.addColorStop(0, `rgba(150, 200, 255, ${d.a})`)
+    g.addColorStop(0.55, `rgba(80, 130, 220, ${d.a * 0.4})`)
+    g.addColorStop(1, 'rgba(20, 40, 90, 0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.arc(d.x + ox, d.y + oy, d.r, 0, Math.PI * 2)
+    ctx.fill()
   }
 
-  for (const trail of trails) {
-    trail.t += trail.speed * dt
-    if (trail.t > 1) {
-      trail.t = 0
-      const x0 = Math.random() * width
-      const y0 = Math.random() * height
-      trail.points = [
-        { x: x0, y: y0 },
-        {
-          x: x0 + (Math.random() - 0.5) * width * 0.5,
-          y: y0 + (Math.random() - 0.5) * height * 0.35
-        },
-        {
-          x: x0 + (Math.random() - 0.5) * width * 0.7,
-          y: y0 + (Math.random() - 0.5) * height * 0.45
-        }
-      ]
-    }
+  for (const s of stars) {
+    const pulse = 0.55 + 0.45 * Math.sin(time * s.tw + s.ph)
+    const alpha = Math.min(1, s.base * pulse)
+    const tone =
+      s.tone > 0.82
+        ? `rgba(255, 236, 210, ${alpha})`
+        : s.tone > 0.55
+          ? `rgba(190, 220, 255, ${alpha})`
+          : `rgba(235, 245, 255, ${alpha})`
+    ctx.beginPath()
+    ctx.fillStyle = tone
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+    ctx.fill()
   }
 
-  if (props.variant === 'auth') drawTrails(ctx)
-  drawStars(ctx, 1)
+  for (const f of flares) {
+    const pulse = 0.45 + 0.55 * Math.sin(time * f.tw + f.ph)
+    const a = f.a * pulse
+    const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * 8)
+    g.addColorStop(0, `rgba(255, 250, 240, ${a})`)
+    g.addColorStop(0.2, `rgba(190, 220, 255, ${a * 0.4})`)
+    g.addColorStop(1, 'rgba(80, 140, 255, 0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.arc(f.x, f.y, f.r * 8, 0, Math.PI * 2)
+    ctx.fill()
 
-  spawnCooldown -= dt
-  if (!shooting && spawnCooldown <= 0) {
-    spawnShootingStar()
-    spawnCooldown = 900 + Math.random() * 1600
+    ctx.strokeStyle = `rgba(230, 245, 255, ${a * 0.55})`
+    ctx.lineWidth = 0.7
+    ctx.beginPath()
+    ctx.moveTo(f.x - f.r * 5, f.y)
+    ctx.lineTo(f.x + f.r * 5, f.y)
+    ctx.moveTo(f.x, f.y - f.r * 5)
+    ctx.lineTo(f.x, f.y + f.r * 5)
+    ctx.stroke()
   }
 
-  if (shooting) {
-    shooting.life += dt / 16
-    shooting.x += Math.cos(shooting.angle) * shooting.speed * (dt / 16)
-    shooting.y += Math.sin(shooting.angle) * shooting.speed * (dt / 16)
-    drawShootingStar(ctx)
-    if (shooting.life >= shooting.maxLife) shooting = null
+  for (const tr of trails) {
+    const x = (tr.x + time * tr.speed * 28) % (width + 160) - 80
+    const y = (tr.y + time * tr.speed * 10) % (height + 120) - 60
+    const x2 = x + Math.cos(tr.ang) * tr.len
+    const y2 = y + Math.sin(tr.ang) * tr.len
+    const g = ctx.createLinearGradient(x, y, x2, y2)
+    g.addColorStop(0, `rgba(180, 230, 255, ${tr.a})`)
+    g.addColorStop(1, 'rgba(180, 230, 255, 0)')
+    ctx.strokeStyle = g
+    ctx.lineWidth = tr.w
+    ctx.beginPath()
+    ctx.moveTo(x, y)
+    ctx.lineTo(x2, y2)
+    ctx.stroke()
   }
 
-  rafId = requestAnimationFrame(drawFrame)
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+function loop(ts: number) {
+  if (!t0) t0 = ts
+  drawFrame((ts - t0) / 1000)
+  rafId = window.requestAnimationFrame(loop)
 }
 
 function start() {
-  if (running || reduceMotion.value) return
-  running = true
-  lastTs = 0
-  rafId = requestAnimationFrame(drawFrame)
+  resize()
+  cancelAnimationFrame(rafId)
+  t0 = 0
+  rafId = window.requestAnimationFrame(loop)
 }
 
 function stop() {
-  running = false
-  if (rafId) {
-    cancelAnimationFrame(rafId)
-    rafId = 0
-  }
-}
-
-function onVisibility() {
-  if (document.hidden) stop()
-  else if (!reduceMotion.value) start()
-}
-
-function paintStaticIfNeeded() {
-  const ctx = canvasRef.value?.getContext('2d')
-  if (ctx && reduceMotion.value) drawStaticScene(ctx)
+  cancelAnimationFrame(rafId)
+  rafId = 0
 }
 
 onMounted(() => {
-  reduceMotion.value = prefersReducedMotion()
-  resizeCanvas()
-  paintStaticIfNeeded()
-
-  const canvas = canvasRef.value
-  resizeObserver = new ResizeObserver(() => {
-    resizeCanvas()
-    paintStaticIfNeeded()
-  })
-  if (canvas?.parentElement) resizeObserver.observe(canvas.parentElement)
-
-  mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-  onMotionChange = (event) => {
-    reduceMotion.value = event.matches
-    if (reduceMotion.value) {
-      stop()
-      paintStaticIfNeeded()
-    } else {
-      start()
-    }
+  start()
+  if (rootRef.value) {
+    resizeObserver = new ResizeObserver(() => resize())
+    resizeObserver.observe(rootRef.value)
   }
-  mediaQuery.addEventListener('change', onMotionChange)
-  document.addEventListener('visibilitychange', onVisibility)
-  if (!reduceMotion.value) start()
+  window.addEventListener('resize', resize)
 })
 
 onUnmounted(() => {
   stop()
-  document.removeEventListener('visibilitychange', onVisibility)
-  if (mediaQuery && onMotionChange) mediaQuery.removeEventListener('change', onMotionChange)
   resizeObserver?.disconnect()
-  resizeObserver = null
+  window.removeEventListener('resize', resize)
 })
+
+watch(
+  () => props.variant,
+  () => {
+    seedField()
+  }
+)
 </script>
+
+<template>
+  <div
+    ref="rootRef"
+    class="galaxy"
+    :class="isAuth ? 'galaxy--auth' : 'galaxy--home'"
+    aria-hidden="true"
+  >
+    <div class="galaxy__void" />
+    <div class="galaxy__milky" />
+    <div class="galaxy__spiral" />
+    <div class="galaxy__nebula galaxy__nebula--a" />
+    <div class="galaxy__nebula galaxy__nebula--b" />
+    <div class="galaxy__nebula galaxy__nebula--c" />
+    <div class="galaxy__nebula galaxy__nebula--d" />
+    <div class="galaxy__glow galaxy__glow--core" />
+    <div class="galaxy__glow galaxy__glow--teal" />
+    <div class="galaxy__glow galaxy__glow--violet" />
+    <div class="galaxy__glow galaxy__glow--warm" />
+    <div class="galaxy__dust" />
+    <div class="galaxy__haze" />
+    <canvas ref="canvasRef" class="galaxy__canvas" />
+    <div
+      v-for="(star, index) in shootingStars"
+      :key="index"
+      class="galaxy__shoot"
+      :style="{
+        top: star.top,
+        animationDelay: star.delay,
+        animationDuration: star.duration
+      }"
+    />
+    <div class="galaxy__vignette" />
+  </div>
+</template>
 
 <style scoped>
 .galaxy {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
   z-index: 0;
+  isolation: isolate;
+  background: #020617;
 }
 
-.galaxy__sky {
+.galaxy__void {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(120% 80% at 18% 12%, rgba(14, 165, 233, 0.18), transparent 55%),
-    radial-gradient(90% 70% at 82% 18%, rgba(45, 212, 191, 0.14), transparent 50%),
-    radial-gradient(80% 60% at 50% 100%, rgba(8, 47, 73, 0.2), transparent 55%),
-    linear-gradient(165deg, #0b1220 0%, #102a43 42%, #0f3d4c 100%);
+    radial-gradient(ellipse 95% 75% at 50% 42%, rgba(18, 36, 78, 0.55), transparent 62%),
+    radial-gradient(ellipse 70% 55% at 20% 80%, rgba(8, 20, 48, 0.7), transparent 55%),
+    linear-gradient(180deg, #01030c 0%, #06102a 42%, #030816 100%);
 }
 
-:global(html:not(.dark)) .galaxy__sky {
+.galaxy__milky {
+  position: absolute;
+  left: -20%;
+  top: 18%;
+  width: 140%;
+  height: 58%;
+  background: linear-gradient(
+    118deg,
+    transparent 8%,
+    rgba(70, 120, 210, 0.14) 28%,
+    rgba(190, 220, 255, 0.28) 44%,
+    rgba(255, 246, 230, 0.34) 50%,
+    rgba(150, 195, 255, 0.24) 58%,
+    rgba(60, 100, 190, 0.12) 72%,
+    transparent 90%
+  );
+  filter: blur(28px) saturate(1.25);
+  transform: rotate(-28deg) scaleY(0.72);
+  opacity: 0.9;
+  animation: milky-drift 48s ease-in-out infinite alternate;
+  mix-blend-mode: screen;
+}
+
+.galaxy__spiral {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: min(140vw, 1280px);
+  height: min(140vw, 1280px);
+  transform: translate(-50%, -50%);
   background:
-    radial-gradient(120% 80% at 15% 8%, rgba(56, 189, 248, 0.35), transparent 55%),
-    radial-gradient(90% 70% at 88% 20%, rgba(45, 212, 191, 0.28), transparent 52%),
-    radial-gradient(80% 55% at 50% 110%, rgba(125, 211, 252, 0.22), transparent 55%),
-    linear-gradient(168deg, #e0f2fe 0%, #ecfeff 45%, #f0fdfa 100%);
-}
-
-:global(html:not(.dark)) .galaxy--auth .galaxy__sky {
-  background:
-    radial-gradient(110% 75% at 12% 10%, rgba(34, 211, 238, 0.28), transparent 52%),
-    radial-gradient(95% 70% at 88% 16%, rgba(56, 189, 248, 0.22), transparent 50%),
-    radial-gradient(80% 55% at 48% 108%, rgba(14, 116, 144, 0.12), transparent 55%),
-    linear-gradient(168deg, #dbeafe 0%, #e0f2fe 46%, #f0fdfa 100%);
-}
-
-:global(html:not(.dark)) .galaxy__vignette {
-  background:
-    radial-gradient(115% 85% at 50% 35%, transparent 42%, rgba(224, 242, 254, 0.45) 100%),
-    linear-gradient(to bottom, rgba(224, 242, 254, 0.2), transparent 18%, transparent 78%, rgba(240, 253, 250, 0.35));
-}
-
-:global(html:not(.dark)) .galaxy__ring {
-  border-color: rgba(8, 145, 178, 0.28);
-  opacity: 0.55;
-}
-
-:global(html:not(.dark)) .galaxy__far-galaxy {
-  opacity: 0.28;
-}
-
-.galaxy--auth .galaxy__sky {
-  background:
-    radial-gradient(110% 75% at 12% 10%, rgba(34, 211, 238, 0.32), transparent 52%),
-    radial-gradient(95% 70% at 88% 16%, rgba(56, 189, 248, 0.26), transparent 50%),
-    radial-gradient(80% 55% at 48% 108%, rgba(8, 47, 73, 0.4), transparent 55%),
-    linear-gradient(168deg, #040914 0%, #0a1f33 46%, #07343c 100%);
-}
-
-.galaxy--auth .galaxy__nebula--a {
-  opacity: 1;
-  background: radial-gradient(ellipse 48% 38% at 22% 30%, rgba(34, 211, 238, 0.5), transparent 70%);
-}
-
-.galaxy--auth .galaxy__nebula--b {
-  opacity: 0.95;
-  background: radial-gradient(ellipse 50% 40% at 78% 62%, rgba(56, 189, 248, 0.4), transparent 72%);
+    conic-gradient(
+      from 20deg,
+      transparent 0deg,
+      rgba(140, 190, 255, 0.12) 16deg,
+      rgba(255, 236, 210, 0.3) 36deg,
+      transparent 68deg,
+      transparent 90deg,
+      rgba(120, 180, 255, 0.14) 108deg,
+      rgba(210, 230, 255, 0.26) 128deg,
+      transparent 158deg,
+      transparent 180deg,
+      rgba(255, 220, 180, 0.22) 202deg,
+      transparent 232deg,
+      transparent 270deg,
+      rgba(150, 200, 255, 0.16) 292deg,
+      rgba(255, 240, 220, 0.24) 318deg,
+      transparent 348deg,
+      transparent 360deg
+    ),
+    radial-gradient(
+      circle at center,
+      rgba(255, 248, 235, 0.55) 0%,
+      rgba(255, 230, 190, 0.28) 10%,
+      rgba(170, 210, 255, 0.18) 22%,
+      rgba(60, 110, 200, 0.08) 40%,
+      transparent 62%
+    );
+  filter: blur(26px) contrast(1.1) saturate(1.25);
+  opacity: 0.92;
+  mix-blend-mode: screen;
+  animation: spiral-spin 150s linear infinite;
 }
 
 .galaxy__nebula {
   position: absolute;
-  inset: -20%;
-  filter: blur(28px);
-  opacity: 0.85;
-  will-change: transform, opacity;
+  border-radius: 999px;
+  filter: blur(50px) saturate(1.35);
+  mix-blend-mode: screen;
+  animation: nebula-breathe 16s ease-in-out infinite;
 }
 
 .galaxy__nebula--a {
-  background: radial-gradient(ellipse 42% 34% at 22% 30%, rgba(34, 211, 238, 0.38), transparent 70%);
-  animation: nebula-a 18s ease-in-out infinite alternate;
+  width: 58vw;
+  height: 42vw;
+  left: -12%;
+  top: -8%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.42), rgba(14, 116, 220, 0.12) 48%, transparent 72%);
+  animation-duration: 18s;
 }
 
 .galaxy__nebula--b {
-  background: radial-gradient(ellipse 46% 36% at 78% 62%, rgba(56, 189, 248, 0.28), transparent 72%);
-  animation: nebula-b 22s ease-in-out infinite alternate;
+  width: 52vw;
+  height: 40vw;
+  right: -14%;
+  top: 10%;
+  background: radial-gradient(circle, rgba(129, 140, 248, 0.34), rgba(67, 56, 202, 0.1) 50%, transparent 74%);
+  animation-duration: 22s;
+  animation-delay: -4s;
 }
 
 .galaxy__nebula--c {
-  background: radial-gradient(ellipse 36% 28% at 55% 18%, rgba(153, 246, 228, 0.18), transparent 70%);
-  animation: nebula-c 16s ease-in-out infinite alternate;
+  width: 64vw;
+  height: 38vw;
+  left: 12%;
+  bottom: -16%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.28), rgba(13, 148, 136, 0.1) 46%, transparent 72%);
+  animation-duration: 20s;
+  animation-delay: -8s;
 }
 
-.galaxy__far-galaxy {
-  position: absolute;
-  border-radius: 50%;
-  opacity: 0.35;
-  filter: blur(1px);
-  animation: far-spin 90s linear infinite;
-}
-
-.galaxy__far-galaxy--1 {
-  left: 8%;
-  top: 16%;
-  width: 180px;
-  height: 90px;
-  background:
-    radial-gradient(ellipse at center, rgba(125, 211, 252, 0.35) 0%, transparent 68%),
-    conic-gradient(from 40deg, transparent, rgba(45, 212, 191, 0.25), transparent 40%);
-  transform: rotate(-24deg);
-}
-
-.galaxy__far-galaxy--2 {
-  right: 10%;
-  bottom: 18%;
-  width: 220px;
-  height: 110px;
-  background:
-    radial-gradient(ellipse at center, rgba(56, 189, 248, 0.28) 0%, transparent 70%),
-    conic-gradient(from 120deg, transparent, rgba(34, 211, 238, 0.2), transparent 45%);
-  transform: rotate(16deg);
-  animation-duration: 120s;
-  animation-direction: reverse;
-}
-
-.galaxy__ring {
-  position: absolute;
-  left: 58%;
+.galaxy__nebula--d {
+  width: 40vw;
+  height: 30vw;
+  left: 38%;
   top: 28%;
-  width: min(520px, 58vw);
-  aspect-ratio: 1.7 / 1;
-  transform: translate(-30%, -20%) rotate(-18deg);
-  border-radius: 50%;
-  border: 1.5px solid rgba(165, 243, 252, 0.22);
-  box-shadow:
-    0 0 40px rgba(34, 211, 238, 0.12),
-    inset 0 0 30px rgba(45, 212, 191, 0.08);
-  animation: ring-spin 48s linear infinite;
-  opacity: 0.7;
+  background: radial-gradient(circle, rgba(255, 220, 180, 0.2), rgba(251, 146, 60, 0.08) 42%, transparent 70%);
+  filter: blur(60px) saturate(1.2);
+  animation-duration: 24s;
+  animation-delay: -2s;
 }
 
-.galaxy__ring::before {
-  content: '';
+.galaxy__glow {
   position: absolute;
-  inset: 12% 8%;
-  border-radius: 50%;
-  border: 1px solid rgba(125, 211, 252, 0.16);
+  border-radius: 999px;
+  filter: blur(40px);
+  mix-blend-mode: screen;
+  animation: glow-drift 22s ease-in-out infinite alternate;
 }
 
-.galaxy--auth .galaxy__ring {
-  left: 50%;
-  top: 42%;
-  opacity: 0.45;
-  width: min(640px, 70vw);
+.galaxy__glow--core {
+  width: 36vw;
+  height: 36vw;
+  left: 42%;
+  top: 30%;
+  background: radial-gradient(circle, rgba(255, 248, 235, 0.28), rgba(147, 197, 253, 0.1) 45%, transparent 70%);
+  animation-duration: 26s;
+}
+
+.galaxy__glow--teal {
+  width: 42vw;
+  height: 30vw;
+  left: 8%;
+  top: 18%;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.24), transparent 70%);
+}
+
+.galaxy__glow--violet {
+  width: 38vw;
+  height: 32vw;
+  right: 4%;
+  top: 26%;
+  background: radial-gradient(circle, rgba(165, 180, 252, 0.22), transparent 70%);
+  animation-delay: -6s;
+}
+
+.galaxy__glow--warm {
+  width: 34vw;
+  height: 26vw;
+  left: 34%;
+  bottom: 8%;
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.12), transparent 70%);
+  animation-delay: -10s;
 }
 
 .galaxy__dust {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.35) 0.6px, transparent 0.7px);
-  background-size: 3px 3px;
-  opacity: 0.05;
-  animation: dust-drift 40s linear infinite;
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 20%, transparent 75%);
+  opacity: 0.5;
+  background-image:
+    radial-gradient(1.5px 1.5px at 8% 18%, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(1px 1px at 18% 62%, rgba(186, 230, 253, 0.75), transparent),
+    radial-gradient(1.5px 1.5px at 28% 28%, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(1px 1px at 40% 78%, rgba(224, 231, 255, 0.7), transparent),
+    radial-gradient(2px 2px at 52% 22%, rgba(255, 255, 255, 0.85), transparent),
+    radial-gradient(1px 1px at 66% 48%, rgba(165, 243, 252, 0.7), transparent),
+    radial-gradient(1.5px 1.5px at 74% 16%, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(1px 1px at 84% 68%, rgba(199, 210, 254, 0.75), transparent),
+    radial-gradient(1px 1px at 92% 34%, rgba(255, 255, 255, 0.65), transparent);
+  background-size: 100% 100%;
+  animation: dust-twinkle 7s ease-in-out infinite;
+}
+
+.galaxy__haze {
+  position: absolute;
+  inset: -10%;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 100%, rgba(15, 23, 42, 0.45), transparent 60%),
+    radial-gradient(ellipse 60% 40% at 10% 30%, rgba(8, 47, 73, 0.25), transparent 50%);
+  animation: haze-shift 36s ease-in-out infinite alternate;
 }
 
 .galaxy__canvas {
@@ -526,91 +667,180 @@ onUnmounted(() => {
   inset: 0;
   width: 100%;
   height: 100%;
+  display: block;
+  mix-blend-mode: screen;
+  opacity: 1;
+}
+
+.galaxy__shoot {
+  position: absolute;
+  left: -12%;
+  width: 140px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), rgba(125, 211, 252, 0.35), transparent);
+  filter: drop-shadow(0 0 6px rgba(125, 211, 252, 0.7));
+  opacity: 0;
+  animation-name: shoot-across;
+  animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+  animation-iteration-count: infinite;
 }
 
 .galaxy__vignette {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(115% 85% at 50% 35%, transparent 40%, rgba(2, 8, 18, 0.55) 100%),
-    linear-gradient(to bottom, rgba(2, 8, 18, 0.25), transparent 18%, transparent 78%, rgba(2, 8, 18, 0.45));
+    radial-gradient(ellipse 75% 65% at 50% 45%, transparent 30%, rgba(2, 6, 23, 0.28) 72%, rgba(2, 6, 23, 0.72) 100%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.25), transparent 22%, transparent 78%, rgba(2, 6, 23, 0.4));
+}
+
+.galaxy--auth .galaxy__milky {
+  opacity: 1;
+  filter: blur(22px) saturate(1.35);
+}
+
+.galaxy--auth .galaxy__spiral {
+  opacity: 1;
+  filter: blur(22px) contrast(1.15) saturate(1.35);
+}
+
+.galaxy--auth .galaxy__nebula {
+  filter: blur(42px) saturate(1.45);
+}
+
+.galaxy--auth .galaxy__dust {
+  opacity: 0.62;
 }
 
 .galaxy--auth .galaxy__vignette {
   background:
-    radial-gradient(90% 70% at 50% 45%, transparent 30%, rgba(2, 8, 18, 0.45) 100%),
-    linear-gradient(to bottom, rgba(2, 8, 18, 0.35), transparent 22%, transparent 75%, rgba(2, 8, 18, 0.5));
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 38%, rgba(2, 6, 23, 0.18) 75%, rgba(2, 6, 23, 0.55) 100%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.15), transparent 20%, transparent 80%, rgba(2, 6, 23, 0.28));
 }
 
-.is-static {
-  animation: none !important;
+.galaxy--home .galaxy__spiral {
+  opacity: 0.7;
 }
 
-@keyframes nebula-a {
+.galaxy--home .galaxy__milky {
+  opacity: 0.75;
+}
+
+/* Keep deep-space cosmos even in light theme — only UI chrome changes */
+:global(html:not(.dark)) .galaxy__void {
+  background:
+    radial-gradient(ellipse 95% 75% at 50% 42%, rgba(18, 36, 78, 0.5), transparent 62%),
+    linear-gradient(180deg, #01030c 0%, #06102a 42%, #030816 100%);
+}
+
+:global(html:not(.dark)) .galaxy__vignette {
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 36%, rgba(2, 6, 23, 0.2) 78%, rgba(2, 6, 23, 0.58) 100%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.12), transparent 22%, transparent 80%, rgba(2, 6, 23, 0.3));
+}
+
+@keyframes milky-drift {
   0% {
-    transform: translate3d(-2%, -1%, 0) scale(1);
+    transform: rotate(-28deg) scaleY(0.72) translate3d(0, 0, 0);
+  }
+  100% {
+    transform: rotate(-26deg) scaleY(0.76) translate3d(2%, -1.5%, 0);
+  }
+}
+
+@keyframes spiral-spin {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes nebula-breathe {
+  0%,
+  100% {
+    transform: scale(1) translate3d(0, 0, 0);
+    filter: blur(50px) saturate(1.3);
+  }
+  50% {
+    transform: scale(1.08) translate3d(1.5%, -1%, 0);
+    filter: blur(56px) saturate(1.45);
+  }
+}
+
+@keyframes glow-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(3%, -2%, 0) scale(1.08);
+  }
+}
+
+@keyframes dust-twinkle {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+  50% {
     opacity: 0.7;
   }
+}
+
+@keyframes haze-shift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
   100% {
-    transform: translate3d(4%, 3%, 0) scale(1.12);
+    transform: translate3d(-1.5%, 1%, 0);
+  }
+}
+
+@keyframes shoot-across {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(18deg);
+  }
+  6% {
     opacity: 1;
   }
-}
-
-@keyframes nebula-b {
-  0% {
-    transform: translate3d(3%, 2%, 0) scale(1.05);
-    opacity: 0.65;
+  24% {
+    opacity: 0;
+    transform: translate3d(118vw, 34vh, 0) rotate(18deg);
   }
   100% {
-    transform: translate3d(-4%, -2%, 0) scale(1.15);
-    opacity: 0.95;
+    opacity: 0;
+    transform: translate3d(118vw, 34vh, 0) rotate(18deg);
   }
 }
 
-@keyframes nebula-c {
-  0% {
-    transform: translate3d(0, 2%, 0) scale(1);
-    opacity: 0.5;
+@media (max-width: 768px) {
+  .galaxy__milky {
+    height: 48%;
+    filter: blur(22px);
   }
-  100% {
-    transform: translate3d(-2%, -3%, 0) scale(1.1);
-    opacity: 0.85;
-  }
-}
 
-@keyframes ring-spin {
-  from {
-    transform: translate(-30%, -20%) rotate(-18deg);
+  .galaxy__spiral {
+    width: 160vw;
+    height: 160vw;
   }
-  to {
-    transform: translate(-30%, -20%) rotate(342deg);
-  }
-}
 
-@keyframes far-spin {
-  from {
-    filter: blur(1px) hue-rotate(0deg);
-  }
-  to {
-    filter: blur(1px) hue-rotate(25deg);
-  }
-}
-
-@keyframes dust-drift {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 120px 80px;
+  .galaxy__nebula--a,
+  .galaxy__nebula--b,
+  .galaxy__nebula--c {
+    filter: blur(40px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .galaxy__milky,
+  .galaxy__spiral,
   .galaxy__nebula,
-  .galaxy__ring,
+  .galaxy__glow,
   .galaxy__dust,
-  .galaxy__far-galaxy {
+  .galaxy__haze,
+  .galaxy__shoot {
     animation: none !important;
   }
 }

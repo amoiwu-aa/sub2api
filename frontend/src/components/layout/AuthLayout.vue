@@ -104,7 +104,8 @@ onMounted(() => {
 }
 
 .auth-shell--light {
-  background: #dbeafe;
+  /* Keep deep-space base so cosmos stays visible; only chrome goes light */
+  background: #040914;
 }
 
 .auth-control {
@@ -187,25 +188,37 @@ onMounted(() => {
   border-radius: 1.5rem;
   border: 1px solid rgba(165, 243, 252, 0.22);
   background:
-    linear-gradient(155deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.04) 40%, rgba(8, 47, 73, 0.34) 100%);
+    linear-gradient(
+      155deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.015) 42%,
+      rgba(8, 47, 73, 0.08) 100%
+    );
   padding: 2rem 1.75rem 1.75rem;
   box-shadow:
-    0 30px 80px rgba(2, 8, 18, 0.58),
-    0 0 48px rgba(34, 211, 238, 0.12),
-    0 0 0 1px rgba(255, 255, 255, 0.05) inset,
-    0 1px 0 rgba(255, 255, 255, 0.18) inset;
-  backdrop-filter: blur(32px) saturate(155%);
-  -webkit-backdrop-filter: blur(32px) saturate(155%);
+    0 30px 80px rgba(2, 8, 18, 0.28),
+    0 0 48px rgba(34, 211, 238, 0.07),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 1px 0 rgba(255, 255, 255, 0.12) inset;
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
 }
 
 .auth-shell--light .glass-card {
-  border-color: rgba(14, 116, 144, 0.2);
+  border-color: rgba(186, 230, 253, 0.35);
   background:
-    linear-gradient(155deg, rgba(255, 255, 255, 0.86) 0%, rgba(240, 253, 250, 0.78) 45%, rgba(224, 242, 254, 0.82) 100%);
+    linear-gradient(
+      155deg,
+      rgba(255, 255, 255, 0.38) 0%,
+      rgba(240, 253, 250, 0.22) 45%,
+      rgba(224, 242, 254, 0.28) 100%
+    );
   box-shadow:
-    0 28px 60px rgba(15, 23, 42, 0.12),
-    0 0 36px rgba(34, 211, 238, 0.1),
-    0 0 0 1px rgba(255, 255, 255, 0.65) inset;
+    0 28px 60px rgba(2, 8, 18, 0.28),
+    0 0 36px rgba(34, 211, 238, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.35) inset;
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
 .glass-card__glow {
@@ -242,9 +255,9 @@ onMounted(() => {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(120% 80% at 20% 0%, rgba(255, 255, 255, 0.16), transparent 45%),
-    radial-gradient(90% 60% at 90% 100%, rgba(34, 211, 238, 0.08), transparent 50%);
-  opacity: 0.9;
+    radial-gradient(120% 80% at 20% 0%, rgba(255, 255, 255, 0.1), transparent 45%),
+    radial-gradient(90% 60% at 90% 100%, rgba(34, 211, 238, 0.05), transparent 50%);
+  opacity: 0.75;
 }
 
 .auth-shell--light .glass-card__sheen {
@@ -262,16 +275,17 @@ onMounted(() => {
   overflow: hidden;
   border-radius: 1.15rem;
   border: 1px solid rgba(165, 243, 252, 0.22);
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(15, 23, 42, 0.35);
   box-shadow:
-    0 12px 30px rgba(2, 8, 18, 0.45),
-    0 0 24px rgba(34, 211, 238, 0.2);
+    0 12px 30px rgba(2, 8, 18, 0.35),
+    0 0 24px rgba(34, 211, 238, 0.18);
+  backdrop-filter: blur(10px);
 }
 
 .auth-shell--light .brand-logo {
   border-color: rgba(14, 116, 144, 0.2);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
 }
 
 .brand-name {

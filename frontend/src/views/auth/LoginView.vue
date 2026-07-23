@@ -575,11 +575,12 @@ function handle2FACancel(): void {
 
 .login-label {
   display: block;
-  margin-bottom: 0.45rem;
+  margin-bottom: 0.65rem;
   font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: #cbd5e1;
+  line-height: 1.2;
 }
 
 :global(html:not(.dark)) .login-label {
@@ -601,8 +602,8 @@ function handle2FACancel(): void {
 .login-input {
   width: 100%;
   border-radius: 0.9rem;
-  border: 1px solid rgba(165, 243, 252, 0.16);
-  background: rgba(2, 8, 18, 0.45);
+  border: 1px solid rgba(165, 243, 252, 0.18);
+  background: rgba(2, 8, 18, 0.28);
   /* Keep room for leading icon; do not let shorthand wipe Tailwind pl/pr */
   padding-top: 0.78rem;
   padding-bottom: 0.78rem;
@@ -618,7 +619,8 @@ function handle2FACancel(): void {
     color 0.25s ease;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.02) inset,
-    0 8px 24px rgba(2, 8, 18, 0.25);
+    0 8px 24px rgba(2, 8, 18, 0.18);
+  backdrop-filter: blur(8px);
 }
 
 .login-input.pr-11 {
@@ -627,11 +629,11 @@ function handle2FACancel(): void {
 
 :global(html:not(.dark)) .login-input {
   border-color: rgba(14, 116, 144, 0.22);
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.55);
   color: #0f172a;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.7) inset,
-    0 8px 20px rgba(15, 23, 42, 0.06);
+    0 0 0 1px rgba(255, 255, 255, 0.55) inset,
+    0 8px 20px rgba(15, 23, 42, 0.05);
 }
 
 .login-input::placeholder {
@@ -704,7 +706,7 @@ function handle2FACancel(): void {
   border-color: rgba(165, 243, 252, 0.28);
   transition: background-color 99999s ease-in-out 0s;
   box-shadow:
-    0 0 0 1000px rgba(2, 8, 18, 0.92) inset,
+    0 0 0 1000px rgba(2, 8, 18, 0.72) inset,
     0 0 0 1px rgba(165, 243, 252, 0.16);
 }
 
@@ -715,7 +717,7 @@ function handle2FACancel(): void {
   caret-color: #0f172a;
   border-color: rgba(14, 116, 144, 0.28);
   box-shadow:
-    0 0 0 1000px rgba(255, 255, 255, 0.96) inset,
+    0 0 0 1000px rgba(255, 255, 255, 0.72) inset,
     0 0 0 1px rgba(14, 116, 144, 0.18);
 }
 
