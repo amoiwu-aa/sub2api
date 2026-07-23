@@ -65,11 +65,11 @@ function seedParticles(count: number) {
   particles = Array.from({ length: count }, () => ({
     x: Math.random() * width,
     y: Math.random() * height,
-    vx: (Math.random() - 0.5) * 0.5,
-    vy: (Math.random() - 0.5) * 0.5,
-    r: 1.6 + Math.random() * 2.4,
+    vx: (Math.random() - 0.5) * 1.15,
+    vy: (Math.random() - 0.5) * 1.15,
+    r: 2 + Math.random() * 2.8,
     pulse: Math.random() * Math.PI * 2,
-    pulseSpeed: 0.02 + Math.random() * 0.03
+    pulseSpeed: 0.03 + Math.random() * 0.04
   }))
 }
 
@@ -107,9 +107,9 @@ function drawNetwork(ctx: CanvasRenderingContext2D, alpha = 1) {
       const dy = a.y - b.y
       const dist = Math.hypot(dx, dy)
       if (dist < LINK_DIST) {
-        const lineAlpha = (1 - dist / LINK_DIST) * 0.55 * alpha
+        const lineAlpha = (1 - dist / LINK_DIST) * 0.72 * alpha
         ctx.strokeStyle = `rgba(${GLOW.r}, ${GLOW.g}, ${GLOW.b}, ${lineAlpha})`
-        ctx.lineWidth = 1.1
+        ctx.lineWidth = 1.35
         ctx.beginPath()
         ctx.moveTo(a.x, a.y)
         ctx.lineTo(b.x, b.y)
@@ -158,18 +158,18 @@ function drawFrame(ts: number) {
   ctx.clearRect(0, 0, width, height)
 
   // sweeping diagonal energy bar
-  const beamX = ((ts * 0.04) % (width + 280)) - 140
+  const beamX = ((ts * 0.08) % (width + 280)) - 140
   const beam = ctx.createLinearGradient(beamX, 0, beamX + 220, height)
   beam.addColorStop(0, 'rgba(56,189,248,0)')
-  beam.addColorStop(0.5, 'rgba(45,212,191,0.12)')
+  beam.addColorStop(0.5, 'rgba(45,212,191,0.2)')
   beam.addColorStop(1, 'rgba(20,184,166,0)')
   ctx.fillStyle = beam
   ctx.fillRect(0, 0, width, height)
 
-  scanY = (scanY + dt * 0.07) % (height + 200)
+  scanY = (scanY + dt * 0.14) % (height + 200)
   const band = ctx.createLinearGradient(0, scanY - 100, 0, scanY + 100)
   band.addColorStop(0, 'rgba(20,184,166,0)')
-  band.addColorStop(0.5, 'rgba(45,212,191,0.18)')
+  band.addColorStop(0.5, 'rgba(45,212,191,0.28)')
   band.addColorStop(1, 'rgba(20,184,166,0)')
   ctx.fillStyle = band
   ctx.fillRect(0, scanY - 100, width, 200)
@@ -308,17 +308,17 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(13, 148, 136, 0.11) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(13, 148, 136, 0.11) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, #000 20%, transparent 75%);
-  animation: lattice-shift 28s linear infinite;
+    linear-gradient(rgba(13, 148, 136, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(13, 148, 136, 0.18) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 85% 75% at 50% 40%, #000 25%, transparent 78%);
+  animation: lattice-shift 12s linear infinite;
 }
 
 :global(.dark) .tech-bg__lattice {
   background-image:
-    linear-gradient(rgba(45, 212, 191, 0.16) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(45, 212, 191, 0.16) 1px, transparent 1px);
+    linear-gradient(rgba(45, 212, 191, 0.24) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(45, 212, 191, 0.24) 1px, transparent 1px);
 }
 
 .tech-bg__floor {
@@ -328,19 +328,19 @@ onUnmounted(() => {
   bottom: -8%;
   height: 78%;
   background-image:
-    linear-gradient(rgba(13, 148, 136, 0.28) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(13, 148, 136, 0.28) 1px, transparent 1px);
-  background-size: 44px 44px;
+    linear-gradient(rgba(13, 148, 136, 0.4) 1.5px, transparent 1.5px),
+    linear-gradient(90deg, rgba(13, 148, 136, 0.4) 1.5px, transparent 1.5px);
+  background-size: 40px 40px;
   transform-origin: 50% 100%;
   transform: perspective(780px) rotateX(64deg);
-  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 45%, transparent 85%);
-  animation: grid-scroll 10s linear infinite;
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.5) 48%, transparent 88%);
+  animation: grid-scroll 5.5s linear infinite;
 }
 
 :global(.dark) .tech-bg__floor {
   background-image:
-    linear-gradient(rgba(45, 212, 191, 0.34) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(45, 212, 191, 0.34) 1px, transparent 1px);
+    linear-gradient(rgba(45, 212, 191, 0.48) 1.5px, transparent 1.5px),
+    linear-gradient(90deg, rgba(45, 212, 191, 0.48) 1.5px, transparent 1.5px);
 }
 
 .tech-bg__horizon {
@@ -369,19 +369,19 @@ onUnmounted(() => {
 .tech-bg__beams i {
   position: absolute;
   top: -25%;
-  width: 2px;
+  width: 3px;
   height: 150%;
   background: linear-gradient(
     180deg,
     transparent,
     rgba(45, 212, 191, 0),
-    rgba(45, 212, 191, 0.7),
+    rgba(45, 212, 191, 0.85),
     rgba(56, 189, 248, 0),
     transparent
   );
-  filter: blur(0.6px);
-  animation: beam-fall 7.5s linear infinite;
-  opacity: 0.7;
+  filter: blur(0.4px);
+  animation: beam-fall 4.2s linear infinite;
+  opacity: 0.85;
 }
 
 .tech-bg__beams i:nth-child(1) {
@@ -404,12 +404,12 @@ onUnmounted(() => {
   background: linear-gradient(
     180deg,
     transparent 0%,
-    rgba(45, 212, 191, 0.1) 48%,
-    rgba(56, 189, 248, 0.06) 54%,
+    rgba(45, 212, 191, 0.16) 48%,
+    rgba(56, 189, 248, 0.1) 54%,
     transparent 100%
   );
   background-size: 100% 240%;
-  animation: scan-sweep 5.8s ease-in-out infinite;
+  animation: scan-sweep 3.6s ease-in-out infinite;
 }
 
 .tech-bg__rings {
@@ -492,7 +492,7 @@ onUnmounted(() => {
     background-position: 0 0, 0 0;
   }
   to {
-    background-position: 64px 64px, -64px 64px;
+    background-position: 56px 56px, -56px 56px;
   }
 }
 
@@ -501,7 +501,7 @@ onUnmounted(() => {
     background-position: 0 0, 0 0;
   }
   to {
-    background-position: 0 44px, 44px 0;
+    background-position: 0 40px, 40px 0;
   }
 }
 
