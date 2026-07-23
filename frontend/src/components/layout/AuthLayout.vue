@@ -1,5 +1,8 @@
 <template>
-  <div class="auth-shell relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
+  <div
+    class="auth-shell relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10"
+    :class="isDark ? 'auth-shell--dark' : 'auth-shell--light'"
+  >
     <GalaxyBackground variant="auth" />
 
     <!-- Upper-right controls -->
@@ -30,18 +33,18 @@
               <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
             </div>
             <p class="brand-name">{{ siteName }}</p>
-            <p class="mt-1 text-[13px] tracking-wide text-slate-400">{{ siteSubtitle }}</p>
+            <p class="brand-subtitle mt-1 text-[13px] tracking-wide">{{ siteSubtitle }}</p>
           </div>
 
           <slot />
         </div>
       </div>
 
-      <div class="mt-6 text-center text-sm text-slate-400">
+      <div class="auth-footer mt-6 text-center text-sm">
         <slot name="footer" />
       </div>
 
-      <div class="mt-8 text-center text-[11px] tracking-wide text-slate-500/80">
+      <div class="auth-copy mt-8 text-center text-[11px] tracking-wide">
         &copy; {{ currentYear }} {{ siteName }}. All rights reserved.
       </div>
     </div>
@@ -72,21 +75,21 @@ const currentYear = computed(() => new Date().getFullYear())
 
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
+function applyTheme(dark: boolean) {
+  isDark.value = dark
+  document.documentElement.classList.toggle('dark', dark)
+  localStorage.setItem('theme', dark ? 'dark' : 'light')
+}
+
 function toggleTheme() {
-  isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
+  applyTheme(!isDark.value)
 }
 
 function initTheme() {
   const savedTheme = localStorage.getItem('theme')
-  if (
-    savedTheme === 'dark' ||
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  ) {
-    isDark.value = true
-    document.documentElement.classList.add('dark')
-  }
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  const shouldUseDark = savedTheme === 'dark' || (!savedTheme && prefersDark)
+  applyTheme(shouldUseDark)
 }
 
 onMounted(() => {
@@ -96,8 +99,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.auth-shell {
+.auth-shell--dark {
   background: #040914;
+}
+
+.auth-shell--light {
+  background: #dbeafe;
 }
 
 .auth-control {
@@ -110,8 +117,18 @@ onMounted(() => {
   box-shadow: 0 8px 24px rgba(2, 8, 18, 0.25);
 }
 
+.auth-shell--light .auth-control {
+  border-color: rgba(14, 116, 144, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
 .auth-control :deep(button) {
   color: #cbd5e1;
+}
+
+.auth-shell--light .auth-control :deep(button) {
+  color: #334155;
 }
 
 .auth-control :deep(button:hover) {
@@ -119,10 +136,20 @@ onMounted(() => {
   color: #fff;
 }
 
+.auth-shell--light .auth-control :deep(button:hover) {
+  background: rgba(14, 116, 144, 0.08);
+  color: #0f172a;
+}
+
 .auth-control :deep(.absolute) {
   border-color: rgba(165, 243, 252, 0.16);
   background: rgba(15, 23, 42, 0.95);
   backdrop-filter: blur(16px);
+}
+
+.auth-shell--light .auth-control :deep(.absolute) {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .auth-control-btn {
@@ -138,9 +165,20 @@ onMounted(() => {
   transition: color 0.2s ease, background 0.2s ease;
 }
 
+.auth-shell--light .auth-control-btn {
+  border-color: rgba(14, 116, 144, 0.18);
+  background: rgba(255, 255, 255, 0.72);
+  color: #334155;
+}
+
 .auth-control-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
+}
+
+.auth-shell--light .auth-control-btn:hover {
+  background: rgba(14, 116, 144, 0.08);
+  color: #0f172a;
 }
 
 .glass-card {
@@ -158,6 +196,16 @@ onMounted(() => {
     0 1px 0 rgba(255, 255, 255, 0.18) inset;
   backdrop-filter: blur(32px) saturate(155%);
   -webkit-backdrop-filter: blur(32px) saturate(155%);
+}
+
+.auth-shell--light .glass-card {
+  border-color: rgba(14, 116, 144, 0.2);
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.86) 0%, rgba(240, 253, 250, 0.78) 45%, rgba(224, 242, 254, 0.82) 100%);
+  box-shadow:
+    0 28px 60px rgba(15, 23, 42, 0.12),
+    0 0 36px rgba(34, 211, 238, 0.1),
+    0 0 0 1px rgba(255, 255, 255, 0.65) inset;
 }
 
 .glass-card__glow {
@@ -185,6 +233,10 @@ onMounted(() => {
   mask-composite: exclude;
 }
 
+.auth-shell--light .glass-card__glow {
+  opacity: 0.7;
+}
+
 .glass-card__sheen {
   pointer-events: none;
   position: absolute;
@@ -193,6 +245,12 @@ onMounted(() => {
     radial-gradient(120% 80% at 20% 0%, rgba(255, 255, 255, 0.16), transparent 45%),
     radial-gradient(90% 60% at 90% 100%, rgba(34, 211, 238, 0.08), transparent 50%);
   opacity: 0.9;
+}
+
+.auth-shell--light .glass-card__sheen {
+  background:
+    radial-gradient(120% 80% at 20% 0%, rgba(255, 255, 255, 0.7), transparent 45%),
+    radial-gradient(90% 60% at 90% 100%, rgba(34, 211, 238, 0.08), transparent 50%);
 }
 
 .brand-logo {
@@ -210,12 +268,47 @@ onMounted(() => {
     0 0 24px rgba(34, 211, 238, 0.2);
 }
 
+.auth-shell--light .brand-logo {
+  border-color: rgba(14, 116, 144, 0.2);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+}
+
 .brand-name {
   font-size: 1.05rem;
   font-weight: 650;
   letter-spacing: 0.04em;
   color: #f8fafc;
   text-shadow: 0 0 22px rgba(34, 211, 238, 0.28);
+}
+
+.auth-shell--light .brand-name {
+  color: #0f172a;
+  text-shadow: none;
+}
+
+.brand-subtitle {
+  color: #94a3b8;
+}
+
+.auth-shell--light .brand-subtitle {
+  color: #64748b;
+}
+
+.auth-footer {
+  color: #94a3b8;
+}
+
+.auth-shell--light .auth-footer {
+  color: #475569;
+}
+
+.auth-copy {
+  color: rgba(100, 116, 139, 0.8);
+}
+
+.auth-shell--light .auth-copy {
+  color: #64748b;
 }
 
 @keyframes neon-breathe {

@@ -378,10 +378,33 @@ onUnmounted(() => {
 
 :global(html:not(.dark)) .galaxy__sky {
   background:
-    radial-gradient(120% 80% at 15% 8%, rgba(56, 189, 248, 0.28), transparent 55%),
-    radial-gradient(90% 70% at 88% 20%, rgba(45, 212, 191, 0.2), transparent 52%),
-    radial-gradient(80% 55% at 50% 110%, rgba(14, 116, 144, 0.16), transparent 55%),
-    linear-gradient(168deg, #071525 0%, #0c2a3f 45%, #0b3a44 100%);
+    radial-gradient(120% 80% at 15% 8%, rgba(56, 189, 248, 0.35), transparent 55%),
+    radial-gradient(90% 70% at 88% 20%, rgba(45, 212, 191, 0.28), transparent 52%),
+    radial-gradient(80% 55% at 50% 110%, rgba(125, 211, 252, 0.22), transparent 55%),
+    linear-gradient(168deg, #e0f2fe 0%, #ecfeff 45%, #f0fdfa 100%);
+}
+
+:global(html:not(.dark)) .galaxy--auth .galaxy__sky {
+  background:
+    radial-gradient(110% 75% at 12% 10%, rgba(34, 211, 238, 0.28), transparent 52%),
+    radial-gradient(95% 70% at 88% 16%, rgba(56, 189, 248, 0.22), transparent 50%),
+    radial-gradient(80% 55% at 48% 108%, rgba(14, 116, 144, 0.12), transparent 55%),
+    linear-gradient(168deg, #dbeafe 0%, #e0f2fe 46%, #f0fdfa 100%);
+}
+
+:global(html:not(.dark)) .galaxy__vignette {
+  background:
+    radial-gradient(115% 85% at 50% 35%, transparent 42%, rgba(224, 242, 254, 0.45) 100%),
+    linear-gradient(to bottom, rgba(224, 242, 254, 0.2), transparent 18%, transparent 78%, rgba(240, 253, 250, 0.35));
+}
+
+:global(html:not(.dark)) .galaxy__ring {
+  border-color: rgba(8, 145, 178, 0.28);
+  opacity: 0.55;
+}
+
+:global(html:not(.dark)) .galaxy__far-galaxy {
+  opacity: 0.28;
 }
 
 .galaxy--auth .galaxy__sky {

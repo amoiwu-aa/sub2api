@@ -70,7 +70,7 @@
             <router-link
               v-if="passwordResetEnabled && !backendModeEnabled"
               to="/forgot-password"
-              class="text-sm font-medium text-cyan-300/90 transition-colors hover:text-cyan-200"
+              class="login-link text-sm font-medium transition-colors"
             >
               {{ t('auth.forgotPassword') }}
             </router-link>
@@ -177,7 +177,7 @@
         {{ t('auth.dontHaveAccount') }}
         <router-link
           to="/register"
-          class="font-semibold text-cyan-300 transition-colors hover:text-cyan-200"
+          class="login-link font-semibold transition-colors"
         >
           {{ t('auth.signUp') }}
         </router-link>
@@ -560,6 +560,19 @@ function handle2FACancel(): void {
   text-shadow: 0 0 24px rgba(34, 211, 238, 0.2);
 }
 
+:global(html:not(.dark)) .login-title {
+  color: #0f172a;
+  text-shadow: none;
+}
+
+.login-panel :deep(.text-slate-400) {
+  color: #94a3b8;
+}
+
+:global(html:not(.dark)) .login-panel :deep(.text-slate-400) {
+  color: #64748b;
+}
+
 .login-label {
   display: block;
   margin-bottom: 0.45rem;
@@ -569,8 +582,20 @@ function handle2FACancel(): void {
   color: #cbd5e1;
 }
 
+:global(html:not(.dark)) .login-label {
+  color: #334155;
+}
+
 .login-field {
   position: relative;
+}
+
+.login-field :deep(svg) {
+  color: #94a3b8;
+}
+
+:global(html:not(.dark)) .login-field :deep(svg) {
+  color: #64748b;
 }
 
 .login-input {
@@ -578,25 +603,51 @@ function handle2FACancel(): void {
   border-radius: 0.9rem;
   border: 1px solid rgba(165, 243, 252, 0.16);
   background: rgba(2, 8, 18, 0.45);
-  padding: 0.78rem 0.95rem;
+  /* Keep room for leading icon; do not let shorthand wipe Tailwind pl/pr */
+  padding-top: 0.78rem;
+  padding-bottom: 0.78rem;
+  padding-left: 2.85rem;
+  padding-right: 0.95rem;
   color: #f8fafc;
   font-size: 0.95rem;
   outline: none;
   transition:
     border-color 0.25s ease,
     box-shadow 0.25s ease,
-    background 0.25s ease;
+    background 0.25s ease,
+    color 0.25s ease;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.02) inset,
     0 8px 24px rgba(2, 8, 18, 0.25);
+}
+
+.login-input.pr-11 {
+  padding-right: 2.85rem;
+}
+
+:global(html:not(.dark)) .login-input {
+  border-color: rgba(14, 116, 144, 0.22);
+  background: rgba(255, 255, 255, 0.88);
+  color: #0f172a;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset,
+    0 8px 20px rgba(15, 23, 42, 0.06);
 }
 
 .login-input::placeholder {
   color: #64748b;
 }
 
+:global(html:not(.dark)) .login-input::placeholder {
+  color: #94a3b8;
+}
+
 .login-input:hover {
   border-color: rgba(125, 211, 252, 0.28);
+}
+
+:global(html:not(.dark)) .login-input:hover {
+  border-color: rgba(8, 145, 178, 0.4);
 }
 
 .login-input:focus {
@@ -609,6 +660,15 @@ function handle2FACancel(): void {
     0 8px 24px rgba(2, 8, 18, 0.3);
 }
 
+:global(html:not(.dark)) .login-input:focus {
+  border-color: rgba(8, 145, 178, 0.65);
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(8, 145, 178, 0.28),
+    0 0 0 6px rgba(34, 211, 238, 0.14),
+    0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
 .login-input--error {
   border-color: rgba(248, 113, 113, 0.7);
   box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12);
@@ -617,6 +677,46 @@ function handle2FACancel(): void {
 .login-input:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.login-link {
+  color: rgba(103, 232, 249, 0.92);
+}
+
+.login-link:hover {
+  color: #a5f3fc;
+}
+
+:global(html:not(.dark)) .login-link {
+  color: #0e7490;
+}
+
+:global(html:not(.dark)) .login-link:hover {
+  color: #155e75;
+}
+
+/* Prevent Chrome autofill from painting light-blue over icons/text */
+.login-input:-webkit-autofill,
+.login-input:-webkit-autofill:hover,
+.login-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f8fafc;
+  caret-color: #f8fafc;
+  border-color: rgba(165, 243, 252, 0.28);
+  transition: background-color 99999s ease-in-out 0s;
+  box-shadow:
+    0 0 0 1000px rgba(2, 8, 18, 0.92) inset,
+    0 0 0 1px rgba(165, 243, 252, 0.16);
+}
+
+:global(html:not(.dark)) .login-input:-webkit-autofill,
+:global(html:not(.dark)) .login-input:-webkit-autofill:hover,
+:global(html:not(.dark)) .login-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #0f172a;
+  caret-color: #0f172a;
+  border-color: rgba(14, 116, 144, 0.28);
+  box-shadow:
+    0 0 0 1000px rgba(255, 255, 255, 0.96) inset,
+    0 0 0 1px rgba(14, 116, 144, 0.18);
 }
 
 .login-submit {
