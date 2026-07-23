@@ -1,12 +1,12 @@
 <template>
   <AuthLayout>
-    <div class="space-y-6">
+    <div class="login-panel space-y-6">
       <!-- Title -->
       <div class="text-center">
-        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
-          {{ t('auth.welcomeBack') }}
+        <h2 class="login-title">
+          {{ t('auth.signIn') }}
         </h2>
-        <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
+        <p class="mt-2 text-sm text-slate-400">
           {{ t('auth.signInToAccount') }}
         </p>
       </div>
@@ -14,12 +14,12 @@
       <form @submit.prevent="handleLogin" class="space-y-5">
         <!-- Email Input -->
         <div>
-          <label for="email" class="input-label">
+          <label for="email" class="login-label">
             {{ t('auth.emailLabel') }}
           </label>
-          <div class="relative">
+          <div class="login-field">
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="mail" size="md" class="text-gray-400 dark:text-dark-500" />
+              <Icon name="mail" size="md" class="text-slate-400" />
             </div>
             <input
               id="email"
@@ -29,8 +29,8 @@
               autofocus
               autocomplete="email"
               :disabled="authActionDisabled"
-              class="input pl-11"
-              :class="{ 'input-error': errors.email }"
+              class="login-input pl-11"
+              :class="{ 'login-input--error': errors.email }"
               :placeholder="t('auth.emailPlaceholder')"
             />
           </div>
@@ -38,12 +38,12 @@
 
         <!-- Password Input -->
         <div>
-          <label for="password" class="input-label">
+          <label for="password" class="login-label">
             {{ t('auth.passwordLabel') }}
           </label>
-          <div class="relative">
+          <div class="login-field">
             <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="lock" size="md" class="text-gray-400 dark:text-dark-500" />
+              <Icon name="lock" size="md" class="text-slate-400" />
             </div>
             <input
               id="password"
@@ -52,26 +52,25 @@
               required
               autocomplete="current-password"
               :disabled="authActionDisabled"
-              class="input pl-11 pr-11"
-              :class="{ 'input-error': errors.password }"
+              class="login-input pl-11 pr-11"
+              :class="{ 'login-input--error': errors.password }"
               :placeholder="t('auth.passwordPlaceholder')"
             />
             <button
               type="button"
               @click="showPassword = !showPassword"
               :disabled="authActionDisabled"
-              class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-dark-300"
+              class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 transition-colors hover:text-slate-200"
             >
               <Icon v-if="showPassword" name="eyeOff" size="md" />
               <Icon v-else name="eye" size="md" />
             </button>
           </div>
-          <div class="mt-1 flex items-center justify-between">
-            <span></span>
+          <div class="mt-2 flex items-center justify-end">
             <router-link
               v-if="passwordResetEnabled && !backendModeEnabled"
               to="/forgot-password"
-              class="text-sm font-medium text-primary-600 transition-colors hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
+              class="text-sm font-medium text-cyan-300/90 transition-colors hover:text-cyan-200"
             >
               {{ t('auth.forgotPassword') }}
             </router-link>
@@ -93,7 +92,7 @@
         <button
           type="submit"
           :disabled="authActionDisabled || (turnstileEnabled && !turnstileToken)"
-          class="btn btn-primary w-full"
+          class="login-submit"
         >
           <svg
             v-if="isLoading"
@@ -133,11 +132,11 @@
 
         <div v-if="showOAuthLogin" class="space-y-3 pt-1">
           <div class="flex items-center gap-3">
-            <div class="h-px flex-1 bg-gray-200 dark:bg-dark-700"></div>
-            <span class="text-xs text-gray-500 dark:text-dark-400">
+            <div class="h-px flex-1 bg-white/10"></div>
+            <span class="text-xs text-slate-400">
               {{ t('auth.oauthOrContinue') }}
             </span>
-            <div class="h-px flex-1 bg-gray-200 dark:bg-dark-700"></div>
+            <div class="h-px flex-1 bg-white/10"></div>
           </div>
 
           <EmailOAuthButtons
@@ -174,11 +173,11 @@
 
     <!-- Footer -->
     <template v-if="!backendModeEnabled" #footer>
-      <p class="text-gray-500 dark:text-dark-400">
+      <p>
         {{ t('auth.dontHaveAccount') }}
         <router-link
           to="/register"
-          class="font-medium text-primary-600 transition-colors hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
+          class="font-semibold text-cyan-300 transition-colors hover:text-cyan-200"
         >
           {{ t('auth.signUp') }}
         </router-link>
@@ -553,6 +552,147 @@ function handle2FACancel(): void {
 </script>
 
 <style scoped>
+.login-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+  text-shadow: 0 0 24px rgba(34, 211, 238, 0.2);
+}
+
+.login-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #cbd5e1;
+}
+
+.login-field {
+  position: relative;
+}
+
+.login-input {
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(165, 243, 252, 0.16);
+  background: rgba(2, 8, 18, 0.45);
+  padding: 0.78rem 0.95rem;
+  color: #f8fafc;
+  font-size: 0.95rem;
+  outline: none;
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 8px 24px rgba(2, 8, 18, 0.25);
+}
+
+.login-input::placeholder {
+  color: #64748b;
+}
+
+.login-input:hover {
+  border-color: rgba(125, 211, 252, 0.28);
+}
+
+.login-input:focus {
+  border-color: rgba(34, 211, 238, 0.7);
+  background: rgba(8, 47, 73, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.35),
+    0 0 0 6px rgba(34, 211, 238, 0.12),
+    0 0 28px rgba(45, 212, 191, 0.18),
+    0 8px 24px rgba(2, 8, 18, 0.3);
+}
+
+.login-input--error {
+  border-color: rgba(248, 113, 113, 0.7);
+  box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12);
+}
+
+.login-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.login-submit {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(165, 243, 252, 0.28);
+  background: linear-gradient(120deg, #22d3ee 0%, #14b8a6 42%, #0891b2 78%, #2dd4bf 100%);
+  background-size: 180% 180%;
+  padding: 0.85rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #04111a;
+  box-shadow:
+    0 12px 30px rgba(34, 211, 238, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+  transition: transform 0.2s ease, filter 0.2s ease;
+  animation: gem-pulse 3.4s ease-in-out infinite;
+}
+
+.login-submit::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 20%, rgba(255, 255, 255, 0.35) 45%, transparent 70%);
+  transform: translateX(-120%);
+  animation: gem-sheen 3.4s ease-in-out infinite;
+}
+
+.login-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.login-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  animation: none;
+}
+
+.login-submit:disabled::before {
+  animation: none;
+}
+
+@keyframes gem-pulse {
+  0%,
+  100% {
+    background-position: 0% 50%;
+    box-shadow:
+      0 12px 30px rgba(34, 211, 238, 0.24),
+      0 0 0 1px rgba(255, 255, 255, 0.16) inset;
+  }
+  50% {
+    background-position: 100% 50%;
+    box-shadow:
+      0 16px 40px rgba(45, 212, 191, 0.4),
+      0 0 0 1px rgba(255, 255, 255, 0.28) inset;
+  }
+}
+
+@keyframes gem-sheen {
+  0%,
+  55% {
+    transform: translateX(-120%);
+  }
+  80%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: all 0.3s ease;
@@ -562,5 +702,12 @@ function handle2FACancel(): void {
 .fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-submit,
+  .login-submit::before {
+    animation: none;
+  }
 }
 </style>
