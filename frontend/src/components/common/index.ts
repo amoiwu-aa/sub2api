@@ -8,7 +8,7 @@ export { default as Toast } from './Toast.vue'
 export { default as LoadingSpinner } from './LoadingSpinner.vue'
 export { default as EmptyState } from './EmptyState.vue'
 export { default as LocaleSwitcher } from './LocaleSwitcher.vue'
-export { default as TechMeshBackground } from './TechMeshBackground.vue'
+export { default as GalaxyBackground } from './GalaxyBackground.vue'
 export { default as ExportProgressDialog } from './ExportProgressDialog.vue'
 
 // Export types
