@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============ 主题 token ============
+ *
+ * 为什么组件不自己写 `:global(.dark) .foo`：
+ * Vue 的 scoped CSS 在本项目的配置下，会把「:global(...) 作为前导选择器 + 后代」
+ * 这种形式的规则整条丢弃（实测编译产物里一条不剩）。症状是深色模式下组件
+ * 保持浅色底——登录表单和仪表盘统计卡都栽在这上面。
+ *
+ * 自定义属性的继承不受作用域约束，在这里统一声明、组件用 var() 消费，
+ * 就绕开了这个缺陷，也让明暗两套值集中可查。
+ */
+:root {
+  --surface-card: #ffffff;
+  --surface-card-border: rgb(229 231 235 / 0.8);
+  --surface-card-border-hover: rgb(203 213 225);
+  --surface-muted-border: rgb(203 213 225);
+  --text-strong: #0f172a;
+  --text-body: #334155;
+  --text-muted: #64748b;
+  --text-faint: #94a3b8;
+  --divider-soft: #cbd5e1;
+}
+
+.dark {
+  --surface-card: rgb(30 41 59 / 0.5);
+  --surface-card-border: rgb(51 65 85 / 0.6);
+  --surface-card-border-hover: rgb(71 85 105);
+  --surface-muted-border: rgb(71 85 105);
+  --text-strong: #f1f5f9;
+  --text-body: #e2e8f0;
+  --text-muted: #94a3b8;
+  --text-faint: #64748b;
+  --divider-soft: #475569;
+}
+
 @layer base {
   * {
     @apply border-gray-200 dark:border-dark-700;

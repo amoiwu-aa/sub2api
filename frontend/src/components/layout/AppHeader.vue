@@ -387,41 +387,27 @@ onBeforeUnmount(() => {
  * 余额是「随时可查的状态」，不是「需要立刻处理的告警」——降到中性描边，
  * 数字本身用 tabular-nums 保证位数变化时不抖动。 */
 .balance-chip {
-  border: 1px solid rgb(226 232 240);
+  border: 1px solid var(--surface-card-border);
   background: transparent;
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .balance-chip:hover {
-  border-color: rgb(203 213 225);
-  background: rgb(248 250 252);
+  border-color: var(--surface-card-border-hover);
 }
 
-:global(.dark) .balance-chip {
-  border-color: rgb(51 65 85 / 0.7);
-}
 
-:global(.dark) .balance-chip:hover {
-  border-color: rgb(71 85 105);
-  background: rgb(30 41 59 / 0.5);
-}
 
 .balance-chip__icon {
-  color: #94a3b8;
+  color: var(--text-faint);
 }
 
-:global(.dark) .balance-chip__icon {
-  color: #64748b;
-}
 
 .balance-chip__amount {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #334155;
+  color: var(--text-body);
   font-variant-numeric: tabular-nums;
 }
 
-:global(.dark) .balance-chip__amount {
-  color: #e2e8f0;
-}
 </style>

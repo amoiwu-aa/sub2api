@@ -53,35 +53,25 @@ defineProps<{
   flex-direction: column;
   gap: 0.4rem;
   border-radius: 0.75rem;
-  border: 1px solid rgb(229 231 235 / 0.8);
-  background: #fff;
+  border: 1px solid var(--surface-card-border);
+  background: var(--surface-card);
   padding: 0.95rem 1.05rem;
   transition: border-color 0.2s ease;
 }
 
-:global(.dark) .stat-tile {
-  border-color: rgb(51 65 85 / 0.6);
-  background: rgb(30 41 59 / 0.5);
-}
 
 .stat-tile:hover {
-  border-color: rgb(203 213 225);
+  border-color: var(--surface-card-border-hover);
 }
 
-:global(.dark) .stat-tile:hover {
-  border-color: rgb(71 85 105);
-}
 
 .stat-tile__head {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
-:global(.dark) .stat-tile__head {
-  color: #94a3b8;
-}
 
 .stat-tile__icon {
   flex-shrink: 0;
@@ -102,27 +92,21 @@ defineProps<{
   font-weight: 650;
   line-height: 1.15;
   letter-spacing: -0.02em;
-  color: #0f172a;
+  color: var(--text-strong);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-:global(.dark) .stat-tile__value {
-  color: #f1f5f9;
-}
 
 .stat-tile__prefix {
   margin-right: 0.05em;
   font-size: 0.95rem;
   font-weight: 550;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
-:global(.dark) .stat-tile__prefix {
-  color: #94a3b8;
-}
 
 .stat-tile__unit {
   /* 数值本身有 -0.02em 的负字距，会把紧随其后的单位吸过去（"0RPM"）。
@@ -131,21 +115,15 @@ defineProps<{
   font-size: 0.78rem;
   font-weight: 500;
   letter-spacing: 0.02em;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
-:global(.dark) .stat-tile__unit {
-  color: #94a3b8;
-}
 
 .stat-tile__foot {
   font-size: 0.72rem;
   line-height: 1.3;
-  color: #64748b;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-:global(.dark) .stat-tile__foot {
-  color: #94a3b8;
-}
 </style>

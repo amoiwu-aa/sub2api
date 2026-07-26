@@ -40,28 +40,18 @@ const { t } = useI18n()
 
 .cost-triplet__actual {
   font-weight: 550;
-  color: #334155;
+  color: var(--text-body);
 }
 
-:global(.dark) .cost-triplet__actual {
-  color: #e2e8f0;
-}
 
 .cost-triplet__account,
 .cost-triplet__standard {
-  color: #94a3b8;
+  color: var(--text-faint);
 }
 
-:global(.dark) .cost-triplet__account,
-:global(.dark) .cost-triplet__standard {
-  color: #64748b;
-}
 
 .cost-triplet__sep {
-  color: #cbd5e1;
+  color: var(--divider-soft);
 }
 
-:global(.dark) .cost-triplet__sep {
-  color: #475569;
-}
 </style>

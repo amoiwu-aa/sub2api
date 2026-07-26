@@ -47,33 +47,23 @@ withDefaults(
   height: 2.75rem;
   margin-bottom: 0.55rem;
   border-radius: 0.75rem;
-  border: 1px dashed rgb(203 213 225);
-  color: #94a3b8;
+  border: 1px dashed var(--surface-muted-border);
+  color: var(--text-faint);
 }
 
-:global(.dark) .chart-empty__mark {
-  border-color: rgb(71 85 105);
-  color: #64748b;
-}
 
 .chart-empty__title {
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
-:global(.dark) .chart-empty__title {
-  color: #94a3b8;
-}
 
 .chart-empty__hint {
   max-width: 22rem;
   font-size: 0.75rem;
   line-height: 1.5;
-  color: #94a3b8;
+  color: var(--text-faint);
 }
 
-:global(.dark) .chart-empty__hint {
-  color: #64748b;
-}
 </style>
