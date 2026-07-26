@@ -1,11 +1,13 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -27,20 +29,26 @@ func (s *AccountTestService) setupSSEHeaders(c *gin.Context) {
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 }
 
-// testKiroAccountConnection 用 ListAvailableModels 探活。
+// testKiroAccountConnection 用选中的模型真发一轮最小对话。
 //
-// 选它而不是发一轮真实对话：这是个 GET，能一次性验证 access token、
-// profileArn、由 ARN 推出的 region 和账号代理，且不消耗任何推理额度。
-// 返回的模型列表顺带告诉运营方这个号实际能用哪些模型。
-func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, account *Account) error {
+// 不用 ListAvailableModels 探活：那虽然不烧额度，但这个弹窗的既定语义是
+// 「选择测试模型」+「发送测试消息」，做成 GET 会和其他平台不一致，
+// 也回答不了「这个模型在这个号上到底能不能跑」——运营方真正关心的是后者。
+func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, account *Account, modelID string) error {
 	ctx := c.Request.Context()
 
 	if s.kiroGatewayService == nil {
 		return s.sendErrorAndEnd(c, "Kiro gateway service is not configured")
 	}
 
+	publicModel := strings.TrimSpace(modelID)
+	if publicModel == "" {
+		publicModel = kiro.DefaultModelIDs()[0]
+	}
+	upstreamModel := kiro.UpstreamModelID(publicModel)
+
 	s.setupSSEHeaders(c)
-	s.sendEvent(c, TestEvent{Type: "test_start", Model: "ListAvailableModels"})
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: publicModel})
 
 	started := time.Now()
 	client, err := s.kiroGatewayService.NewTestClient(ctx, account)
@@ -48,33 +56,44 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, account *
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to prepare Kiro client: %s", err.Error()))
 	}
 
-	models, defaultModel, err := client.ListAvailableModels(ctx)
+	state, err := kiro.BuildConversationState(&kiro.AnthropicRequest{
+		Model:     publicModel,
+		MaxTokens: 64,
+		Messages: []kiro.AnthropicMessage{
+			{Role: "user", Content: json.RawMessage(`"Reply with the single word: ok"`)},
+		},
+	}, uuid.NewString(), upstreamModel)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build Kiro request: %s", err.Error()))
+	}
+
+	var reply strings.Builder
+	_, err = client.GenerateAssistantResponse(ctx, &kiro.GenerateAssistantResponseRequest{
+		ConversationState: *state,
+	}, func(event kiro.StreamEvent) error {
+		if event.AssistantResponse == nil || event.AssistantResponse.Content == "" {
+			return nil
+		}
+		reply.WriteString(event.AssistantResponse.Content)
+		s.sendEvent(c, TestEvent{Type: "content", Text: event.AssistantResponse.Content})
+		return nil
+	})
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Kiro upstream rejected the request: %s", err.Error()))
 	}
 
 	elapsed := time.Since(started)
-	names := make([]string, 0, len(models))
-	for _, m := range models {
-		if name := strings.TrimSpace(m.ModelID); name != "" {
-			names = append(names, name)
-		}
-	}
-
-	summary := fmt.Sprintf("凭证有效，上游返回 %d 个可用模型（耗时 %dms）", len(names), elapsed.Milliseconds())
-	if defaultModel != nil && strings.TrimSpace(defaultModel.ModelID) != "" {
-		summary += fmt.Sprintf("，默认模型 %s", defaultModel.ModelID)
-	}
-	s.sendEvent(c, TestEvent{Type: "content", Text: summary})
-	if len(names) > 0 {
-		s.sendEvent(c, TestEvent{Type: "content", Text: strings.Join(names, ", ")})
+	if strings.TrimSpace(reply.String()) == "" {
+		return s.sendErrorAndEnd(c,
+			fmt.Sprintf("Kiro connected but returned no content (%dms)", elapsed.Milliseconds()))
 	}
 
 	s.sendEvent(c, TestEvent{
 		Type:    "test_complete",
 		Success: true,
 		Status:  "ok",
-		Data:    map[string]any{"models": names, "duration_ms": elapsed.Milliseconds()},
+		Model:   publicModel,
+		Data:    map[string]any{"duration_ms": elapsed.Milliseconds()},
 	})
 	return nil
 }
@@ -85,15 +104,23 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, account *
 // 它的上游是 HTTP/2 双向流 + 手写 protobuf + 逆向出来的 checksum，
 // 任何一环错了都只在真实发起一轮时才暴露。所以这里发一个极短的 prompt，
 // 用 Auto 模型（具名模型可能受套餐限制），把真实回复透出来。
-func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account *Account) error {
+func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account *Account, modelID string) error {
 	ctx := c.Request.Context()
 
 	if s.cursorGatewayService == nil {
 		return s.sendErrorAndEnd(c, "Cursor gateway service is not configured")
 	}
 
+	// 尊重下拉框选中的模型。此前这里硬编码 AutoModelID，界面显示
+	// 「Cursor Claude Sonnet 5」却实际用 cursor/default 去跑，对不上。
+	publicModel := strings.TrimSpace(modelID)
+	if publicModel == "" {
+		publicModel = cursor.PublicModelPrefix + cursor.AutoModelID
+	}
+	upstreamModel := cursor.UpstreamModelID(publicModel)
+
 	s.setupSSEHeaders(c)
-	s.sendEvent(c, TestEvent{Type: "test_start", Model: cursor.PublicModelPrefix + cursor.AutoModelID})
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: publicModel})
 
 	started := time.Now()
 	options, err := s.cursorGatewayService.NewTestAgentOptions(ctx, account)
@@ -105,9 +132,9 @@ func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account
 	result, err := cursor.RunAgentTurn(ctx, options, cursor.AgentTurnInput{
 		Text:           "Reply with the single word: ok",
 		ConversationID: uuid.NewString(),
-		ModelID:        cursor.AutoModelID,
+		ModelID:        upstreamModel,
 		// Auto 模式不带 effort/fast 这类具名模型参数。
-		ModelParams: []cursor.ModelParam{},
+		ModelParams: cursorTestModelParams(upstreamModel),
 	}, func(delta cursor.AgentDelta) error {
 		if delta.Text == "" {
 			return nil
@@ -135,7 +162,16 @@ func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account
 		Type:    "test_complete",
 		Success: true,
 		Status:  "ok",
+		Model:   publicModel,
 		Data:    map[string]any{"duration_ms": elapsed.Milliseconds()},
 	})
 	return nil
+}
+
+// cursorTestModelParams 与生产路径同一规则：Auto 不带具名模型的参数。
+func cursorTestModelParams(upstreamModel string) []cursor.ModelParam {
+	if upstreamModel == cursor.AutoModelID {
+		return []cursor.ModelParam{}
+	}
+	return cursor.DefaultModelParams()
 }

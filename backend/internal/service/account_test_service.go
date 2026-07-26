@@ -212,11 +212,11 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	// 兜底分支打的是 Anthropic 上游。新平台若不在这里显式登记，后台「测试连接」
 	// 会拿着该平台的凭证去打 Claude API，得到一个和真实故障无关的 401。
 	if account.Platform == PlatformKiro {
-		return s.testKiroAccountConnection(c, account)
+		return s.testKiroAccountConnection(c, account, modelID)
 	}
 
 	if account.Platform == PlatformCursor {
-		return s.testCursorAccountConnection(c, account)
+		return s.testCursorAccountConnection(c, account, modelID)
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
