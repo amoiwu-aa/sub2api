@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ const (
 type KiroGatewayService struct {
 	tokenProvider    *KiroTokenProvider
 	rateLimitService *RateLimitService
+	catalog          kiroCatalogCache
 }
 
 func NewKiroGatewayService(tokenProvider *KiroTokenProvider, rateLimitService *RateLimitService) *KiroGatewayService {
@@ -92,6 +94,12 @@ func (s *KiroGatewayService) forwardOnce(ctx context.Context, c *gin.Context, ac
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 
+	// 前置校验：明知会失败的请求就别发了，省一次调用和一轮 failover。
+	// 拿不到目录时什么都不做——这只是优化，不能因为目录缺失就拦请求。
+	if msg := s.preflightReject(ctx, account, client, conversationState, upstreamModel); msg != "" {
+		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", msg)
+	}
+
 	upstreamCtx, cancel := context.WithTimeout(ctx, kiroUpstreamTimeout)
 	defer cancel()
 
@@ -99,6 +107,45 @@ func (s *KiroGatewayService) forwardOnce(ctx context.Context, c *gin.Context, ac
 		return s.forwardStreaming(upstreamCtx, c, account, client, conversationState, publicModel, upstreamModel, startTime)
 	}
 	return s.forwardBuffered(upstreamCtx, c, account, client, conversationState, publicModel, upstreamModel, startTime)
+}
+
+// preflightReject 在发请求前判断这次调用是不是注定失败。
+// 返回非空字符串表示应当直接拒绝，内容是给客户端看的原因。
+//
+// 目前只拦一种确定失败的组合：纯文本模型收到了图片。实测 minimax-m2.5 与
+// glm-5 的 supportedInputTypes 只有 TEXT，带图片发过去必然报错。
+//
+// 这里刻意保守：目录拿不到、模型不在目录里、或者判断不出来，一律放行让
+// 上游去判。误拦一个本来能用的请求，比多发一个失败请求糟糕得多。
+func (s *KiroGatewayService) preflightReject(
+	ctx context.Context, account *Account, client *kiro.Client,
+	state *kiro.ConversationState, upstreamModel string,
+) string {
+	if !state.HasImages() {
+		return ""
+	}
+	catalog := s.catalog.Get(account, func(fetchCtx context.Context) ([]kiro.AvailableModel, error) {
+		models, _, err := client.ListAvailableModels(fetchCtx)
+		return models, err
+	})
+	if catalog == nil {
+		return ""
+	}
+	if _, known := catalog.Lookup(upstreamModel); !known {
+		return ""
+	}
+	if catalog.SupportsImages(upstreamModel) {
+		return ""
+	}
+
+	msg := "Model " + upstreamModel + " does not accept image input"
+	if alt := catalog.CheapestSupporting(true, 0); alt != "" {
+		msg += "; try " + kiro.PublicModelID(alt)
+	}
+	slog.Info("kiro.preflight_rejected_image_on_text_only_model",
+		"account_id", accountIDOrZero(account), "model", upstreamModel)
+	_ = ctx
+	return msg
 }
 
 func (s *KiroGatewayService) buildClient(ctx context.Context, account *Account) (*kiro.Client, error) {
