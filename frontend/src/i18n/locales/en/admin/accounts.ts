@@ -882,6 +882,8 @@ export default {
       // OAuth flow
       oauth: {
         title: 'Claude Account Authorization',
+        kiroTitle: 'Kiro account authorization',
+        cursorTitle: 'Cursor account authorization',
         authMethod: 'Authorization Method',
         manualAuth: 'Manual Authorization',
         cookieAutoAuth: 'Cookie Auto-Auth',

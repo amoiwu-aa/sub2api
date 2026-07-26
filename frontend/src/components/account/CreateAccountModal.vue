@@ -3789,6 +3789,9 @@ const oauthStepTitle = computed(() => {
   if (form.platform === 'gemini') return t('admin.accounts.oauth.gemini.title')
   if (form.platform === 'antigravity') return t('admin.accounts.oauth.antigravity.title')
   if (form.platform === 'grok') return t('admin.accounts.oauth.grok.title')
+  // 少了这两个分支就会落到兜底的「Claude 账号授权」——选 Kiro 却显示 Claude。
+  if (form.platform === 'kiro') return t('admin.accounts.oauth.kiroTitle')
+  if (form.platform === 'cursor') return t('admin.accounts.oauth.cursorTitle')
   return t('admin.accounts.oauth.title')
 })
 
