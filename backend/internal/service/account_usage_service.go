@@ -964,6 +964,7 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 			return nil, err
 		}
 		enrichUsageWithAccountError(usage, account)
+		s.parkExhaustedKiroAccount(account, usage)
 		s.cache.kiroCache.Store(account.ID, &kiroUsageCache{usageInfo: usage, timestamp: time.Now()})
 		return usage, nil
 	})
@@ -996,6 +997,52 @@ func (s *AccountUsageService) loadKiroCache(accountID int64) (*UsageInfo, bool) 
 	}
 	recalcKiroRemainingSeconds(entry.usageInfo)
 	return entry.usageInfo, true
+}
+
+// kiroExhaustedFallbackPark 是拿不到重置时间时的暂停时长。
+// 不能不暂停——否则调度器会一直往一个必然失败的账号上打。
+const kiroExhaustedFallbackPark = 30 * time.Minute
+
+// parkExhaustedKiroAccount 把额度耗尽的账号暂停调度到额度重置为止。
+//
+// 用 SetTempUnschedulable 而不是别的手段，是因为语义正好对上：这不是
+// 永久踢出（额度会恢复），也不该只是降优先级（在恢复前每一次调度过去
+// 都注定失败）。到点自动恢复，不需要人工干预。
+//
+// 只在「额度用尽且没开超额」时才停。开了超额的账号仍然可用，只是要花钱，
+// 停掉它等于平白损失可用容量。
+//
+// 覆盖面的局限要清楚：这条路径挂在用量查询上，而用量查询目前只有后台
+// 面板会触发，没有周期任务。也就是说没人看面板时不会自动暂停。要做到
+// 无人值守，得再加一个周期性巡检任务。
+func (s *AccountUsageService) parkExhaustedKiroAccount(account *Account, usage *UsageInfo) {
+	if account == nil || usage == nil || !usage.KiroExhausted {
+		return
+	}
+	if s.accountRepo == nil {
+		return
+	}
+
+	until := time.Now().Add(kiroExhaustedFallbackPark)
+	if usage.KiroCredits != nil && usage.KiroCredits.ResetsAt != nil && usage.KiroCredits.ResetsAt.After(time.Now()) {
+		until = *usage.KiroCredits.ResetsAt
+	}
+
+	reason := fmt.Sprintf("kiro credits exhausted (%.2f/%.2f), parked until quota reset",
+		usage.KiroCreditsUsed, usage.KiroCreditsLimit)
+
+	// 调用方的 context 可能随请求结束就取消了，这里用 background
+	// 保证标记一定写下去。
+	if err := s.accountRepo.SetTempUnschedulable(context.Background(), account.ID, until, reason); err != nil {
+		slog.Warn("kiro.park_exhausted_account_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	slog.Info("kiro.account_parked_until_quota_reset",
+		"account_id", account.ID,
+		"until", until,
+		"credits_used", usage.KiroCreditsUsed,
+		"credits_limit", usage.KiroCreditsLimit,
+	)
 }
 
 // recalcKiroRemainingSeconds 重算距重置的剩余秒数，避免返回缓存里过时的值。

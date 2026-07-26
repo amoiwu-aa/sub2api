@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"testing"
@@ -203,6 +204,117 @@ func TestGetKiroUsageWithoutFetcher(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.NotNil(t, usage.UpdatedAt)
+}
+
+// parkRecorder 记录 SetTempUnschedulable 的调用，其余方法不实现——
+// 本测试只关心暂停调度这一个行为。
+type parkRecorder struct {
+	AccountRepository
+	calls  int
+	id     int64
+	until  time.Time
+	reason string
+	err    error
+}
+
+func (r *parkRecorder) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
+	r.calls++
+	r.id, r.until, r.reason = id, until, reason
+	return r.err
+}
+
+func TestParkExhaustedKiroAccount(t *testing.T) {
+	t.Run("耗尽时暂停到额度重置", func(t *testing.T) {
+		resetAt := time.Now().Add(3 * time.Hour)
+		repo := &parkRecorder{}
+		s := &AccountUsageService{accountRepo: repo}
+		s.parkExhaustedKiroAccount(kiroQuotaAccount(), &UsageInfo{
+			KiroExhausted:    true,
+			KiroCreditsUsed:  50,
+			KiroCreditsLimit: 50,
+			KiroCredits:      &UsageProgress{ResetsAt: &resetAt},
+		})
+
+		require.Equal(t, 1, repo.calls)
+		require.Equal(t, int64(1), repo.id)
+		require.Equal(t, resetAt, repo.until)
+		require.Contains(t, repo.reason, "exhausted")
+	})
+
+	t.Run("没耗尽不动", func(t *testing.T) {
+		repo := &parkRecorder{}
+		s := &AccountUsageService{accountRepo: repo}
+		s.parkExhaustedKiroAccount(kiroQuotaAccount(), &UsageInfo{
+			KiroExhausted:    false,
+			KiroCreditsUsed:  10,
+			KiroCreditsLimit: 50,
+		})
+		require.Zero(t, repo.calls)
+	})
+
+	t.Run("拿不到重置时间时用兜底时长", func(t *testing.T) {
+		repo := &parkRecorder{}
+		s := &AccountUsageService{accountRepo: repo}
+		before := time.Now()
+		s.parkExhaustedKiroAccount(kiroQuotaAccount(), &UsageInfo{KiroExhausted: true})
+
+		require.Equal(t, 1, repo.calls)
+		// 必须暂停，否则调度器会一直往必然失败的账号上打
+		require.True(t, repo.until.After(before))
+		require.WithinDuration(t, before.Add(kiroExhaustedFallbackPark), repo.until, time.Minute)
+	})
+
+	t.Run("重置时间已过则用兜底时长", func(t *testing.T) {
+		repo := &parkRecorder{}
+		s := &AccountUsageService{accountRepo: repo}
+		past := time.Now().Add(-time.Hour)
+		before := time.Now()
+		s.parkExhaustedKiroAccount(kiroQuotaAccount(), &UsageInfo{
+			KiroExhausted: true,
+			KiroCredits:   &UsageProgress{ResetsAt: &past},
+		})
+
+		require.Equal(t, 1, repo.calls)
+		require.True(t, repo.until.After(before))
+	})
+
+	t.Run("写失败不 panic", func(t *testing.T) {
+		repo := &parkRecorder{err: errors.New("db down")}
+		s := &AccountUsageService{accountRepo: repo}
+		require.NotPanics(t, func() {
+			s.parkExhaustedKiroAccount(kiroQuotaAccount(), &UsageInfo{KiroExhausted: true})
+		})
+	})
+
+	t.Run("入参为空时不动", func(t *testing.T) {
+		repo := &parkRecorder{}
+		s := &AccountUsageService{accountRepo: repo}
+		s.parkExhaustedKiroAccount(nil, &UsageInfo{KiroExhausted: true})
+		s.parkExhaustedKiroAccount(kiroQuotaAccount(), nil)
+		require.Zero(t, repo.calls)
+	})
+}
+
+// TestParkSkipsOverageEnabledAccount 开了超额的账号仍然可用（只是要花钱），
+// 停掉它等于平白损失可用容量。这条由 kiro_exhausted 的语义保证：
+// buildKiroUsageInfo 在开了超额时不会置位。
+func TestParkSkipsOverageEnabledAccount(t *testing.T) {
+	repo := &parkRecorder{}
+	s := &AccountUsageService{accountRepo: repo}
+
+	u, l := 50.0, 50.0
+	usage := buildKiroUsageInfo(&kiro.UsageLimits{
+		OverageConfiguration: kiro.OverageConfiguration{OverageStatus: "ENABLED"},
+		UsageBreakdownList: []kiro.UsageBreakdown{{
+			ResourceType:              kiro.ResourceTypeCredit,
+			CurrentUsageWithPrecision: &u,
+			UsageLimitWithPrecision:   &l,
+		}},
+	}, time.Now())
+
+	require.False(t, usage.KiroExhausted)
+	s.parkExhaustedKiroAccount(kiroQuotaAccount(), usage)
+	require.Zero(t, repo.calls)
 }
 
 // TestKiroUsageCacheTTL 确认降级结果用更短的 TTL——
