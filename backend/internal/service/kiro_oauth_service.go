@@ -20,14 +20,18 @@ const (
 
 // KiroOAuthService 负责 kiro 账号的凭证导入与刷新。
 //
-// Kiro 没有可服务端拉起的 OAuth 流程（反代同样没有），凭证只能由运营方
-// 从本机 Kiro 的 ~/.aws/sso/cache/kiro-auth-token.json 复制粘贴进来。
+// 支持两条建号路径：
+//  1. 网页登录（portal）——服务端生成登录链接，管理员在浏览器完成登录后
+//     把回调地址粘回来换 token，见 kiro_web_login.go；
+//  2. 粘贴本机 ~/.aws/sso/cache/kiro-auth-token.json（IdC 账号仍走这条）。
 type KiroOAuthService struct {
 	proxyRepo ProxyRepository
+	// webLogins 保存进行中的 portal 登录会话（见 kiro_web_login.go）。
+	webLogins *KiroWebLoginStore
 }
 
 func NewKiroOAuthService(proxyRepo ProxyRepository) *KiroOAuthService {
-	return &KiroOAuthService{proxyRepo: proxyRepo}
+	return &KiroOAuthService{proxyRepo: proxyRepo, webLogins: NewKiroWebLoginStore()}
 }
 
 // KiroImportInput 是后台粘贴式建号的入参。

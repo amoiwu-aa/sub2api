@@ -480,6 +480,9 @@ func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerKiroRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	kiro := admin.Group("/kiro")
 	{
+		// 网页登录：生成 portal 链接 → 管理员浏览器登录 → 粘回回调地址换 token。
+		kiro.POST("/oauth/start", h.Admin.Kiro.StartWebLogin)
+		kiro.POST("/oauth/complete", h.Admin.Kiro.CompleteWebLogin)
 		kiro.POST("/import", h.Admin.Kiro.Import)
 		kiro.POST("/accounts/:id/refresh", h.Admin.Kiro.RefreshAccountToken)
 	}

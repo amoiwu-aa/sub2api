@@ -648,6 +648,14 @@ export default {
         apiKeyHint: 'Grok 订阅支持使用 OAuth refresh token；API Key 账号不在本次范围内。'
       },
       kiro: {
+        webLogin: '网页登录',
+        pasteFile: '粘贴本机文件',
+        webHint: '推荐。服务器生成登录链接，你在浏览器里用 Google / GitHub 登录即可，不需要本机装 Kiro。企业版（IdC）请改用「粘贴本机文件」。',
+        generateLoginUrl: '生成登录链接',
+        loginUrlLabel: '登录链接',
+        openInBrowser: '在浏览器打开',
+        callbackHint: '登录完成后浏览器会跳到下面这种地址并提示「无法访问」——这是正常的（本机没有服务在监听）。请把地址栏里的完整地址复制粘贴到下面：',
+        callbackLabel: '回调地址',
         intro: 'Kiro 没有可由服务端拉起的登录流程，请在本机登录 Kiro 后，把下面这个文件的内容整段粘贴进来：',
         tokenJsonLabel: 'kiro-auth-token.json 内容',
         clientRegistrationLabel: 'IdC 客户端注册',

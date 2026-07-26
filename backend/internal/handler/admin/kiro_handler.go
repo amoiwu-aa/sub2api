@@ -127,3 +127,52 @@ func (h *KiroHandler) RefreshAccountToken(c *gin.Context) {
 	}
 	response.Success(c, dto.AccountFromService(updatedAccount))
 }
+
+type KiroWebLoginStartRequest struct {
+	ProxyID *int64 `json:"proxy_id"`
+}
+
+// StartWebLogin 生成 portal 登录链接。
+//
+// 服务端收不到 portal 的 localhost 回调（只放行本机端口），所以这里只负责
+// 生成链接与保存 PKCE；管理员在浏览器登录后把回调地址粘回来，走 CompleteWebLogin。
+func (h *KiroHandler) StartWebLogin(c *gin.Context) {
+	var req KiroWebLoginStartRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req = KiroWebLoginStartRequest{}
+	}
+	result, err := h.kiroOAuthService.StartWebLogin(c.Request.Context(), req.ProxyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+type KiroWebLoginCompleteRequest struct {
+	SessionID string `json:"session_id"`
+	// Callback 是浏览器地址栏里那条打不开的回调地址（也接受裸 code）。
+	Callback string `json:"callback"`
+}
+
+// CompleteWebLogin 用回调里的授权码换凭证，返回可直接建号的 credentials。
+func (h *KiroHandler) CompleteWebLogin(c *gin.Context) {
+	var req KiroWebLoginCompleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.SessionID) == "" || strings.TrimSpace(req.Callback) == "" {
+		response.BadRequest(c, "session_id and callback are required")
+		return
+	}
+	tokenInfo, err := h.kiroOAuthService.CompleteWebLogin(c.Request.Context(), req.SessionID, req.Callback)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, KiroImportResponse{
+		TokenInfo:   tokenInfo,
+		Credentials: h.kiroOAuthService.BuildAccountCredentials(tokenInfo),
+	})
+}

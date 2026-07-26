@@ -3175,41 +3175,120 @@
     <!-- Step 2: Kiro credential paste.
          Kiro has no server-initiated OAuth flow (neither does the reverse proxy),
          so operators paste the token file that Kiro wrote on their own machine. -->
+    <!-- Step 2: Kiro。
+         网页登录是首选：portal 只放行 localhost 回调，服务器收不到，所以
+         回调页在管理员本机打不开——但授权码就在地址栏里，粘回来即可。
+         IdC（企业版）仍需走粘贴文件那条路，它要额外的 clientId/clientSecret。 -->
     <div v-else-if="form.platform === 'kiro'" class="space-y-5">
-      <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
-        <p class="text-sm text-amber-800 dark:text-amber-300">
-          {{ t('admin.accounts.kiro.intro') }}
+      <div class="flex gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
+        <button
+          type="button"
+          @click="kiroAuthMode = 'web'"
+          :class="[
+            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
+            kiroAuthMode === 'web'
+              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
+              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+          ]"
+        >
+          {{ t('admin.accounts.kiro.webLogin') }}
+        </button>
+        <button
+          type="button"
+          @click="kiroAuthMode = 'paste'"
+          :class="[
+            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
+            kiroAuthMode === 'paste'
+              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
+              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+          ]"
+        >
+          {{ t('admin.accounts.kiro.pasteFile') }}
+        </button>
+      </div>
+
+      <!-- 网页登录 -->
+      <div v-if="kiroAuthMode === 'web'" class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.accounts.kiro.webHint') }}
         </p>
-        <code class="mt-2 block text-xs text-amber-700 dark:text-amber-400">
-          ~/.aws/sso/cache/kiro-auth-token.json
-        </code>
+        <button
+          v-if="!kiroLoginUrl"
+          type="button"
+          class="btn btn-secondary w-full"
+          :disabled="kiroImporting"
+          @click="handleKiroStartWebLogin"
+        >
+          {{ t('admin.accounts.kiro.generateLoginUrl') }}
+        </button>
+        <template v-else>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.kiro.loginUrlLabel') }}</label>
+            <div class="mt-1 flex gap-2">
+              <input :value="kiroLoginUrl" readonly class="input flex-1 font-mono text-xs" />
+              <a :href="kiroLoginUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary shrink-0">
+                {{ t('admin.accounts.kiro.openInBrowser') }}
+              </a>
+            </div>
+          </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+            <p class="text-xs text-amber-800 dark:text-amber-300">
+              {{ t('admin.accounts.kiro.callbackHint') }}
+            </p>
+            <code class="mt-1 block break-all text-xs text-amber-700 dark:text-amber-400">
+              {{ kiroCallbackPrefix }}/oauth/callback?login_option=…&amp;code=…
+            </code>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.kiro.callbackLabel') }}</label>
+            <textarea
+              v-model="kiroCallback"
+              rows="3"
+              spellcheck="false"
+              class="input mt-1 font-mono text-xs"
+              :placeholder="kiroCallbackPrefix + '/oauth/callback?login_option=google&code=...'"
+            ></textarea>
+          </div>
+        </template>
       </div>
 
-      <div>
-        <label class="input-label">{{ t('admin.accounts.kiro.tokenJsonLabel') }}</label>
-        <textarea
-          v-model="kiroTokenJson"
-          rows="9"
-          spellcheck="false"
-          class="input mt-1 font-mono text-xs"
-          :placeholder="kiroTokenJsonPlaceholder"
-        ></textarea>
-      </div>
+      <!-- 粘贴本机凭证文件 -->
+      <div v-else class="space-y-4">
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+          <p class="text-sm text-amber-800 dark:text-amber-300">
+            {{ t('admin.accounts.kiro.intro') }}
+          </p>
+          <code class="mt-2 block text-xs text-amber-700 dark:text-amber-400">
+            ~/.aws/sso/cache/kiro-auth-token.json
+          </code>
+        </div>
 
-      <div>
-        <label class="input-label">
-          {{ t('admin.accounts.kiro.clientRegistrationLabel') }}
-          <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.kiro.clientRegistrationHint') }}
-          </span>
-        </label>
-        <textarea
-          v-model="kiroClientRegistrationJson"
-          rows="4"
-          spellcheck="false"
-          class="input mt-1 font-mono text-xs"
-          placeholder='{"clientId": "...", "clientSecret": "..."}'
-        ></textarea>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.kiro.tokenJsonLabel') }}</label>
+          <textarea
+            v-model="kiroTokenJson"
+            rows="9"
+            spellcheck="false"
+            class="input mt-1 font-mono text-xs"
+            :placeholder="kiroTokenJsonPlaceholder"
+          ></textarea>
+        </div>
+
+        <div>
+          <label class="input-label">
+            {{ t('admin.accounts.kiro.clientRegistrationLabel') }}
+            <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.kiro.clientRegistrationHint') }}
+            </span>
+          </label>
+          <textarea
+            v-model="kiroClientRegistrationJson"
+            rows="4"
+            spellcheck="false"
+            class="input mt-1 font-mono text-xs"
+            placeholder='{"clientId": "...", "clientSecret": "..."}'
+          ></textarea>
+        </div>
       </div>
 
       <p v-if="kiroImportError" class="text-sm text-red-600 dark:text-red-400">
@@ -3412,9 +3491,9 @@
         <button
           v-else-if="form.platform === 'kiro'"
           type="button"
-          :disabled="kiroImporting || !kiroTokenJson.trim()"
+          :disabled="kiroImporting || !kiroSubmitReady"
           class="btn btn-primary"
-          @click="handleKiroImport"
+          @click="kiroAuthMode === 'web' ? handleKiroCompleteWebLogin() : handleKiroImport()"
         >
           <svg v-if="kiroImporting" class="-ml-1 mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -4288,6 +4367,13 @@ const isOAuthFlow = computed(() => {
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
 
 // ── Kiro：粘贴式建号 ──────────────────────────────────────────────
+// 'web' = portal 网页登录（默认，不需要本机装 Kiro）；'paste' = 粘贴本机凭证文件。
+// IdC（企业版）只能走 paste：它额外需要 clientId/clientSecret，portal 不返回。
+const kiroAuthMode = ref<'web' | 'paste'>('web')
+const kiroLoginUrl = ref('')
+const kiroSessionId = ref('')
+const kiroCallbackPrefix = ref('http://localhost:3128')
+const kiroCallback = ref('')
 const kiroTokenJson = ref('')
 const kiroClientRegistrationJson = ref('')
 const kiroImporting = ref(false)
@@ -4303,6 +4389,10 @@ const kiroTokenJsonPlaceholder = `{
 }`
 
 const resetKiroImportState = () => {
+  kiroAuthMode.value = 'web'
+  kiroLoginUrl.value = ''
+  kiroSessionId.value = ''
+  kiroCallback.value = ''
   kiroTokenJson.value = ''
   kiroClientRegistrationJson.value = ''
   kiroImportError.value = ''
@@ -4420,6 +4510,53 @@ const handleCursorImport = async () => {
 // 组件被销毁时定时器还在跑的话，会持续打后端并持有已经无效的表单引用。
 onBeforeUnmount(stopCursorPolling)
 
+// 生成 portal 登录链接。
+const handleKiroStartWebLogin = async () => {
+  if (kiroImporting.value) return
+  kiroImporting.value = true
+  kiroImportError.value = ''
+  try {
+    const result = await adminAPI.kiro.startWebLogin({ proxy_id: form.proxy_id })
+    kiroLoginUrl.value = result.login_url
+    kiroSessionId.value = result.session_id
+    kiroCallbackPrefix.value = result.callback_prefix
+  } catch (error: any) {
+    kiroImportError.value =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      t('admin.accounts.kiro.importFailed')
+    appStore.showError(kiroImportError.value)
+  } finally {
+    kiroImporting.value = false
+  }
+}
+
+// 用粘回来的回调地址换 token 并建号。
+const handleKiroCompleteWebLogin = async () => {
+  if (!kiroCallback.value.trim() || kiroImporting.value) return
+  kiroImporting.value = true
+  kiroImportError.value = ''
+  try {
+    const result = await adminAPI.kiro.completeWebLogin({
+      session_id: kiroSessionId.value,
+      callback: kiroCallback.value.trim()
+    })
+    await createAccountAndFinish('kiro', 'oauth', { ...result.credentials })
+  } catch (error: any) {
+    kiroImportError.value =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      t('admin.accounts.kiro.importFailed')
+    appStore.showError(kiroImportError.value)
+    // 授权码是一次性的：换失败就必须重新走一遍登录，这里清掉链接避免误导。
+    kiroLoginUrl.value = ''
+    kiroSessionId.value = ''
+    kiroCallback.value = ''
+  } finally {
+    kiroImporting.value = false
+  }
+}
+
 const handleKiroImport = async () => {
   if (!kiroTokenJson.value.trim() || kiroImporting.value) return
 
@@ -4443,6 +4580,13 @@ const handleKiroImport = async () => {
     kiroImporting.value = false
   }
 }
+
+// 两种模式各有各的「填够了没有」。
+const kiroSubmitReady = computed(() =>
+  kiroAuthMode.value === 'web'
+    ? !!kiroSessionId.value && !!kiroCallback.value.trim()
+    : !!kiroTokenJson.value.trim()
+)
 
 const isManualInputMethod = computed(() => {
   return oauthFlowRef.value?.inputMethod === 'manual'

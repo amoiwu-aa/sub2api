@@ -588,6 +588,14 @@ export default {
         apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.'
       },
       kiro: {
+        webLogin: 'Web login',
+        pasteFile: 'Paste local file',
+        webHint: 'Recommended. The server generates a login link; sign in with Google / GitHub in your browser — no local Kiro install needed. For enterprise (IdC) accounts use "Paste local file" instead.',
+        generateLoginUrl: 'Generate login link',
+        loginUrlLabel: 'Login link',
+        openInBrowser: 'Open in browser',
+        callbackHint: 'After signing in, the browser lands on an address like the one below and shows "cannot be reached" — that is expected (nothing is listening locally). Copy the full address from the address bar and paste it here:',
+        callbackLabel: 'Callback address',
         intro: 'Kiro has no server-initiated login flow. Sign in to Kiro on your own machine, then paste the full contents of this file:',
         tokenJsonLabel: 'kiro-auth-token.json contents',
         clientRegistrationLabel: 'IdC client registration',

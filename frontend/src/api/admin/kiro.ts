@@ -51,4 +51,28 @@ export async function refreshAccountToken(id: number): Promise<Account> {
   return data
 }
 
-export default { importToken, refreshAccountToken }
+export default { importToken, refreshAccountToken, startWebLogin, completeWebLogin }
+
+export interface KiroWebLoginStartResponse {
+  /** 在浏览器里打开这个地址完成 Google / GitHub 登录 */
+  login_url: string
+  session_id: string
+  /** 登录完成后浏览器会跳到这个开头的地址（本机没监听，打不开是正常的） */
+  callback_prefix: string
+}
+
+export async function startWebLogin(payload: {
+  proxy_id?: number | null
+}): Promise<KiroWebLoginStartResponse> {
+  const { data } = await apiClient.post<KiroWebLoginStartResponse>('/admin/kiro/oauth/start', payload)
+  return data
+}
+
+export async function completeWebLogin(payload: {
+  session_id: string
+  /** 浏览器地址栏里那条打不开的回调地址，或只有其中的 code */
+  callback: string
+}): Promise<KiroImportResponse> {
+  const { data } = await apiClient.post<KiroImportResponse>('/admin/kiro/oauth/complete', payload)
+  return data
+}
