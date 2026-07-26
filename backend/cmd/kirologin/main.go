@@ -128,21 +128,36 @@ func run() error {
 		return err
 	}
 
+	file, err := login(opts, client, openBrowser)
+	if err != nil {
+		return err
+	}
+	return emit(file, opts)
+}
+
+// login 跑完整条登录链：起本地回调 -> 把用户送进 portal -> 收 code -> 换 token。
+//
+// open 是「把用户送进 portal」这一步，生产上就是拉起浏览器；
+// 单独抽出来是为了让测试能用一个模拟浏览器驱动完整流程，
+// 而不必把端口选择、回调处理、换 token 这些环节各自拆开单测。
+func login(opts options, client *http.Client, open func(string) error) (authTokenFile, error) {
+	var zero authTokenFile
+
 	// PKCE 与 state：完全复刻扩展里的生成方式。
 	state, err := randomUUID()
 	if err != nil {
-		return fmt.Errorf("生成 state: %w", err)
+		return zero, fmt.Errorf("生成 state: %w", err)
 	}
 	verifier, err := randomBase64URL(32)
 	if err != nil {
-		return fmt.Errorf("生成 code_verifier: %w", err)
+		return zero, fmt.Errorf("生成 code_verifier: %w", err)
 	}
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 
 	srv, err := startCallbackServer(state)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	defer srv.close()
 
@@ -155,23 +170,23 @@ func run() error {
 
 	if opts.noBrowser {
 		fmt.Println("已按 -no-browser 跳过自动打开，请手动在浏览器里打开上面的地址。")
-	} else if err := openBrowser(portalURL); err != nil {
+	} else if err := open(portalURL); err != nil {
 		fmt.Printf("自动打开浏览器失败（%v），请手动打开上面的地址。\n", err)
 	}
 	fmt.Printf("等待回调，超时 %s...\n", authFlowTimeout)
 
 	cb, err := srv.wait(authFlowTimeout)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	fmt.Printf("已收到回调: login_option=%s\n", cb.LoginOption)
 
 	provider, err := socialProvider(cb)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	if cb.Code == "" {
-		return errors.New("回调里没有 code")
+		return zero, errors.New("回调里没有 code")
 	}
 
 	machineID := machineID()
@@ -187,7 +202,7 @@ func run() error {
 		invitationCode: opts.invitationCode,
 	})
 	if err != nil {
-		return err
+		return zero, err
 	}
 
 	expiresIn := tok.ExpiresIn
@@ -207,8 +222,7 @@ func run() error {
 		file.MachineID = machineID
 		file.KiroVersion = opts.kiroVersion
 	}
-
-	return emit(file, opts)
+	return file, nil
 }
 
 func parseFlags() options {
