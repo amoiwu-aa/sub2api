@@ -163,6 +163,32 @@ go run ./cmd/kirologin -install             # 顺便覆盖本机 Kiro 的登录�
 | `-kiro-version` | 覆盖 UA 里的版本号，默认从本机安装的 Kiro 探测 |
 | `-invitation-code` | 邀请码，仅当 portal 提示需要时填 |
 | `-verify` | 落盘前真打一次上游 `ListAvailableModels` 确认凭证可用（只读，不计费） |
+| `-refresh` | 续期已有凭证而不重新登录，取值为凭证文件路径（**就地写回**） |
+
+### 续期
+
+access token 只有 1 小时，每次都拉浏览器点一遍太费事。凭证里有 refresh token，
+直接续期即可：
+
+```bash
+go run ./cmd/kirologin -refresh ./kiro-auth-token.json          # 续期
+go run ./cmd/kirologin -refresh ./kiro-auth-token.json -verify  # 续期并验证可用
+```
+
+两条链都支持，按凭证里的 `authMethod` 自动分派：
+
+| | 端点 | 请求体 |
+| --- | --- | --- |
+| `social` | `POST {auth}/refreshToken` | `{refreshToken}` |
+| `idc` | `POST https://oidc.{region}.amazonaws.com/token` | `{clientId, clientSecret, grantType: "refresh_token", refreshToken}` |
+
+IdC 那条**必须有 `clientId`/`clientSecret`**，所以 `-refresh` 只能用在本工具产出的
+凭证上——官方 `kiro-auth-token.json` 不含这两项（它们在本机 SSO 缓存的另一个文件里）。
+
+结果**就地写回原文件**，`-o` 在续期模式下被忽略：刷新可能轮换 refresh token，
+写去别处会留下一份随时作废的旧凭证。实测目前两条链都不轮换，但协议允许，不能指望。
+
+刷新失败通常意味着 refresh token 本身失效了（实测有效期 7~30 天），那就得重新登录。
 
 远程/无桌面环境下用 `-no-browser`：把打印出来的地址拷到本地浏览器打开，
 但要注意回调是打到**运行本工具那台机器**的 `localhost:<port>`，

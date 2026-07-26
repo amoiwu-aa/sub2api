@@ -122,6 +122,7 @@ type options struct {
 	proxy          string
 	invitationCode string
 	verify         bool
+	refresh        string
 }
 
 func main() {
@@ -137,6 +138,12 @@ func run() error {
 	client, err := buildHTTPClient(opts.proxy)
 	if err != nil {
 		return err
+	}
+
+	// -refresh 走续期而不是重新登录：token 一小时就过期，
+	// 每次都拉浏览器点一遍太费事。
+	if opts.refresh != "" {
+		return refreshCredential(opts, client)
 	}
 
 	file, err := login(opts, client, openBrowser)
@@ -204,6 +211,64 @@ func verifyCredential(file authTokenFile, client *http.Client) error {
 		fmt.Printf("  默认模型: %s\n", defaultModel.ModelID)
 	}
 	return nil
+}
+
+// refreshCredential 用 refresh token 给已有凭证续期，不走浏览器。
+//
+// 两条链都支持，由凭证里的 auth_method 分派：
+//
+//	social -> POST {auth}/refreshToken
+//	idc    -> POST https://oidc.{region}.amazonaws.com/token（需要 clientId/clientSecret）
+//
+// 结果**就地写回原文件**。刷新可能轮换 refreshToken，不写回的话手上那份
+// 就作废了——实测这两条链目前都不轮换，但协议允许，不能指望它不变。
+func refreshCredential(opts options, client *http.Client) error {
+	raw, err := os.ReadFile(opts.refresh)
+	if err != nil {
+		return fmt.Errorf("读取凭证 %s: %w", opts.refresh, err)
+	}
+	creds, err := kiro.ParseAuthToken(raw)
+	if err != nil {
+		return fmt.Errorf("解析凭证: %w", err)
+	}
+
+	fmt.Printf("续期前: authMethod=%s provider=%s expiresAt=%s\n",
+		creds.AuthMethod, creds.Provider, creds.ExpiresAt.Format(time.RFC3339))
+
+	ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
+	defer cancel()
+
+	refreshed, err := kiro.Refresh(ctx, client, creds)
+	if err != nil {
+		return fmt.Errorf("续期失败（refresh token 可能已失效，需要重新登录）: %w", err)
+	}
+
+	file := authTokenFile{
+		AccessToken:  refreshed.AccessToken,
+		RefreshToken: refreshed.RefreshToken,
+		ProfileARN:   refreshed.ProfileARN,
+		ExpiresAt:    refreshed.ExpiresAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		AuthMethod:   refreshed.AuthMethod,
+		Provider:     refreshed.Provider,
+		Region:       refreshed.Region,
+		ClientID:     refreshed.ClientID,
+		ClientSecret: refreshed.ClientSecret,
+		MachineID:    refreshed.MachineID,
+		KiroVersion:  refreshed.KiroVersion,
+	}
+
+	if opts.verify {
+		if err := verifyCredential(file, client); err != nil {
+			return fmt.Errorf("续期后校验未通过: %w", err)
+		}
+	}
+
+	// 就地写回。-o 在续期模式下被忽略：续期的语义就是更新原文件，
+	// 写去别处会留下一份已被轮换风险作废的旧凭证。
+	refreshOpts := opts
+	refreshOpts.output = opts.refresh
+	refreshOpts.install = false
+	return emit(file, refreshOpts)
 }
 
 // login 跑完整条登录链：起本地回调 -> 把用户送进 portal -> 收 code -> 换 token。
@@ -317,6 +382,7 @@ func parseFlags() options {
 	flag.StringVar(&opts.proxy, "proxy", "", "换 token 走的代理，如 http://127.0.0.1:7890 或 socks5://...")
 	flag.StringVar(&opts.invitationCode, "invitation-code", "", "邀请码，仅在 portal 要求时填写")
 	flag.BoolVar(&opts.verify, "verify", false, "落盘前真打一次上游 ListAvailableModels，确认凭证可用（只读，不计费）")
+	flag.StringVar(&opts.refresh, "refresh", "", "续期已有凭证而不重新登录，取值为凭证文件路径（会就地写回）")
 	flag.Parse()
 	return opts
 }

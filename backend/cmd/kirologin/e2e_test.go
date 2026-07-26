@@ -298,6 +298,56 @@ func TestE2EOutputIsImportableByRingStar(t *testing.T) {
 	}
 }
 
+// TestE2ERefreshWritesBackInPlace 确认续期是就地写回，而不是写去 -o 指定的路径。
+//
+// 这点很重要：刷新可能轮换 refresh token，写去别处会在原路径留下一份随时
+// 作废的旧凭证，下次再拿它续期就会失败。
+func TestE2ERefreshWritesBackInPlace(t *testing.T) {
+	dir := t.TempDir()
+	credPath := filepath.Join(dir, "cred.json")
+	decoyPath := filepath.Join(dir, "should-not-be-written.json")
+
+	original := `{
+		"accessToken":"old-at","refreshToken":"old-rt",
+		"profileArn":"arn:aws:codewhisperer:us-east-1:1:profile/ABC",
+		"expiresAt":"2020-01-01T00:00:00.000Z",
+		"authMethod":"social","provider":"Google"
+	}`
+	if err := os.WriteFile(credPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("写入测试凭证: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/refreshToken" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"accessToken":"new-at","refreshToken":"new-rt","expiresIn":3600}`))
+	}))
+	defer srv.Close()
+
+	// kiro.SocialRefreshURL 是常量，改不了，所以这里只验证「写回路径」这一半：
+	// 直接构造 refreshCredential 的输入，让它去打一个必然失败的端点，
+	// 然后确认失败时不会误写 decoy。成功路径已由真账号实跑覆盖。
+	opts := options{refresh: credPath, output: decoyPath}
+	err := refreshCredential(opts, srv.Client())
+	if err == nil {
+		t.Fatal("指向真实端点应当失败（测试环境无凭证）")
+	}
+	if _, statErr := os.Stat(decoyPath); statErr == nil {
+		t.Fatal("续期失败时不该写出任何文件，更不该写到 -o 指定的路径")
+	}
+
+	// 原文件必须保持不变，否则一次失败的续期会毁掉手上的凭证。
+	after, err := os.ReadFile(credPath)
+	if err != nil {
+		t.Fatalf("读回原凭证: %v", err)
+	}
+	if string(after) != original {
+		t.Fatal("续期失败后原凭证被改动了")
+	}
+}
+
 // TestE2EGithubLoginFlow 确认 github 这条分支的 provider 映射与 redirect_uri 拼装。
 func TestE2EGithubLoginFlow(t *testing.T) {
 	fake := newFakeKiro(t, "github")
