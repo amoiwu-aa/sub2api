@@ -588,6 +588,7 @@ export default {
         apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.'
       },
       kiro: {
+        pasteHintShort: 'Requires Kiro installed and signed in locally. Enterprise (IdC) accounts must use this method.',
         webLogin: 'Web login',
         pasteFile: 'Paste local file',
         webHint: 'Recommended. The server generates a login link; sign in with Google / GitHub in your browser — no local Kiro install needed. For enterprise (IdC) accounts use "Paste local file" instead.',

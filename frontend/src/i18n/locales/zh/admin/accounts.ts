@@ -648,6 +648,7 @@ export default {
         apiKeyHint: 'Grok 订阅支持使用 OAuth refresh token；API Key 账号不在本次范围内。'
       },
       kiro: {
+        pasteHintShort: '需要本机装有 Kiro 并已登录；企业版（IdC）只能用这种方式。',
         webLogin: '网页登录',
         pasteFile: '粘贴本机文件',
         webHint: '推荐。服务器生成登录链接，你在浏览器里用 Google / GitHub 登录即可，不需要本机装 Kiro。企业版（IdC）请改用「粘贴本机文件」。',

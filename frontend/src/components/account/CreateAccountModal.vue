@@ -1124,6 +1124,80 @@
         </div>
       </div>
 
+      <!-- Add Method (Kiro / Cursor)
+           与 Anthropic 的「添加方式」同一形态：授权方式在第一步就选定，
+           第二步只负责执行。之前这两个平台在第一步什么都不显示，平台选完
+           直接跳到调度参数，看起来像「这个平台没接上」。 -->
+      <div v-if="form.platform === 'kiro'">
+        <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
+        <div class="mt-2 flex flex-wrap gap-4">
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="kiroAuthMode"
+              type="radio"
+              value="web"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{
+              t('admin.accounts.kiro.webLogin')
+            }}</span>
+          </label>
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="kiroAuthMode"
+              type="radio"
+              value="paste"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{
+              t('admin.accounts.kiro.pasteFile')
+            }}</span>
+          </label>
+        </div>
+        <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+          {{
+            kiroAuthMode === 'web'
+              ? t('admin.accounts.kiro.webHint')
+              : t('admin.accounts.kiro.pasteHintShort')
+          }}
+        </p>
+      </div>
+
+      <div v-else-if="form.platform === 'cursor'">
+        <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
+        <div class="mt-2 flex flex-wrap gap-4">
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="cursorAuthMode"
+              type="radio"
+              value="browser"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{
+              t('admin.accounts.cursor.browserLogin')
+            }}</span>
+          </label>
+          <label class="flex cursor-pointer items-center">
+            <input
+              v-model="cursorAuthMode"
+              type="radio"
+              value="cookie"
+              class="mr-2 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-700 dark:text-gray-300">{{
+              t('admin.accounts.cursor.pasteCookie')
+            }}</span>
+          </label>
+        </div>
+        <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+          {{
+            cursorAuthMode === 'browser'
+              ? t('admin.accounts.cursor.browserHint')
+              : t('admin.accounts.cursor.cookieHint')
+          }}
+        </p>
+      </div>
+
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
         <div>
@@ -3180,33 +3254,6 @@
          回调页在管理员本机打不开——但授权码就在地址栏里，粘回来即可。
          IdC（企业版）仍需走粘贴文件那条路，它要额外的 clientId/clientSecret。 -->
     <div v-else-if="form.platform === 'kiro'" class="space-y-5">
-      <div class="flex gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
-        <button
-          type="button"
-          @click="kiroAuthMode = 'web'"
-          :class="[
-            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
-            kiroAuthMode === 'web'
-              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
-              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-          ]"
-        >
-          {{ t('admin.accounts.kiro.webLogin') }}
-        </button>
-        <button
-          type="button"
-          @click="kiroAuthMode = 'paste'"
-          :class="[
-            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
-            kiroAuthMode === 'paste'
-              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
-              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-          ]"
-        >
-          {{ t('admin.accounts.kiro.pasteFile') }}
-        </button>
-      </div>
-
       <!-- 网页登录 -->
       <div v-if="kiroAuthMode === 'web'" class="space-y-4">
         <p class="text-sm text-gray-600 dark:text-gray-400">
@@ -3301,33 +3348,6 @@
          existing cookie. Either way the result must be a type=session JWT;
          a type=web token is rejected by the Agent. -->
     <div v-else-if="form.platform === 'cursor'" class="space-y-5">
-      <div class="flex gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
-        <button
-          type="button"
-          @click="cursorAuthMode = 'browser'"
-          :class="[
-            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
-            cursorAuthMode === 'browser'
-              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
-              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-          ]"
-        >
-          {{ t('admin.accounts.cursor.browserLogin') }}
-        </button>
-        <button
-          type="button"
-          @click="cursorAuthMode = 'cookie'"
-          :class="[
-            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
-            cursorAuthMode === 'cookie'
-              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
-              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-          ]"
-        >
-          {{ t('admin.accounts.cursor.pasteCookie') }}
-        </button>
-      </div>
-
       <div v-if="cursorAuthMode === 'browser'" class="space-y-4">
         <p class="text-sm text-gray-600 dark:text-gray-400">
           {{ t('admin.accounts.cursor.browserHint') }}
