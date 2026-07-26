@@ -1261,6 +1261,18 @@ export interface AccountUsageInfo {
   grok_local_usage_7d?: WindowStats | null
   grok_local_usage_monthly?: WindowStats | null
   grok_billing?: GrokBillingSummary | null
+
+  // Kiro credit 额度（上游 GET /getUsageLimits）
+  kiro_credits?: UsageProgress | null
+  kiro_credits_used?: number
+  kiro_credits_limit?: number
+  kiro_overage_enabled?: boolean
+  // 额度用尽且没开超额 —— 该账号已经不可用，调度侧应当轮换
+  kiro_exhausted?: boolean
+  kiro_overage_rate?: number
+  kiro_currency?: string
+  kiro_free_trial_status?: string
+
   subscription_tier?: string
   subscription_tier_raw?: string
   ai_credits?: Array<{

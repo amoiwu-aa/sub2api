@@ -594,6 +594,9 @@ export default {
         clientRegistrationHint: 'Required for IdC (Enterprise / BuilderId) accounts only. The server cannot read your local SSO cache, so without this the token cannot be renewed once it expires.',
         importAndCreate: 'Import and create',
         importFailed: 'Failed to import Kiro credentials',
+        credits: 'Credits',
+        exhausted: 'Exhausted',
+        overage: 'Overage',
       },
       cursor: {
         browserLogin: 'Browser login',

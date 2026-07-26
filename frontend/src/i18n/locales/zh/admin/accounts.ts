@@ -654,6 +654,9 @@ export default {
         clientRegistrationHint: '仅 IdC（企业版 / BuilderId）账号需要；服务器读不到本机 SSO 缓存，不填的话 token 过期后无法续期',
         importAndCreate: '导入并创建',
         importFailed: '导入 Kiro 凭证失败',
+        credits: 'Credits',
+        exhausted: '额度耗尽',
+        overage: '超额可用',
       },
       cursor: {
         browserLogin: '浏览器登录',

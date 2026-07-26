@@ -156,6 +156,85 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.gemini3Image|70|2026-03-01T09:00:00Z')
   })
 
+  function mountKiro(usage: Record<string, unknown>) {
+    getUsage.mockResolvedValue(usage)
+    return mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 2001, platform: 'kiro', type: 'oauth' })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}|{{ resetsAt }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+  }
+
+  it('Kiro 显示 credit 进度、套餐与已用/上限', async () => {
+    const wrapper = mountKiro({
+      kiro_credits: {
+        utilization: 12.5,
+        resets_at: '2026-08-01T00:00:00Z',
+        remaining_seconds: 475200
+      },
+      kiro_credits_used: 6.25,
+      kiro_credits_limit: 50,
+      subscription_tier: 'FREE',
+      subscription_tier_raw: 'KIRO FREE'
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.kiro.credits|12.5|2026-08-01T00:00:00Z')
+    expect(wrapper.text()).toContain('KIRO FREE')
+    // credit 是小数计量，取整会把「已经在用」显示成 0
+    expect(wrapper.text()).toContain('6.25 / 50')
+  })
+
+  it('Kiro 额度耗尽时打耗尽标记', async () => {
+    const wrapper = mountKiro({
+      kiro_credits: { utilization: 100, resets_at: null, remaining_seconds: 0 },
+      kiro_credits_used: 50,
+      kiro_credits_limit: 50,
+      kiro_exhausted: true
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.kiro.exhausted')
+    expect(wrapper.text()).not.toContain('admin.accounts.kiro.overage')
+  })
+
+  it('Kiro 开了超额时显示超额可用而不是耗尽', async () => {
+    const wrapper = mountKiro({
+      kiro_credits: { utilization: 100, resets_at: null, remaining_seconds: 0 },
+      kiro_credits_used: 50,
+      kiro_credits_limit: 50,
+      kiro_exhausted: false,
+      kiro_overage_enabled: true,
+      kiro_overage_rate: 0.04,
+      kiro_currency: 'USD'
+    })
+
+    await flushPromises()
+
+    // 开了超额的账号仍然可用，不该被显示成已耗尽
+    expect(wrapper.text()).toContain('admin.accounts.kiro.overage')
+    expect(wrapper.text()).not.toContain('admin.accounts.kiro.exhausted')
+  })
+
+  it('Kiro 取不到额度时显示错误而不是空白', async () => {
+    const wrapper = mountKiro({ error: 'kiro GetUsageLimits failed (HTTP 401)' })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('HTTP 401')
+  })
+
   it('Antigravity 会显示 AI Credits 余额信息', async () => {
     getUsage.mockResolvedValue({
       ai_credits: [

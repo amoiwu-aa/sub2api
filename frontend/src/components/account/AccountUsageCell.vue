@@ -540,6 +540,58 @@
       </div>
     </template>
 
+    <!-- Kiro OAuth accounts: credit 额度（上游 GET /getUsageLimits） -->
+    <template v-else-if="account.platform === 'kiro' && account.type === 'oauth'">
+      <div v-if="loading" class="space-y-1.5">
+        <div class="h-3 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+      </div>
+
+      <div v-else-if="kiroCredits" class="space-y-1">
+        <!-- 套餐徽章 + 耗尽/超额标记 -->
+        <div class="flex items-center gap-1">
+          <span
+            v-if="kiroTierLabel"
+            :class="[
+              'inline-block rounded px-1.5 py-0.5 text-[10px] font-medium',
+              kiroTierClass
+            ]"
+          >
+            {{ kiroTierLabel }}
+          </span>
+          <!-- 额度耗尽且没开超额：该账号已经不可用 -->
+          <span
+            v-if="usageInfo?.kiro_exhausted"
+            class="inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-900/40 dark:text-red-300"
+          >
+            {{ t('admin.accounts.kiro.exhausted') }}
+          </span>
+          <span
+            v-else-if="usageInfo?.kiro_overage_enabled"
+            class="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-900/40 dark:text-amber-300"
+            :title="kiroOverageTitle"
+          >
+            {{ t('admin.accounts.kiro.overage') }}
+          </span>
+        </div>
+
+        <UsageProgressBar
+          :label="t('admin.accounts.kiro.credits')"
+          :utilization="kiroCredits.utilization"
+          :resets-at="kiroCredits.resets_at"
+          color="indigo"
+        />
+
+        <div class="text-[10px] text-gray-500 dark:text-gray-400">
+          💳 {{ kiroCreditsDisplay }}
+        </div>
+      </div>
+
+      <div v-else-if="usageInfo?.error" class="text-[10px] text-red-500">
+        {{ usageInfo.error }}
+      </div>
+      <div v-else class="text-xs text-gray-400">-</div>
+    </template>
+
     <!-- Other accounts: no usage window -->
     <template v-else>
       <div class="text-xs text-gray-400">-</div>
@@ -699,6 +751,10 @@ const shouldFetchUsage = computed(() => {
   if (props.account.platform === 'openai') {
     return props.account.type === 'oauth'
   }
+  // Kiro 上游有账号级额度接口（GET /getUsageLimits），可以主动查
+  if (props.account.platform === 'kiro') {
+    return props.account.type === 'oauth'
+  }
   return false
 })
 
@@ -810,6 +866,52 @@ const aiCreditsDisplay = computed(() => {
   const total = credits.reduce((sum, credit) => sum + (credit.amount ?? 0), 0)
   if (total <= 0) return null
   return total.toFixed(0)
+})
+
+// ===== Kiro credit 额度（usageInfo.kiro_credits）=====
+
+const kiroCredits = computed(() => usageInfo.value?.kiro_credits ?? null)
+
+// 已用 / 上限。credit 是小数计量，用两位小数——上游一次对话大约消耗
+// 0.01 级别，取整会把「已经在用」显示成 0。
+const kiroCreditsDisplay = computed(() => {
+  const info = usageInfo.value
+  if (!info || info.kiro_credits_limit === undefined) return null
+  const used = info.kiro_credits_used ?? 0
+  return `${used.toFixed(2)} / ${info.kiro_credits_limit.toFixed(0)}`
+})
+
+const kiroOverageTitle = computed(() => {
+  const info = usageInfo.value
+  if (!info?.kiro_overage_rate) return ''
+  return `${info.kiro_overage_rate} ${info.kiro_currency || 'USD'} / credit`
+})
+
+// subscription_tier 由后端归一成 FREE / PRO / UNKNOWN，
+// subscription_tier_raw 保留上游原始名称（例如 "KIRO FREE"）。
+const kiroTierLabel = computed(() => {
+  const info = usageInfo.value
+  if (!info) return null
+  if (info.subscription_tier_raw) return info.subscription_tier_raw
+  switch (info.subscription_tier) {
+    case 'FREE':
+      return t('admin.accounts.tier.free')
+    case 'PRO':
+      return t('admin.accounts.tier.pro')
+    default:
+      return null
+  }
+})
+
+const kiroTierClass = computed(() => {
+  switch (usageInfo.value?.subscription_tier) {
+    case 'FREE':
+      return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+    case 'PRO':
+      return 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300'
+    default:
+      return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+  }
 })
 
 // Antigravity 账户类型（从 load_code_assist 响应中提取）
