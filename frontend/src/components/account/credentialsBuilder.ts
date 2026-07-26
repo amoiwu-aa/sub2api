@@ -56,10 +56,10 @@ export function requiresDedicatedTokenRefresh(platform: string | undefined | nul
 /**
  * 后端是否实现了该平台的连接测试。
  *
- * cursor / kiro 现已实现（account_test_native_bridge.go）：
- * kiro 走 ListAvailableModels（GET，不消耗推理额度），
- * cursor 跑一轮最小 Agent 对话（它没有只读探活接口，而"凭证没过期"
- * 并不等于"Agent 真能跑"）。所以这里对所有平台都返回 true——
+ * cursor / kiro 现已实现（account_test_native_bridge.go）：两者都用弹窗里
+ * 选中的模型真发一轮最小对话。只读探活（如 kiro 的 ListAvailableModels）
+ * 不烧额度，但答不了运营方真正要问的"这个模型在这个号上能不能跑"——
+ * "凭证没过期"不等于"能出内容"。所以这里对所有平台都返回 true，
  * 保留这个函数是为了下次接入新平台时有个显式的登记点。
  */
 export function supportsConnectionTest(_platform: string | undefined | null): boolean {

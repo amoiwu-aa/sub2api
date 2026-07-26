@@ -454,11 +454,51 @@
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
-    <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
-      <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-        <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" v-model="includeProxyOnExport" />
-        <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
-      </label>
+    <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="exportFormatNotice" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
+      <div class="space-y-3">
+        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+          {{ t('admin.accounts.dataExportFormat') }}
+        </div>
+        <div class="space-y-2">
+          <button
+            v-for="option in exportFormatOptions"
+            :key="option.value"
+            type="button"
+            @click="exportFormat = option.value"
+            :aria-pressed="exportFormat === option.value"
+            :class="[
+              'flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors',
+              exportFormat === option.value
+                ? 'border-primary-500 bg-primary-50 dark:border-primary-400 dark:bg-primary-900/20'
+                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-dark-600 dark:hover:border-dark-500 dark:hover:bg-dark-700/50'
+            ]"
+          >
+            <span
+              :class="[
+                'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                exportFormat === option.value
+                  ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/40 dark:text-primary-300'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400'
+              ]"
+            >
+              <Icon :name="option.icon" size="sm" />
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ option.label }}</span>
+              <span class="mt-0.5 block text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ option.description }}</span>
+            </span>
+          </button>
+        </div>
+        <!-- 只有备份格式会用到这个勾选：csv 恒需代理名做一列、原生凭证根本不看代理，
+             这两种格式下继续摆一个不生效的勾选框就是个假开关。 -->
+        <label
+          v-if="exportFormatHonorsProxyChoice"
+          class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+        >
+          <input type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" v-model="includeProxyOnExport" />
+          <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
+        </label>
+      </div>
     </ConfirmDialog>
     <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
@@ -507,6 +547,12 @@ import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import {
+  buildExportArtifact,
+  formatHonorsProxyChoice,
+  formatNeedsProxies,
+  type AccountExportFormat
+} from '@/utils/accountExportFormats'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -567,6 +613,39 @@ const showSync = ref(false)
 const showImportData = ref(false)
 const showExportDataDialog = ref(false)
 const includeProxyOnExport = ref(true)
+const exportFormat = ref<AccountExportFormat>('backup')
+const exportFormatHonorsProxyChoice = computed(() => formatHonorsProxyChoice(exportFormat.value))
+const exportFormatOptions = computed(() => ([
+  {
+    value: 'backup' as const,
+    icon: 'database' as const,
+    label: t('admin.accounts.dataExportFormatBackup'),
+    description: t('admin.accounts.dataExportFormatBackupDesc')
+  },
+  {
+    value: 'csv' as const,
+    icon: 'grid' as const,
+    label: t('admin.accounts.dataExportFormatCsv'),
+    description: t('admin.accounts.dataExportFormatCsvDesc')
+  },
+  {
+    value: 'credentials' as const,
+    icon: 'key' as const,
+    label: t('admin.accounts.dataExportFormatCredentials'),
+    description: t('admin.accounts.dataExportFormatCredentialsDesc')
+  }
+]))
+// 敏感度按格式走：CSV 不含密钥值，沿用「含敏感信息」的通用告警会让人以为它也不能外发。
+const exportFormatNotice = computed(() => {
+  switch (exportFormat.value) {
+    case 'csv':
+      return t('admin.accounts.dataExportCsvNotice')
+    case 'credentials':
+      return t('admin.accounts.dataExportCredentialsNotice')
+    default:
+      return t('admin.accounts.dataExportConfirmMessage')
+  }
+})
 const showBulkEdit = ref(false)
 const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
 const showTempUnsched = ref(false)
@@ -1878,34 +1957,35 @@ const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
 }
-const formatExportTimestamp = () => {
-  const now = new Date()
-  const pad2 = (value: number) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
-}
 const openExportDataDialog = () => {
   includeProxyOnExport.value = true
+  exportFormat.value = 'backup'
   showExportDataDialog.value = true
 }
 const handleExportData = async () => {
   if (exportingData.value) return
   exportingData.value = true
   try {
+    const includeProxies = formatNeedsProxies(exportFormat.value, includeProxyOnExport.value)
     const dataPayload = await accountExportStepUp.run(() => adminAPI.accounts.exportData(
       selIds.value.length > 0
-        ? { ids: selIds.value, includeProxies: includeProxyOnExport.value }
+        ? { ids: selIds.value, includeProxies }
         : {
-            includeProxies: includeProxyOnExport.value,
+            includeProxies,
             filters: buildAccountQueryFilters()
           }
     ))
-    const timestamp = formatExportTimestamp()
-    const filename = `ringstar-account-${timestamp}.json`
-    const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
+    // 空导出会静默下载一个 0 账号的文件，看起来跟成功一样;明确拦下来。
+    if (!dataPayload.accounts?.length) {
+      appStore.showWarning(t('admin.accounts.dataExportEmpty'))
+      return
+    }
+    const artifact = buildExportArtifact(exportFormat.value, dataPayload, new Date())
+    const blob = new Blob([artifact.content], { type: artifact.mime })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = filename
+    link.download = artifact.filename
     link.click()
     URL.revokeObjectURL(url)
     // spark 影子账号被后端排除出备份(其凭据透传母账号、调度配置不可经凭据型导入重建);
