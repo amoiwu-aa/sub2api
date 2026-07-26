@@ -82,6 +82,56 @@ func TestUserAgentFallbacks(t *testing.T) {
 	require.NotContains(t, creds.AuthUserAgent(), "ringstar")
 }
 
+// TestListAvailableModelsParsesRateAndCaching 用真实响应片段钉住模型目录的
+// 计费与缓存字段。这两组字段此前都被丢掉了。
+func TestListAvailableModelsParsesRateAndCaching(t *testing.T) {
+	client := &stubHTTPClient{responses: []*http.Response{
+		jsonResponse(http.StatusOK, `{"models":[
+			{"modelId":"claude-sonnet-4.5","modelName":"Claude Sonnet 4.5","rateMultiplier":1.3,"rateUnit":"Credit",
+			 "supportedInputTypes":["TEXT","IMAGE"],
+			 "tokenLimits":{"maxInputTokens":200000,"maxOutputTokens":64000},
+			 "promptCaching":{"supportsPromptCaching":true,"minimumTokensPerCacheCheckpoint":1024,"maximumCacheCheckpointsPerRequest":4}},
+			{"modelId":"qwen3-coder-next","rateMultiplier":0.05,"rateUnit":"Credit",
+			 "tokenLimits":{"maxInputTokens":256000,"maxOutputTokens":64000}}
+		]}`),
+	}}
+	qClient, err := NewClient(client, testCredentials())
+	require.NoError(t, err)
+
+	models, _, err := qClient.ListAvailableModels(context.Background())
+	require.NoError(t, err)
+	require.Len(t, models, 2)
+
+	sonnet := models[0]
+	require.InDelta(t, 1.3, sonnet.RateMultiplier, 1e-9)
+	require.Equal(t, "Credit", sonnet.RateUnit)
+	require.Equal(t, []string{"TEXT", "IMAGE"}, sonnet.SupportedInputTypes)
+	require.Equal(t, int64(200000), sonnet.TokenLimits.MaxInputTokens)
+	require.True(t, sonnet.PromptCaching.SupportsPromptCaching)
+	require.Equal(t, int64(1024), sonnet.PromptCaching.MinimumTokensPerCacheCheckpoint)
+	require.Equal(t, int64(4), sonnet.PromptCaching.MaximumCacheCheckpointsPerRequest)
+
+	// 不支持缓存的模型不下发 promptCaching。
+	require.Nil(t, models[1].PromptCaching)
+	require.InDelta(t, 0.05, models[1].RateMultiplier, 1e-9)
+
+	// 倍率表：最贵的是最便宜的 26 倍，换模型是最直接的省钱手段。
+	rates := RateMultiplierByModel(models)
+	require.Len(t, rates, 2)
+	require.InDelta(t, 1.3, rates["claude-sonnet-4.5"], 1e-9)
+	require.InDelta(t, 0.05, rates["qwen3-coder-next"], 1e-9)
+}
+
+func TestRateMultiplierByModelSkipsUnusable(t *testing.T) {
+	require.Nil(t, RateMultiplierByModel(nil))
+	// 没有 modelId 或倍率非正的条目不能进表，否则按 0 计费会把成本算没。
+	require.Nil(t, RateMultiplierByModel([]AvailableModel{
+		{ModelID: "", RateMultiplier: 1.0},
+		{ModelID: "x", RateMultiplier: 0},
+		{ModelID: "y", RateMultiplier: -1},
+	}))
+}
+
 func TestGetUsageLimitsParsesRealResponse(t *testing.T) {
 	client := &stubHTTPClient{responses: []*http.Response{
 		jsonResponse(http.StatusOK, usageLimitsFixture),

@@ -62,7 +62,10 @@ func TestIdCAuthorizeURL(t *testing.T) {
 		"state":                 "st",
 		"code_challenge":        "ch",
 		"code_challenge_method": "S256",
-		"scopes":                "completions,analysis,conversations,transformations,taskassist",
+		// scope 必须带 codewhisperer: 前缀。少了它 AWS 会直接回
+		// "Invalid scope provided"——实测踩出来的。
+		"scopes": "codewhisperer:completions,codewhisperer:analysis,codewhisperer:conversations," +
+			"codewhisperer:transformations,codewhisperer:taskassist",
 	} {
 		if got := q.Get(key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
@@ -96,6 +99,21 @@ func TestIsIdCLoginOption(t *testing.T) {
 		if isIdCLoginOption(opt) {
 			t.Errorf("%q 不该判为 IdC", opt)
 		}
+	}
+}
+
+// TestIdCProviderComesFromPortalLoginOption 守住一个实测踩到的坑：
+// provider 必须取自 portal 那次回调的 login_option。IdC 自己那次回调是
+// AWS OIDC 发的，不带 login_option——在那儿取，awsidc 账号会被错记成
+// BuilderId（默认值），进而影响 provider 相关的请求头判断。
+func TestIdCProviderComesFromPortalLoginOption(t *testing.T) {
+	// IdC 回调（第二次）不带 login_option，模拟从那里取的情形。
+	if got := idcProviderFromLoginOption(""); got != "BuilderId" {
+		t.Fatalf("空 login_option 落到默认值 %q", got)
+	}
+	// 从 portal 回调透传的才是对的。
+	if got := idcProviderFromLoginOption("awsidc"); got != "Enterprise" {
+		t.Fatalf("awsidc -> %q, want Enterprise", got)
 	}
 }
 

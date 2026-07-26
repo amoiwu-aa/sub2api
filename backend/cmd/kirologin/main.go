@@ -258,7 +258,7 @@ func login(opts options, client *http.Client, open func(string) error) (authToke
 		srv.close()
 		fmt.Printf("这是 IAM Identity Center 账号，继续 IdC 登录（issuer=%s, region=%s）...\n\n",
 			cb.IssuerURL, cb.IdcRegion)
-		return loginIdC(opts, client, open, cb.IssuerURL, cb.IdcRegion)
+		return loginIdC(opts, client, open, cb.IssuerURL, cb.IdcRegion, cb.LoginOption)
 	}
 
 	provider, err := socialProvider(cb)

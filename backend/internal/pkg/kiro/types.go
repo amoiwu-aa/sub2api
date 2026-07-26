@@ -44,6 +44,26 @@ type UserInputMessage struct {
 
 	UserInputMessageContext *UserInputMessageContext `json:"userInputMessageContext,omitempty"`
 	Images                  []ImageBlock             `json:"images,omitempty"`
+
+	// CachePoint 在此消息处打一个提示缓存点。
+	//
+	// 上游 schema 里 UserInputMessage / AssistantResponseMessage / Tool
+	// 都能挂它，取值只有 CachePointTypeDefault。命中后这部分输入会走
+	// tokenUsage.cacheReadInputTokens 计价，首次建立时走 cacheWriteInputTokens。
+	//
+	// 生效有门槛：模型必须 supportsPromptCaching，且缓存点之前的内容不少于
+	// minimumTokensPerCacheCheckpoint（实测 1024 或 4096，随模型而定），
+	// 单次请求的缓存点数不超过 maximumCacheCheckpointsPerRequest（实测 4）。
+	// 这些参数由 ListAvailableModels 按模型下发。
+	CachePoint *CachePoint `json:"cachePoint,omitempty"`
+}
+
+// CachePointTypeDefault 是 CachePoint.Type 唯一的合法取值。
+const CachePointTypeDefault = "default"
+
+// CachePoint 是提示缓存的断点标记。
+type CachePoint struct {
+	Type string `json:"type"`
 }
 
 type UserInputMessageContext struct {

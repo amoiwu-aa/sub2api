@@ -209,6 +209,30 @@ func (c *Client) ListAvailableProfiles(ctx context.Context) ([]Profile, error) {
 	return all, nil
 }
 
+// RateMultiplierByModel 把模型目录压成 modelId -> 计费倍率的表。
+//
+// 用途是按真实成本做路由与计费：实测同样输入重复请求，credit 消耗逐位
+// 相同，说明它是输入规模与倍率的确定性函数——成本可以在请求发出前算准，
+// 不必事后统计。
+//
+// 倍率跨度很大（实测 0.05 ~ 2.4，相差 48 倍），拿它换模型是最直接的省钱手段。
+func RateMultiplierByModel(models []AvailableModel) map[string]float64 {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(models))
+	for _, m := range models {
+		if m.ModelID == "" || m.RateMultiplier <= 0 {
+			continue
+		}
+		out[m.ModelID] = m.RateMultiplier
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // Used 返回已消耗量，优先取高精度字段。
 func (b *UsageBreakdown) Used() float64 {
 	if b == nil {

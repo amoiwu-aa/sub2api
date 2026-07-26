@@ -33,8 +33,43 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 )
 
-// idcScopes 对齐扩展的 GRANT_SCOPES。
-var idcScopes = []string{"completions", "analysis", "conversations", "transformations", "taskassist"}
+// qDataPlaneRegions 是 Q 数据面实际提供服务的 region。
+//
+// **IdC 的 region 与 Q 的 region 是两回事**，不能拿前者去拼后者的端点：
+// Identity Center 实例可以开在任意 region（实测某企业账号在 us-east-2），
+// 但 Q 数据面只在下面这几个 region 有端点——扩展 bundle 里出现过的全部
+// q.* 主机就这些。拿 us-east-2 去连 q.us-east-2.amazonaws.com 会直接 EOF。
+//
+// 这也正是仓库 Credentials.QRegion() 从 profileArn 推 region、而不是用
+// Credentials.Region 的原因。但 profileArn 恰恰是这一步要查的东西，
+// 所以这里只能逐个候选 region 试。
+//
+// FIPS 那两个 gov 端点不在候选里：那是政府云，普通账号用不到。
+var qDataPlaneRegions = []string{"us-east-1", "eu-central-1"}
+
+// idcScopePrefix 是 scope 的命名空间前缀。
+//
+// 扩展里 GRANT_SCOPES 存的是裸名（completions / analysis / ...），
+// 真正发出去之前 IDCAuthProvider 的构造函数会逐个加上前缀：
+//
+//	const scopePrefix = config.get("codewhisperer.config.scopePrefix") ?? "codewhisperer";
+//	this.scopes = GRANT_SCOPES.map(s => `${scopePrefix}:${s}`);
+//
+// 少了这个前缀，authorize 会被 AWS 直接回 "Invalid scope provided"——
+// 这是实测踩出来的，不是推断。
+const idcScopePrefix = "codewhisperer"
+
+// idcGrantScopes 对齐扩展的 GRANT_SCOPES（裸名，不含前缀）。
+var idcGrantScopes = []string{"completions", "analysis", "conversations", "transformations", "taskassist"}
+
+// idcScopes 返回真正发给上游的 scope 列表（含前缀）。
+func idcScopes() []string {
+	scopes := make([]string, 0, len(idcGrantScopes))
+	for _, s := range idcGrantScopes {
+		scopes = append(scopes, idcScopePrefix+":"+s)
+	}
+	return scopes
+}
 
 const (
 	// idcClientName 与扩展的 registerClient 参数一致。
@@ -60,7 +95,11 @@ type idcTokenResponse struct {
 //
 // issuerURL 与 region 来自 portal 回调（login_option=builderid/awsidc/internal），
 // 也可以由用户直接指定。
-func loginIdC(opts options, client *http.Client, open func(string) error, issuerURL, region string) (authTokenFile, error) {
+// portalLoginOption 是 portal 那一步回调里的 login_option
+// （builderid / awsidc / internal）。它决定凭证里的 provider，
+// 必须从 portal 回调透传进来——IdC 自己那次回调是 AWS OIDC 发的，
+// 不带 login_option，在那儿取只会永远拿到空值。
+func loginIdC(opts options, client *http.Client, open func(string) error, issuerURL, region, portalLoginOption string) (authTokenFile, error) {
 	var zero authTokenFile
 
 	if strings.TrimSpace(issuerURL) == "" {
@@ -131,7 +170,7 @@ func loginIdC(opts options, client *http.Client, open func(string) error, issuer
 		RefreshToken: tok.RefreshToken,
 		ExpiresAt:    time.Now().UTC().Add(time.Duration(expiresIn) * time.Second).Format("2006-01-02T15:04:05.000Z"),
 		AuthMethod:   "idc",
-		Provider:     idcProviderFromLoginOption(cb.LoginOption),
+		Provider:     idcProviderFromLoginOption(portalLoginOption),
 		Region:       region,
 		ClientID:     reg.ClientID,
 		ClientSecret: reg.ClientSecret,
@@ -166,7 +205,7 @@ func idcRegisterClient(client *http.Client, oidcBase, issuerURL string) (*idcCli
 	body := map[string]any{
 		"clientName":   idcClientName,
 		"clientType":   idcClientType,
-		"scopes":       idcScopes,
+		"scopes":       idcScopes(),
 		"grantTypes":   []string{"authorization_code", "refresh_token"},
 		"redirectUris": []string{idcRegisteredRedirectURI},
 		"issuerUrl":    issuerURL,
@@ -192,7 +231,7 @@ func idcAuthorizeURL(oidcBase, clientID, redirectURI, state, challenge string) s
 	params.Set("response_type", "code")
 	params.Set("client_id", clientID)
 	params.Set("redirect_uri", redirectURI)
-	params.Set("scopes", strings.Join(idcScopes, ","))
+	params.Set("scopes", strings.Join(idcScopes(), ","))
 	params.Set("state", state)
 	params.Set("code_challenge", challenge)
 	params.Set("code_challenge_method", "S256")
@@ -231,47 +270,54 @@ func idcCreateToken(client *http.Client, oidcBase string, reg *idcClientRegistra
 // social 登录时 profileArn 由 /oauth/token 直接下发，IdC 这条没有，
 // 必须显式查一次。多个 profile 时取第一个，与 Kiro 的 ProfileArnGuard 一致。
 func idcResolveProfileARN(client *http.Client, file *authTokenFile) (string, error) {
-	// 这一步要用 Q 数据面，而端点是从 profileArn 推的——此刻还没有。
-	// 先按 region 直连，拿到 profile 后再回填。
+	var lastErr error
+
+	// 逐个候选 region 试，第一个查到 profile 的即为准。
+	for _, region := range qDataPlaneRegions {
+		profiles, err := idcListProfilesIn(client, file, region)
+		if err != nil {
+			lastErr = fmt.Errorf("%s: %w", region, err)
+			continue
+		}
+		if len(profiles) == 0 {
+			continue
+		}
+		if len(profiles) > 1 {
+			fmt.Printf("该账号在 %s 有 %d 个 profile，取第一个：\n", region, len(profiles))
+			for _, p := range profiles {
+				fmt.Printf("  - %s %s\n", p.ARN, p.ProfileName)
+			}
+		}
+		return profiles[0].ARN, nil
+	}
+
+	if lastErr != nil {
+		return "", fmt.Errorf("在 %v 都没查到可用 profile，最后一个错误 %w", qDataPlaneRegions, lastErr)
+	}
+	return "", fmt.Errorf("该账号在 %v 都没有可用 profile，请联系管理员开通", qDataPlaneRegions)
+}
+
+func idcListProfilesIn(client *http.Client, file *authTokenFile, region string) ([]kiro.Profile, error) {
 	creds := &kiro.Credentials{
 		AccessToken: file.AccessToken,
 		AuthMethod:  kiro.AuthMethodIdC,
 		Region:      file.Region,
 		MachineID:   file.MachineID,
 		KiroVersion: file.KiroVersion,
-		// 占位：仅为通过 NewClient 的校验，真实值就是本函数要查的东西。
-		ProfileARN: fmt.Sprintf("arn:aws:codewhisperer:%s:000000000000:profile/BOOTSTRAP", credsRegion(file.Region)),
+		// 占位：只为通过 NewClient 的校验并把端点定到 region 上。
+		// 真实的 profileArn 正是本函数要查的东西。
+		ProfileARN: fmt.Sprintf("arn:aws:codewhisperer:%s:000000000000:profile/BOOTSTRAP", region),
 	}
 
 	qClient, err := kiro.NewClient(client, creds)
 	if err != nil {
-		return "", fmt.Errorf("构造 Q 客户端: %w", err)
+		return nil, fmt.Errorf("构造 Q 客户端: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
 	defer cancel()
 
-	profiles, err := qClient.ListAvailableProfiles(ctx)
-	if err != nil {
-		return "", fmt.Errorf("查询可用 profile: %w", err)
-	}
-	if len(profiles) == 0 {
-		return "", errors.New("该账号没有任何可用 profile，请联系管理员开通")
-	}
-	if len(profiles) > 1 {
-		fmt.Printf("该账号有 %d 个 profile，取第一个：\n", len(profiles))
-		for _, p := range profiles {
-			fmt.Printf("  - %s %s\n", p.ARN, p.ProfileName)
-		}
-	}
-	return profiles[0].ARN, nil
-}
-
-func credsRegion(region string) string {
-	if strings.TrimSpace(region) == "" {
-		return kiro.DefaultRegion
-	}
-	return region
+	return qClient.ListAvailableProfiles(ctx)
 }
 
 // isIdCLoginOption 报告 portal 回调是否要转交 IdC 流程。

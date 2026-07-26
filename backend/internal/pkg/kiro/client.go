@@ -285,6 +285,53 @@ type AvailableModel struct {
 	ModelID     string `json:"modelId"`
 	ModelName   string `json:"modelName,omitempty"`
 	Description string `json:"description,omitempty"`
+
+	// RateMultiplier 是该模型的 credit 计费倍率，由上游直接下发。
+	//
+	// 实测跨度很大：qwen3-coder-next 0.05、claude-sonnet-4.5 1.3、
+	// claude-opus-5 2.2、gpt-5.6-sol 2.4——最贵的是最便宜的 48 倍。
+	// 有了它就不必再估算成本：同样输入重复请求，credit 消耗逐位相同，
+	// 说明计费是输入规模与本倍率的确定性函数。
+	RateMultiplier float64 `json:"rateMultiplier,omitempty"`
+	// RateUnit 是计费单位，实测恒为 "Credit"。
+	RateUnit string `json:"rateUnit,omitempty"`
+
+	// SupportedInputTypes 实测取值为 TEXT / IMAGE。
+	SupportedInputTypes []string `json:"supportedInputTypes,omitempty"`
+
+	// TokenLimits 是该模型的上下文与输出上限。
+	TokenLimits *ModelTokenLimits `json:"tokenLimits,omitempty"`
+
+	// PromptCaching 描述该模型的提示缓存能力。
+	//
+	// ⚠️ 实测：打 cachePoint 拿不到任何计费收益，所以网关**故意不发**它。
+	// 用同一段 4 万字符前缀在 claude-sonnet-4.5 上跑 5 次对照
+	// （2 次不打缓存点、3 次打），credit 消耗全部是 0.082131，逐位相同。
+	// 上游收下 cachePoint 不报错，但计费不变。
+	//
+	// 无法区分是服务端没实现、还是缓存生效了但 credit 计价不透传 token：
+	// 这几次请求上游一次都没下发 metadataEvent，拿不到
+	// cacheReadInputTokens / cacheWriteInputTokens 这个直接证据。
+	//
+	// 保留解析是为了将来 Kiro 改计价方式时能快速重测，不必从头逆向。
+	// 参见 UserInputMessage.CachePoint。
+	PromptCaching *ModelPromptCaching `json:"promptCaching,omitempty"`
+}
+
+// ModelTokenLimits 对应 schema 的 TokenLimits。
+type ModelTokenLimits struct {
+	MaxInputTokens  int64 `json:"maxInputTokens,omitempty"`
+	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
+}
+
+// ModelPromptCaching 对应 schema 的 PromptCaching。
+type ModelPromptCaching struct {
+	SupportsPromptCaching bool `json:"supportsPromptCaching,omitempty"`
+	// MinimumTokensPerCacheCheckpoint 是打一个缓存点所需的最小 token 数，
+	// 低于它即使打了缓存点也不会生效。
+	MinimumTokensPerCacheCheckpoint int64 `json:"minimumTokensPerCacheCheckpoint,omitempty"`
+	// MaximumCacheCheckpointsPerRequest 是单次请求允许的缓存点上限。
+	MaximumCacheCheckpointsPerRequest int64 `json:"maximumCacheCheckpointsPerRequest,omitempty"`
 }
 
 type listAvailableModelsResponse struct {
