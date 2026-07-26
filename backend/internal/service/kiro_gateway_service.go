@@ -11,8 +11,10 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 const (
@@ -272,6 +274,20 @@ func (s *KiroGatewayService) buildResult(
 	if !translator.HasUpstreamUsage() {
 		inputTokens = kiro.EstimateConversationTokens(state)
 		outputTokens = translator.EstimatedOutputTokens()
+
+		// 走到估算说明本次没有权威 token 数，计费完全靠猜。
+		// meteringEvent 里的 credit 是上游对本次请求的权威扣费口径
+		// （与 GetUsageLimits 的 currentUsage 同源），量纲不同不能直接拿来
+		// 计费，但记下来就能回头核对估算跑偏了多少。
+		if metering := translator.MeteringUsage(); metering > 0 {
+			logger.L().Debug("kiro.usage_estimated_with_upstream_metering",
+				zap.String("model", publicModel),
+				zap.String("upstream_model", upstreamModel),
+				zap.Int("estimated_input_tokens", inputTokens),
+				zap.Int("estimated_output_tokens", outputTokens),
+				zap.Float64("upstream_metering_credits", metering),
+			)
+		}
 	}
 
 	result := &ForwardResult{

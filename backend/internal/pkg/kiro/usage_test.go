@@ -60,6 +60,28 @@ const usageLimitsFixture = `{
   "userInfo": {"email": null, "userId": "d-0000000000.00000000-0000-0000-0000-000000000000"}
 }`
 
+// TestUserAgentFormatsAreDistinct 钉住两套 UA 的区别：
+// auth 服务（/oauth/token、/refreshToken）用连字符，
+// Q 数据面（generateAssistantResponse 等）用空格。混用等于自报家门。
+func TestUserAgentFormatsAreDistinct(t *testing.T) {
+	creds := &Credentials{KiroVersion: "1.0.212", MachineID: "abc123"}
+
+	require.Equal(t, "KiroIDE 1.0.212 abc123", creds.UserAgent())
+	require.Equal(t, "KiroIDE-1.0.212-abc123", creds.AuthUserAgent())
+}
+
+// TestUserAgentFallbacks 确认兜底值不含产品名。
+// 以前 machineId 缺失时会填 "ringstar"，那串东西出现在上游日志里
+// 等于把代理流量标记出来。
+func TestUserAgentFallbacks(t *testing.T) {
+	creds := &Credentials{}
+
+	require.Equal(t, "KiroIDE "+DefaultVersion+" "+DefaultMachineID, creds.UserAgent())
+	require.Equal(t, "KiroIDE-"+DefaultVersion+"-"+DefaultMachineID, creds.AuthUserAgent())
+	require.NotContains(t, creds.UserAgent(), "ringstar")
+	require.NotContains(t, creds.AuthUserAgent(), "ringstar")
+}
+
 func TestGetUsageLimitsParsesRealResponse(t *testing.T) {
 	client := &stubHTTPClient{responses: []*http.Response{
 		jsonResponse(http.StatusOK, usageLimitsFixture),

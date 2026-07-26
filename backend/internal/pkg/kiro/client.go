@@ -28,7 +28,13 @@ const (
 	headerRedirectIntern = "redirect-for-internal"
 	headerConversationID = "x-amzn-codewhisperer-conversation-id"
 
-	// tokenTypeExternalIDP 只在 IdC（外部身份源）账号上发送。
+	// tokenTypeExternalIDP 只在 external_idp（企业自建 IdP）账号上发送。
+	//
+	// 早先这里按 IdC 发，等于向上游谎报 token 来源：实测在一个 social 账号上
+	// 加这个头，/getUsageLimits 直接从 200 变 403（x-amzn-errortype:
+	// InternalFailure），而换成未知取值则被忽略——说明上游专门识别这个值，
+	// 会按外部 IdP 的路径去校验 token。BuilderId / Enterprise 的 token 同样
+	// 不是外部 IdP 签发的，发了只会把账号打死。
 	tokenTypeExternalIDP = "EXTERNAL_IDP"
 
 	maxErrorBody      = 1 << 20
@@ -106,7 +112,7 @@ func (c *Client) applyCommonHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set(headerOptOut, "true")
-	if c.authMethod == AuthMethodIdC {
+	if c.authMethod == AuthMethodExternalIDP {
 		req.Header.Set(headerTokenType, tokenTypeExternalIDP)
 	}
 	if c.internal {

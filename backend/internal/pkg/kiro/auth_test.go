@@ -176,7 +176,8 @@ func TestRefreshSocial(t *testing.T) {
 	require.Len(t, client.requests, 1)
 	require.Equal(t, SocialRefreshURL, client.requests[0].URL.String())
 	require.Equal(t, "application/json", client.requests[0].Header.Get("Content-Type"))
-	require.Equal(t, "KiroIDE "+DefaultVersion+" ringstar", client.requests[0].Header.Get("User-Agent"))
+	// auth 服务用连字符格式，与数据面的空格格式（UserAgent）是两套，不能混用。
+	require.Equal(t, "KiroIDE-"+DefaultVersion+"-"+DefaultMachineID, client.requests[0].Header.Get("User-Agent"))
 	require.JSONEq(t, `{"refreshToken":"aws-refresh-token"}`, client.bodies[0])
 
 	require.Equal(t, "new-access", updated.AccessToken)

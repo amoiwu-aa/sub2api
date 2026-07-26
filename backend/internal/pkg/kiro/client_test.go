@@ -116,6 +116,12 @@ func TestGenerateAssistantResponseSendsModeledRequest(t *testing.T) {
 	require.NotContains(t, client.bodies[0], `"userInputMessageContext":{"modelId"`)
 }
 
+// TestGenerateAssistantResponseIdCAndInternalHeaders 覆盖 IdC + Internal 账号。
+//
+// IdC 账号绝不能发 TokenType：实测在真账号上加这个头，上游会从 200 变 403
+// （x-amzn-errortype: InternalFailure），而换成未知取值则被忽略——说明上游
+// 专门识别 EXTERNAL_IDP，会按外部 IdP 的路径去校验 token。
+// BuilderId / Enterprise 的 token 不是外部 IdP 签发的，发了就是把账号打死。
 func TestGenerateAssistantResponseIdCAndInternalHeaders(t *testing.T) {
 	creds := testCredentials()
 	creds.AuthMethod = AuthMethodIdC
@@ -128,8 +134,36 @@ func TestGenerateAssistantResponseIdCAndInternalHeaders(t *testing.T) {
 	_, err = qClient.GenerateAssistantResponse(context.Background(), &GenerateAssistantResponseRequest{}, nil)
 	require.NoError(t, err)
 
-	require.Equal(t, tokenTypeExternalIDP, client.requests[0].Header.Get(headerTokenType))
+	require.Empty(t, client.requests[0].Header.Get(headerTokenType))
 	require.Equal(t, "true", client.requests[0].Header.Get(headerRedirectIntern))
+}
+
+// TestGenerateAssistantResponseExternalIdpSendsTokenType 确认只有 external_idp
+// 这一种 authMethod 才发 TokenType。
+func TestGenerateAssistantResponseExternalIdpSendsTokenType(t *testing.T) {
+	creds := testCredentials()
+	creds.AuthMethod = AuthMethodExternalIDP
+
+	client := &stubHTTPClient{responses: []*http.Response{streamResponse(t)}}
+	qClient, err := NewClient(client, creds)
+	require.NoError(t, err)
+
+	_, err = qClient.GenerateAssistantResponse(context.Background(), &GenerateAssistantResponseRequest{}, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, tokenTypeExternalIDP, client.requests[0].Header.Get(headerTokenType))
+}
+
+// TestSocialAccountNeverSendsTokenType 守住 social 这条最常用的路径。
+func TestSocialAccountNeverSendsTokenType(t *testing.T) {
+	client := &stubHTTPClient{responses: []*http.Response{streamResponse(t)}}
+	qClient, err := NewClient(client, testCredentials())
+	require.NoError(t, err)
+
+	_, err = qClient.GenerateAssistantResponse(context.Background(), &GenerateAssistantResponseRequest{}, nil)
+	require.NoError(t, err)
+
+	require.Empty(t, client.requests[0].Header.Get(headerTokenType))
 }
 
 func TestGenerateAssistantResponseDecodesEventStream(t *testing.T) {

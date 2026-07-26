@@ -18,17 +18,35 @@ const (
 	AuthMethodSocial = "social"
 	// AuthMethodIdC 对应 Enterprise / BuilderId（AWS IAM Identity Center）。
 	AuthMethodIdC = "idc"
+	// AuthMethodExternalIDP 对应企业自建 IdP。
+	//
+	// Kiro 有三种 authMethod（social / IdC / external_idp），只有这一种
+	// 才发 TokenType: EXTERNAL_IDP 请求头。本包暂不支持用它登录与续期，
+	// 定义出来是为了让请求头的判断条件写对——早先把它并进 IdC，导致所有
+	// IdC 账号都发了这个头，实测上游会直接 403。
+	AuthMethodExternalIDP = "external_idp"
 
 	// SocialRefreshURL 见 kiro-proxy token-reader.js 的 SOCIAL_REFRESH_URL。
 	SocialRefreshURL = "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken"
 
 	// DefaultRegion 是 profileArn 无法推导 region 时的兜底。
 	DefaultRegion = "us-east-1"
-	// DefaultVersion 用于 User-Agent，对齐反代的 KIRO_VERSION 默认值。
-	DefaultVersion = "0.11.107"
+	// DefaultVersion 用于 User-Agent，对齐本机实测的 Kiro 版本。
+	// 这个值会原样出现在发往上游的 UA 里，落后太多等于自报家门。
+	DefaultVersion = "1.0.212"
 
-	// RefreshBuffer 是提前刷新的缓冲期，与反代的 REFRESH_BUFFER_MS 一致。
-	RefreshBuffer = 5 * time.Minute
+	// DefaultMachineID 是取不到 machineId 时的兜底，取自 Kiro 扩展的
+	// DEFAULT_MACHINE_ID。以前这里写的是 "ringstar"——产品名直接出现在
+	// UA 里，上游日志中一眼就能把代理流量摘出来。
+	//
+	// 更好的做法是每个账号带自己的 machineId（kirologin -ringstar 产出的
+	// 凭证就有），这里只是最后的兜底。
+	DefaultMachineID = "UNDETERMINED_MACHINE_ID"
+
+	// RefreshBuffer 是提前刷新的缓冲期。
+	// 10 分钟对齐 Kiro 扩展的 REFRESH_BEFORE_EXPIRY_SECONDS，
+	// 比原来的 5 分钟多留一倍余量给代理链路上的重试。
+	RefreshBuffer = 10 * time.Minute
 
 	// ProviderInternal 触发 redirect-for-internal 请求头。
 	ProviderInternal = "Internal"
@@ -196,6 +214,8 @@ func NormalizeAuthMethod(value string) string {
 		return AuthMethodSocial
 	case "idc":
 		return AuthMethodIdC
+	case "external_idp", "externalidp":
+		return AuthMethodExternalIDP
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
 	}
@@ -271,10 +291,28 @@ func (c *Credentials) OIDCRegion() string {
 	return DefaultRegion
 }
 
-// UserAgent 复刻反代的 buildUserAgent：`KiroIDE {version} {machineId}`。
+// UserAgent 是调用 Q / CodeWhisperer 数据面时用的 UA：
+// `KiroIDE {version} {machineId}`，空格分隔，对应扩展的 getCustomUserAgent()。
+//
+// 注意别和 AuthUserAgent 混用：auth 服务那边是连字符格式，两者不通用。
 func (c *Credentials) UserAgent() string {
-	version := DefaultVersion
-	machineID := ""
+	version, machineID := c.uaParts()
+	return "KiroIDE " + version + " " + machineID
+}
+
+// AuthUserAgent 是调用 auth 服务（/oauth/token、/refreshToken、/logout）时用的 UA：
+// `KiroIDE-{version}-{machineId}`，连字符分隔。
+//
+// 对应扩展 sso-oidc-client 里的
+// `USER_AGENT = KiroIDE-${kiroVersion}-${machineId}`，
+// 与数据面那套空格格式是两回事。
+func (c *Credentials) AuthUserAgent() string {
+	version, machineID := c.uaParts()
+	return "KiroIDE-" + version + "-" + machineID
+}
+
+func (c *Credentials) uaParts() (version, machineID string) {
+	version = DefaultVersion
 	if c != nil {
 		if v := strings.TrimSpace(c.KiroVersion); v != "" {
 			version = v
@@ -282,9 +320,9 @@ func (c *Credentials) UserAgent() string {
 		machineID = strings.TrimSpace(c.MachineID)
 	}
 	if machineID == "" {
-		machineID = "ringstar"
+		machineID = DefaultMachineID
 	}
-	return "KiroIDE " + version + " " + machineID
+	return version, machineID
 }
 
 // IsInternalProvider 报告是否需要 redirect-for-internal 请求头。
@@ -370,7 +408,7 @@ func Refresh(ctx context.Context, client HTTPClient, creds *Credentials) (*Crede
 
 func refreshSocial(ctx context.Context, client HTTPClient, creds *Credentials) (*Credentials, error) {
 	body := map[string]string{"refreshToken": creds.RefreshToken}
-	resp, err := postJSON(ctx, client, SocialRefreshURL, body, creds.UserAgent())
+	resp, err := postJSON(ctx, client, SocialRefreshURL, body, creds.AuthUserAgent())
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +429,7 @@ func refreshIdC(ctx context.Context, client HTTPClient, creds *Credentials) (*Cr
 		"grantType":    "refresh_token",
 		"refreshToken": creds.RefreshToken,
 	}
-	resp, err := postJSON(ctx, client, endpoint, body, creds.UserAgent())
+	resp, err := postJSON(ctx, client, endpoint, body, creds.AuthUserAgent())
 	if err != nil {
 		return nil, err
 	}

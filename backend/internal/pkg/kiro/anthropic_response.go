@@ -339,7 +339,12 @@ func (t *ResponseTranslator) Usage() AnthropicUsage { return t.usage }
 // HasUpstreamUsage 报告上游是否给出了 tokenUsage。
 func (t *ResponseTranslator) HasUpstreamUsage() bool { return t.sawUsage }
 
-// MeteringUsage 是上游的计费单位数，用于对不上 token 时的兜底口径。
+// MeteringUsage 是上游在 meteringEvent 里下发的计费单位数（credit）。
+//
+// 它和 token 不是一个量纲，**不能**拿来替代 token 计费，所以不参与
+// ForwardResult.Usage 的计算。它的用处是对账：这是上游对本次请求的权威
+// 扣费口径，与账号额度接口（GetUsageLimits）里的 currentUsage 同源，
+// 可以用来验证本地的 token 估算有没有跑偏。
 func (t *ResponseTranslator) MeteringUsage() float64 { return t.meteringUnit }
 
 // Response 组装非流式响应。必须在 Finish 之后调用。
