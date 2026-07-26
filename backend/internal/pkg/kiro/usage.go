@@ -15,17 +15,21 @@ package kiro
 // 走独立的 control plane 端点。既然 runtime 这条能通，就不必再引一套。）
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 const (
 	getUsageLimitsPath = "/getUsageLimits"
-	maxUsageLimitsBody = 1 << 20
+	// listAvailableProfilesPath 是 POST，与同 client 上 GET 的两个接口不同。
+	listAvailableProfilesPath = "/ListAvailableProfiles"
+	maxUsageLimitsBody        = 1 << 20
 
 	// ResourceTypeCredit 是目前唯一观测到的计量维度。
 	ResourceTypeCredit = "CREDIT"
@@ -136,6 +140,73 @@ func (c *Client) GetUsageLimits(ctx context.Context) (*UsageLimits, error) {
 		return nil, fmt.Errorf("decode kiro usage limits response: %w", err)
 	}
 	return &parsed, nil
+}
+
+// Profile 是 ListAvailableProfiles 返回的单个 profile。
+type Profile struct {
+	ARN         string `json:"arn"`
+	ProfileName string `json:"profileName,omitempty"`
+}
+
+type listAvailableProfilesResponse struct {
+	Profiles  []Profile `json:"profiles"`
+	NextToken string    `json:"nextToken,omitempty"`
+}
+
+// ListAvailableProfiles 查账号可用的 profile 列表。
+//
+// social 登录时 profileArn 由 auth 服务的 /oauth/token 直接下发，
+// 这个接口是给 IdC 用的——那条链不返回 profileArn，必须显式查一次。
+//
+// HTTP 绑定是 ["POST", "/ListAvailableProfiles", 200]，注意是 POST，
+// 与同一 client 上 GET 的 /getUsageLimits、/ListAvailableModels 不同。
+func (c *Client) ListAvailableProfiles(ctx context.Context) ([]Profile, error) {
+	var all []Profile
+	nextToken := ""
+
+	for page := 0; page < maxListModelsPage; page++ {
+		body := map[string]any{}
+		if nextToken != "" {
+			body["nextToken"] = nextToken
+		}
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("encode kiro list profiles request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			c.endpoint+listAvailableProfilesPath, bytes.NewReader(payload))
+		if err != nil {
+			return nil, fmt.Errorf("build kiro list profiles request: %w", err)
+		}
+		c.applyCommonHeaders(req)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("kiro list profiles request: %w", err)
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxUsageLimitsBody))
+		_ = resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, &APIError{Status: resp.StatusCode, Operation: "ListAvailableProfiles", Body: string(raw)}
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("read kiro list profiles response: %w", readErr)
+		}
+
+		var parsed listAvailableProfilesResponse
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, fmt.Errorf("decode kiro list profiles response: %w", err)
+		}
+		all = append(all, parsed.Profiles...)
+		nextToken = strings.TrimSpace(parsed.NextToken)
+		if nextToken == "" {
+			break
+		}
+	}
+	return all, nil
 }
 
 // Used 返回已消耗量，优先取高精度字段。

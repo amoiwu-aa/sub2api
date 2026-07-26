@@ -99,6 +99,12 @@ type authTokenFile struct {
 	AuthMethod   string `json:"authMethod"`
 	Provider     string `json:"provider"`
 
+	// 以下三项只有 IdC 账号会写。服务器上没有本机的 ~/.aws/sso/cache，
+	// clientId/clientSecret 不落库的话 access token 一过期就永久失效。
+	Region       string `json:"region,omitempty"`
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+
 	// 以下两项官方文件里没有，加上是为了让 RingStar 网关复刻本机的
 	// `KiroIDE {version} {machineId}` User-Agent。仅 -ringstar 时写出。
 	MachineID   string `json:"machineId,omitempty"`
@@ -217,8 +223,7 @@ func login(opts options, client *http.Client, open func(string) error) (authToke
 	if err != nil {
 		return zero, fmt.Errorf("生成 code_verifier: %w", err)
 	}
-	sum := sha256.Sum256([]byte(verifier))
-	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
+	challenge := pkceChallenge(verifier)
 
 	srv, err := startCallbackServer(state)
 	if err != nil {
@@ -245,6 +250,16 @@ func login(opts options, client *http.Client, open func(string) error) (authToke
 		return zero, err
 	}
 	fmt.Printf("已收到回调: login_option=%s\n", cb.LoginOption)
+
+	// IdC 那几条路 portal 不发 token，只回 issuer_url + idc_region，
+	// 要接着自己跑一遍 authorization_code 流程。
+	// 先把 portal 的回调服务关掉，IdC 那条链要重新占用同一批端口。
+	if isIdCLoginOption(cb.LoginOption) {
+		srv.close()
+		fmt.Printf("这是 IAM Identity Center 账号，继续 IdC 登录（issuer=%s, region=%s）...\n\n",
+			cb.IssuerURL, cb.IdcRegion)
+		return loginIdC(opts, client, open, cb.IssuerURL, cb.IdcRegion)
+	}
 
 	provider, err := socialProvider(cb)
 	if err != nil {
@@ -440,8 +455,9 @@ func socialProvider(cb callbackData) (string, error) {
 	case "github":
 		return "Github", nil
 	case "builderid", "awsidc", "internal":
-		return "", fmt.Errorf("login_option=%s 走的是 IAM Identity Center 设备码流程（issuer_url=%s, idc_region=%s），"+
-			"本工具只实现了 portal 社交登录；请在登录页选择 Google 或 GitHub", cb.LoginOption, cb.IssuerURL, cb.IdcRegion)
+		// 正常不该走到这里：login() 在分派社交路径之前就把 IdC 接走了。
+		return "", fmt.Errorf("login_option=%s 属于 IdC，应由 loginIdC 处理（issuer_url=%s, idc_region=%s）",
+			cb.LoginOption, cb.IssuerURL, cb.IdcRegion)
 	case "external_idp":
 		return "", fmt.Errorf("login_option=external_idp 需要与企业 IdP 再做一次 OAuth（issuer_url=%s, client_id=%s），本工具未覆盖",
 			cb.IssuerURL, cb.ClientID)
@@ -605,6 +621,13 @@ func randomUUID() (string, error) {
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// pkceChallenge 对 verifier **字符串**做 sha256 再 base64url。
+// 注意是对字符串，不是对生成它的那串随机字节——搞错的话上游会在回调阶段就拒掉。
+func pkceChallenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 func randomBase64URL(n int) (string, error) {

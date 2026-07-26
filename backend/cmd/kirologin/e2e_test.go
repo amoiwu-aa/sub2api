@@ -102,7 +102,10 @@ func (f *fakeKiro) handleSignin(w http.ResponseWriter, r *http.Request) {
 	case "builderid", "awsidc", "internal":
 		params.Del("code")
 		params.Set("issuer_url", "https://identitycenter.amazonaws.com/ssoins-1234567890")
-		params.Set("idc_region", "us-east-1")
+		// 刻意给一个非法 region：IdC 链在构造 OIDC 端点时就会被 region 校验挡下，
+		// 于是测试不会真去打 oidc.<region>.amazonaws.com。
+		// 这样既证明了「IdC 被路由进 IdC 流程」，又保证整个测试不出网。
+		params.Set("idc_region", "not-a-region")
 	}
 
 	http.Redirect(w, r, redirectURI+"/oauth/callback?"+params.Encode(), http.StatusFound)
@@ -396,26 +399,29 @@ func TestE2EForgedStateRejected(t *testing.T) {
 	}
 }
 
-// TestE2EIdCLoginOptionReportsClearly 确认 IdC 那几条路会明确报错而不是静默失败，
-// 且把排查需要的 issuer_url 打出来。
-func TestE2EIdCLoginOptionReportsClearly(t *testing.T) {
+// TestE2EIdCLoginOptionRoutesToIdCFlow 确认 IdC 的三种 login_option 会被
+// 转交给 IdC 流程，而不是错当成社交登录、也不是静默失败。
+//
+// 这里用非法 region 让 IdC 链在构造端点时就停下，所以本测试**不出网**，
+// 覆盖的是「路由是否正确」而非 IdC 链本身。IdC 链尚未有端到端覆盖：
+// 它需要一个真实的 IAM Identity Center 账号才能验证。
+func TestE2EIdCLoginOptionRoutesToIdCFlow(t *testing.T) {
 	for _, loginOption := range []string{"builderid", "awsidc", "internal"} {
 		t.Run(loginOption, func(t *testing.T) {
 			fake := newFakeKiro(t, loginOption)
 
 			_, err := login(fake.opts(), fake.auth.Client(), fake.browser())
 			if err == nil {
-				t.Fatalf("login_option=%s 应该报错", loginOption)
+				t.Fatalf("login_option=%s 用非法 region 应该失败", loginOption)
 			}
-			if !strings.Contains(err.Error(), "identitycenter.amazonaws.com") {
-				t.Errorf("错误里应带上 issuer_url，实际: %v", err)
-			}
-			if !strings.Contains(err.Error(), "us-east-1") {
-				t.Errorf("错误里应带上 idc_region，实际: %v", err)
+			// 错在 region 校验，说明确实进了 IdC 链——社交链根本不看 region。
+			if !strings.Contains(err.Error(), "region") {
+				t.Errorf("应因 region 非法而失败，实际: %v", err)
 			}
 
 			fake.mu.Lock()
 			defer fake.mu.Unlock()
+			// IdC 不走 portal 的 /oauth/token，它有自己的换 token 端点。
 			if fake.exchangeHits != 0 {
 				t.Errorf("IdC 不该去 portal 换 token，实际打了 %d 次", fake.exchangeHits)
 			}

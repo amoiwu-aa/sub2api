@@ -168,11 +168,49 @@ go run ./cmd/kirologin -install             # 顺便覆盖本机 Kiro 的登录�
 但要注意回调是打到**运行本工具那台机器**的 `localhost:<port>`，
 所以需要把该端口通过 SSH 隧道转发到本地，否则浏览器回调不回来。
 
-## 没覆盖的部分
+## IdC（BuilderID / 企业 IdC）
 
-portal 还能回 `builderid` / `awsidc` / `internal` / `external_idp` 四种 `login_option`，
-它们不在 portal 里发 token，而是回一个 `issuer_url` + `idc_region`，
-IDE 接着走 IAM Identity Center 的设备码流程（`RegisterClient` →
-`StartDeviceAuthorization` → `CreateToken`），再调 `ListAvailableProfiles` 拿 `profileArn`。
-本工具遇到这四种会明确报错并把 `issuer_url` / `idc_region` 打出来，不会静默失败。
-登录页请选 Google 或 GitHub。
+登录页选 BuilderID 或企业 IdC 时，portal 不发 token，只回 `issuer_url` +
+`idc_region`，本工具会自动接着跑 IdC 链，不需要额外操作。
+
+**它不是设备码流程。** bundle 里能搜到 `StartDeviceAuthorization`，但那是 AWS SDK
+自带的命令，Kiro 没用。实际走的是 `authorization_code` + PKCE，和 portal 那条链同构：
+
+```
+1. POST https://oidc.{region}.amazonaws.com/client/register
+     { clientName: "Kiro IDE", clientType: "public",
+       scopes: [completions, analysis, conversations, transformations, taskassist],
+       grantTypes: [authorization_code, refresh_token],
+       redirectUris: ["http://127.0.0.1/oauth/callback"], issuerUrl }
+   -> { clientId, clientSecret }
+
+2. 浏览器打开 https://oidc.{region}.amazonaws.com/authorize
+     ?response_type=code&client_id=..&redirect_uri=http://127.0.0.1:{port}/oauth/callback
+     &scopes=completions,analysis,...      <- 逗号分隔，不是空格
+     &state=..&code_challenge=..&code_challenge_method=S256
+
+3. 回调拿 code
+
+4. POST https://oidc.{region}.amazonaws.com/token
+     { clientId, clientSecret, grantType: "authorization_code",
+       code, codeVerifier, redirectUri }
+   -> { accessToken, refreshToken, expiresIn }     <- 注意没有 profileArn
+
+5. POST https://q.{region}.amazonaws.com/ListAvailableProfiles
+   -> profiles[0].arn 作为 profileArn
+```
+
+与社交链的三处差异：
+
+1. **`scopes` 逗号分隔**，不是 OAuth 常见的空格分隔。
+2. **不返回 `profileArn`**，必须再查一次 `ListAvailableProfiles`；
+   缺了它每个 Q API 请求都发不出去，所以这一步失败就是硬失败。
+3. **`clientId` / `clientSecret` 必须随凭证落库**。服务器上没有本机的
+   `~/.aws/sso/cache`，少了这两项 access token 一过期就永久失效。
+   本工具会把它们写进产出的 JSON。
+
+⚠️ **IdC 链尚未经过真实账号验证** —— 手头只有 social 账号。协议逐字段对照了
+扩展源码，单测覆盖了 URL 构造与路由，但没有端到端跑通过。首次使用时请留意报错。
+
+`external_idp`（企业自建 IdP）仍未支持：它要求与客户自己的 IdP 再做一次 OAuth，
+且续期路径也不同。遇到会明确报错。

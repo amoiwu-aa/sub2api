@@ -41,6 +41,76 @@ func TestRandomBase64URLIsUnpadded(t *testing.T) {
 	}
 }
 
+// TestIdCAuthorizeURL 钉住 IdC 的 authorize 参数。
+// scopes 是逗号分隔——这点与 OAuth 常见的空格分隔不同，写错会被上游拒。
+func TestIdCAuthorizeURL(t *testing.T) {
+	raw := idcAuthorizeURL("https://oidc.us-east-1.amazonaws.com", "cid", "http://127.0.0.1:3128/oauth/callback", "st", "ch")
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("解析 authorize URL: %v", err)
+	}
+	if u.Host != "oidc.us-east-1.amazonaws.com" || u.Path != "/authorize" {
+		t.Fatalf("端点不对: %s", raw)
+	}
+
+	q := u.Query()
+	for key, want := range map[string]string{
+		"response_type":         "code",
+		"client_id":             "cid",
+		"redirect_uri":          "http://127.0.0.1:3128/oauth/callback",
+		"state":                 "st",
+		"code_challenge":        "ch",
+		"code_challenge_method": "S256",
+		"scopes":                "completions,analysis,conversations,transformations,taskassist",
+	} {
+		if got := q.Get(key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestIdCOIDCBase(t *testing.T) {
+	base, err := idcOIDCBase("us-east-1")
+	if err != nil {
+		t.Fatalf("idcOIDCBase: %v", err)
+	}
+	if base != "https://oidc.us-east-1.amazonaws.com" {
+		t.Fatalf("base = %q", base)
+	}
+	// region 来自外部输入，直接拼进 URL 有 SSRF 风险，必须挡住。
+	for _, bad := range []string{"", "evil.com", "us_east_1", "../x"} {
+		if _, err := idcOIDCBase(bad); err == nil {
+			t.Errorf("region %q 应被拒绝", bad)
+		}
+	}
+}
+
+func TestIsIdCLoginOption(t *testing.T) {
+	for _, opt := range []string{"builderid", "awsidc", "internal"} {
+		if !isIdCLoginOption(opt) {
+			t.Errorf("%q 应判为 IdC", opt)
+		}
+	}
+	for _, opt := range []string{"google", "github", "external_idp", ""} {
+		if isIdCLoginOption(opt) {
+			t.Errorf("%q 不该判为 IdC", opt)
+		}
+	}
+}
+
+func TestIdCProviderFromLoginOption(t *testing.T) {
+	for opt, want := range map[string]string{
+		"builderid": "BuilderId",
+		"internal":  "Internal",
+		"awsidc":    "Enterprise",
+	} {
+		if got := idcProviderFromLoginOption(opt); got != want {
+			t.Errorf("%q -> %q, want %q", opt, got, want)
+		}
+	}
+}
+
 func TestBuildPortalURL(t *testing.T) {
 	raw := buildPortalURL("https://app.kiro.dev", "state-1", "challenge-1", "http://localhost:3128")
 
