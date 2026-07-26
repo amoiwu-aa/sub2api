@@ -588,6 +588,8 @@ export default {
         apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.'
       },
       kiro: {
+        webLoginSub: 'Sign in via browser, no local Kiro',
+        pasteFileSub: 'Local token file / enterprise IdC',
         pasteHintShort: 'Requires Kiro installed and signed in locally. Enterprise (IdC) accounts must use this method.',
         webLogin: 'Web login',
         pasteFile: 'Paste local file',
@@ -608,6 +610,8 @@ export default {
         overage: 'Overage',
       },
       cursor: {
+        browserLoginSub: 'Browser sign-in, polled automatically',
+        pasteCookieSub: 'An existing session cookie',
         browserLogin: 'Browser login',
         pasteCookie: 'Paste cookie',
         browserHint: 'Generate a login link, open it in your browser and authorize. This page detects completion and creates the account automatically.',

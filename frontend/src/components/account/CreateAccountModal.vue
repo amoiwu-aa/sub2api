@@ -1125,77 +1125,137 @@
       </div>
 
       <!-- Add Method (Kiro / Cursor)
-           与 Anthropic 的「添加方式」同一形态：授权方式在第一步就选定，
-           第二步只负责执行。之前这两个平台在第一步什么都不显示，平台选完
-           直接跳到调度参数，看起来像「这个平台没接上」。 -->
+           用与「账号类型」相同的卡片形态，而不是小单选：对这两个平台来说
+           授权方式就是**唯一**的主要选择（它们没有单独的账号类型），
+           视觉分量应当对齐 Anthropic 的账号类型卡片。 -->
       <div v-if="form.platform === 'kiro'">
         <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
-        <div class="mt-2 flex flex-wrap gap-4">
-          <label class="flex cursor-pointer items-center">
-            <input
-              v-model="kiroAuthMode"
-              type="radio"
-              value="web"
-              class="mr-2 text-primary-600 focus:ring-primary-500"
-            />
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.kiro.webLogin')
-            }}</span>
-          </label>
-          <label class="flex cursor-pointer items-center">
-            <input
-              v-model="kiroAuthMode"
-              type="radio"
-              value="paste"
-              class="mr-2 text-primary-600 focus:ring-primary-500"
-            />
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.kiro.pasteFile')
-            }}</span>
-          </label>
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            @click="kiroAuthMode = 'web'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              kiroAuthMode === 'web'
+                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                : 'border-gray-200 hover:border-amber-300 dark:border-dark-600 dark:hover:border-amber-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                kiroAuthMode === 'web'
+                  ? 'bg-amber-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="globe" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.kiro.webLogin')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.kiro.webLoginSub')
+              }}</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            @click="kiroAuthMode = 'paste'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              kiroAuthMode === 'paste'
+                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                : 'border-gray-200 hover:border-amber-300 dark:border-dark-600 dark:hover:border-amber-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                kiroAuthMode === 'paste'
+                  ? 'bg-amber-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="clipboard" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.kiro.pasteFile')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.kiro.pasteFileSub')
+              }}</span>
+            </div>
+          </button>
         </div>
-        <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-          {{
-            kiroAuthMode === 'web'
-              ? t('admin.accounts.kiro.webHint')
-              : t('admin.accounts.kiro.pasteHintShort')
-          }}
-        </p>
       </div>
 
       <div v-else-if="form.platform === 'cursor'">
         <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
-        <div class="mt-2 flex flex-wrap gap-4">
-          <label class="flex cursor-pointer items-center">
-            <input
-              v-model="cursorAuthMode"
-              type="radio"
-              value="browser"
-              class="mr-2 text-primary-600 focus:ring-primary-500"
-            />
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.cursor.browserLogin')
-            }}</span>
-          </label>
-          <label class="flex cursor-pointer items-center">
-            <input
-              v-model="cursorAuthMode"
-              type="radio"
-              value="cookie"
-              class="mr-2 text-primary-600 focus:ring-primary-500"
-            />
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{
-              t('admin.accounts.cursor.pasteCookie')
-            }}</span>
-          </label>
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            @click="cursorAuthMode = 'browser'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              cursorAuthMode === 'browser'
+                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                : 'border-gray-200 hover:border-indigo-300 dark:border-dark-600 dark:hover:border-indigo-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                cursorAuthMode === 'browser'
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="globe" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.cursor.browserLogin')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.cursor.browserLoginSub')
+              }}</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            @click="cursorAuthMode = 'cookie'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              cursorAuthMode === 'cookie'
+                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                : 'border-gray-200 hover:border-indigo-300 dark:border-dark-600 dark:hover:border-indigo-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                cursorAuthMode === 'cookie'
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="clipboard" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.cursor.pasteCookie')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.cursor.pasteCookieSub')
+              }}</span>
+            </div>
+          </button>
         </div>
-        <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-          {{
-            cursorAuthMode === 'browser'
-              ? t('admin.accounts.cursor.browserHint')
-              : t('admin.accounts.cursor.cookieHint')
-          }}
-        </p>
       </div>
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->

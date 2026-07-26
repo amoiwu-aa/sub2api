@@ -648,6 +648,8 @@ export default {
         apiKeyHint: 'Grok 订阅支持使用 OAuth refresh token；API Key 账号不在本次范围内。'
       },
       kiro: {
+        webLoginSub: '浏览器登录，无需本机 Kiro',
+        pasteFileSub: '本机 token 文件 / 企业版 IdC',
         pasteHintShort: '需要本机装有 Kiro 并已登录；企业版（IdC）只能用这种方式。',
         webLogin: '网页登录',
         pasteFile: '粘贴本机文件',
@@ -668,6 +670,8 @@ export default {
         overage: '超额可用',
       },
       cursor: {
+        browserLoginSub: '浏览器登录并自动轮询',
+        pasteCookieSub: '已有的 Session Cookie',
         browserLogin: '浏览器登录',
         pasteCookie: '粘贴 Cookie',
         browserHint: '生成登录链接后在浏览器中打开并完成授权，本页会自动检测并建号。',
