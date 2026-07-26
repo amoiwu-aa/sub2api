@@ -1015,6 +1015,12 @@ const kiroExhaustedFallbackPark = 30 * time.Minute
 // 覆盖面的局限要清楚：这条路径挂在用量查询上，而用量查询目前只有后台
 // 面板会触发，没有周期任务。也就是说没人看面板时不会自动暂停。要做到
 // 无人值守，得再加一个周期性巡检任务。
+//
+// 还有一点：企业（IdC）账号的额度是**组织共享池**，profileArn 里那个 AWS
+// 账号属于整个组织。所以这类账号被暂停，往往不是本服务用超了，而是组织里
+// 其他人（IDE、别的客户端）把共享额度耗完了——重置时间一到会自己恢复，
+// 但在那之前换本组织的另一个账号也没用，它们共用同一个池子。
+// 详见 KiroQuotaFetcher 的说明。
 func (s *AccountUsageService) parkExhaustedKiroAccount(account *Account, usage *UsageInfo) {
 	if account == nil || usage == nil || !usage.KiroExhausted {
 		return

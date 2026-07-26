@@ -25,6 +25,30 @@ const (
 // access token 直接从账号凭证里取，续期由后台的 token refresher 负责。
 // token 过期时上游会回 401，FetchQuota 把它翻译成 needs_reauth 而不是硬报错，
 // 这样一个待重新授权的账号不会把整个用量面板打挂。
+//
+// # 额度归属：企业账号是组织共享池，不是这个账号私有的
+//
+// 拉回来的额度挂在 profileArn 上，而 profileArn 里嵌着 AWS 账号号码：
+//
+//	免费（social）  arn:aws:codewhisperer:us-east-1:699475941385:profile/XXXX   50 credits
+//	企业（IdC）     arn:aws:codewhisperer:us-east-1:317380566887:profile/YYYY   5000 credits
+//
+// 企业那个 AWS 账号是**整个组织**的，5000 credits 由组织成员共用。实测把一个
+// 企业账号导进来后，即使本服务一个请求都没发，currentUsage 也在持续上涨——
+// 那是组织里其他人（IDE、其他客户端）在消耗同一个池子。
+//
+// 对账号池的两点影响：
+//
+//   - 企业账号进池会和同事抢额度，且 kiro_exhausted 触发时意味着整个组织
+//     都用完了，不只是这一个「账号」。运维看到 5000 的池子被打满时，别只查
+//     本服务的调用量。
+//   - 免费账号那种 50 credits 的独立小池反而更适合池化：各归各的，
+//     一个号用尽不影响其他号。
+//
+// 上游没有按人拆分的接口：GetUsageLimits 的 userInfo 是当前 token 持有者
+// 自己，不是消费者名单；schema 里的 ByUserAnalytics 只是个 {toggle, startUrl}
+// 开关，按人统计的数据流向 AWS 侧的管理控制台，不回传给客户端。
+// 也就是说「谁用掉的」只能去 AWS Console 查，这里查不到。
 type KiroQuotaFetcher struct {
 	proxyRepo ProxyRepository
 }
