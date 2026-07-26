@@ -138,12 +138,19 @@ portal 基址默认 `https://app.kiro.dev`，可被环境变量 `KIRO_AUTH_PORTA
 
 ```bash
 go run ./cmd/kirologin                      # 登录并写出 ./kiro-auth-token.json
+go run ./cmd/kirologin -verify -ringstar    # 推荐：先验凭证可用，再带上 UA 字段落盘
 go run ./cmd/kirologin -o -                 # 只打印到标准输出
-go run ./cmd/kirologin -ringstar            # 额外带上 machineId / kiroVersion
 go run ./cmd/kirologin -proxy socks5://127.0.0.1:1080
 go run ./cmd/kirologin -no-browser          # headless：只打印登录地址
 go run ./cmd/kirologin -install             # 顺便覆盖本机 Kiro 的登录态
 ```
+
+`-verify` 会在落盘前把凭证走一遍 RingStar 真正会走的路径：
+`kiro.ParseAuthToken`（后台导得进去）→ `Validate`（字段完整）→
+真打一次上游 `ListAvailableModels`（上游认这张凭证）。
+选 `ListAvailableModels` 是因为它只读且不计费；发一次对话虽然更彻底，
+但会平白扣掉账号的 credit。养号时建议默认带上——凭证是死是活当场就知道，
+而不是等导进 RingStar、真有流量打过去才发现。
 
 | 参数 | 说明 |
 | --- | --- |
@@ -155,6 +162,7 @@ go run ./cmd/kirologin -install             # 顺便覆盖本机 Kiro 的登录�
 | `-portal` / `-endpoint` | 覆盖 portal / auth 服务地址 |
 | `-kiro-version` | 覆盖 UA 里的版本号，默认从本机安装的 Kiro 探测 |
 | `-invitation-code` | 邀请码，仅当 portal 提示需要时填 |
+| `-verify` | 落盘前真打一次上游 `ListAvailableModels` 确认凭证可用（只读，不计费） |
 
 远程/无桌面环境下用 `-no-browser`：把打印出来的地址拷到本地浏览器打开，
 但要注意回调是打到**运行本工具那台机器**的 `localhost:<port>`，

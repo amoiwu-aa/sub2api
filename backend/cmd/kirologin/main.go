@@ -36,6 +36,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 )
 
 const (
@@ -52,6 +54,8 @@ const (
 	exchangeTimeout = 10 * time.Second
 	// exchangeRetries 对齐 axios-retry 的 retries: 3。
 	exchangeRetries = 3
+	// verifyTimeout 是 -verify 那次上游探测的上限。
+	verifyTimeout = 60 * time.Second
 
 	maxResponseBody = 1 << 20
 )
@@ -111,6 +115,7 @@ type options struct {
 	noBrowser      bool
 	proxy          string
 	invitationCode string
+	verify         bool
 }
 
 func main() {
@@ -132,7 +137,67 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	// 先验后写：凭证是死是活当场就知道，而不是等导进 RingStar
+	// 真有流量打过去才发现。
+	if opts.verify {
+		if err := verifyCredential(file, client); err != nil {
+			return fmt.Errorf("凭证校验未通过: %w", err)
+		}
+	}
 	return emit(file, opts)
+}
+
+// verifyCredential 拿刚到手的凭证真打一次上游，确认它可用。
+//
+// 走的是 internal/pkg/kiro 而不是另写一套：这样验的就是 RingStar 网关
+// 真正会走的那条路径——先过 ParseAuthToken（证明后台导得进去），
+// 再过 Validate，最后调 ListAvailableModels。
+//
+// 选 ListAvailableModels 是因为它只读且不计费；发一次对话虽然更彻底，
+// 但会平白扣掉账号的 credit。
+func verifyCredential(file authTokenFile, client *http.Client) error {
+	raw, err := json.Marshal(file)
+	if err != nil {
+		return fmt.Errorf("序列化凭证: %w", err)
+	}
+
+	creds, err := kiro.ParseAuthToken(raw)
+	if err != nil {
+		return fmt.Errorf("RingStar 解析不了这份凭证: %w", err)
+	}
+	if err := creds.Validate(); err != nil {
+		return fmt.Errorf("凭证不完整: %w", err)
+	}
+
+	c, err := kiro.NewClient(client, creds)
+	if err != nil {
+		return fmt.Errorf("构造上游客户端: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
+	defer cancel()
+
+	models, defaultModel, err := c.ListAvailableModels(ctx)
+	if err != nil {
+		return fmt.Errorf("调用上游失败: %w", err)
+	}
+	if len(models) == 0 {
+		return errors.New("上游没有返回任何可用模型")
+	}
+
+	fmt.Printf("\n凭证校验通过，账号可用模型 %d 个:\n", len(models))
+	for _, m := range models {
+		name := m.ModelName
+		if name == "" {
+			name = m.ModelID
+		}
+		fmt.Printf("  - %-22s %s\n", m.ModelID, name)
+	}
+	if defaultModel != nil {
+		fmt.Printf("  默认模型: %s\n", defaultModel.ModelID)
+	}
+	return nil
 }
 
 // login 跑完整条登录链：起本地回调 -> 把用户送进 portal -> 收 code -> 换 token。
@@ -236,6 +301,7 @@ func parseFlags() options {
 	flag.BoolVar(&opts.noBrowser, "no-browser", false, "不自动打开浏览器，只打印登录地址")
 	flag.StringVar(&opts.proxy, "proxy", "", "换 token 走的代理，如 http://127.0.0.1:7890 或 socks5://...")
 	flag.StringVar(&opts.invitationCode, "invitation-code", "", "邀请码，仅在 portal 要求时填写")
+	flag.BoolVar(&opts.verify, "verify", false, "落盘前真打一次上游 ListAvailableModels，确认凭证可用（只读，不计费）")
 	flag.Parse()
 	return opts
 }

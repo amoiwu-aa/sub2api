@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 )
 
 // 这个文件搭了一套完整的模拟环境：假 portal + 假 auth 服务 + 假浏览器，
@@ -248,6 +250,48 @@ func TestE2ESocialLoginFlow(t *testing.T) {
 	}
 	if fake.exchangeHits != 1 {
 		t.Errorf("换 token 次数 = %d, want 1", fake.exchangeHits)
+	}
+}
+
+// TestE2EOutputIsImportableByRingStar 把产出的凭证喂给 RingStar 自己的解析器。
+//
+// 这一步是 -verify 的离线部分：光看字段名对不对没用，得让真正要消费它的
+// 那套代码点头。上游连通性没法在这儿验（q.<region>.amazonaws.com 的
+// 地址是从 profileArn 推出来的，改不了），那部分靠 -verify 在真登录时打。
+func TestE2EOutputIsImportableByRingStar(t *testing.T) {
+	fake := newFakeKiro(t, "google")
+
+	file, err := login(fake.opts(), fake.auth.Client(), fake.browser())
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	raw, err := json.Marshal(file)
+	if err != nil {
+		t.Fatalf("序列化凭证: %v", err)
+	}
+
+	creds, err := kiro.ParseAuthToken(raw)
+	if err != nil {
+		t.Fatalf("RingStar 解析不了 kirologin 的产出: %v", err)
+	}
+	if err := creds.Validate(); err != nil {
+		t.Fatalf("凭证没通过 RingStar 的完整性校验: %v", err)
+	}
+
+	if creds.AuthMethod != kiro.AuthMethodSocial {
+		t.Errorf("authMethod = %q, want %q", creds.AuthMethod, kiro.AuthMethodSocial)
+	}
+	if creds.Provider != "Google" {
+		t.Errorf("provider = %q, want Google", creds.Provider)
+	}
+	// profileArn 决定了网关往哪个 region 打，推错了请求会发到不存在的端点。
+	if creds.QRegion() != "us-east-1" {
+		t.Errorf("QRegion = %q, want us-east-1", creds.QRegion())
+	}
+	// 刚拿到的凭证有效期 1 小时，不该立刻就要求续期。
+	if creds.NeedsRefresh(time.Now(), kiro.RefreshBuffer) {
+		t.Errorf("新凭证不该立刻需要刷新, expiresAt=%s", creds.ExpiresAt)
 	}
 }
 
