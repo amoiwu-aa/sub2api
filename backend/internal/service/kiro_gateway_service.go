@@ -23,6 +23,13 @@ const (
 	kiroUpstreamTimeout = 15 * time.Minute
 	// kiroResponseHeaderTimeout 只限制首字节前的等待。
 	kiroResponseHeaderTimeout = 90 * time.Second
+
+	// kiroContextOverflowRatio 是超限拦截的触发比例。
+	//
+	// 本地估算是「字符数 / 4」的粗糙口径，中文、代码、工具定义都会让它偏离
+	// 真实 token 数，偏离方向还不固定。所以只在明显超出时才拦——留 15% 余量，
+	// 宁可放过几个临界请求让上游去判，也不要把本来能跑的请求误杀。
+	kiroContextOverflowRatio = 1.15
 )
 
 // KiroGatewayService 把 Anthropic Messages API 桥接到 Amazon Q。
@@ -121,10 +128,17 @@ func (s *KiroGatewayService) preflightReject(
 	ctx context.Context, account *Account, client *kiro.Client,
 	state *kiro.ConversationState, upstreamModel string,
 ) string {
-	if !state.HasImages() {
-		return ""
-	}
+	hasImages := state.HasImages()
+	estimatedTokens := int64(kiro.EstimateConversationTokens(state))
+
+	// 闭包在后台 goroutine 里执行，触发它的请求那时可能早已结束。
+	// client 为 nil 时只是拉不了新目录，已缓存的仍然可用——所以是在闭包里
+	// 返回错误，而不是在函数开头短路：后者会让「有缓存但没 client」的场景
+	// 白白放弃已有的目录。
 	catalog := s.catalog.Get(account, func(fetchCtx context.Context) ([]kiro.AvailableModel, error) {
+		if client == nil {
+			return nil, errors.New("kiro client is nil")
+		}
 		models, _, err := client.ListAvailableModels(fetchCtx)
 		return models, err
 	})
@@ -134,18 +148,32 @@ func (s *KiroGatewayService) preflightReject(
 	if _, known := catalog.Lookup(upstreamModel); !known {
 		return ""
 	}
-	if catalog.SupportsImages(upstreamModel) {
-		return ""
+
+	if hasImages && !catalog.SupportsImages(upstreamModel) {
+		msg := "Model " + upstreamModel + " does not accept image input"
+		if alt := catalog.CheapestSupporting(true, 0); alt != "" {
+			msg += "; try " + kiro.PublicModelID(alt)
+		}
+		slog.Info("kiro.preflight_rejected_image_on_text_only_model",
+			"account_id", accountIDOrZero(account), "model", upstreamModel)
+		return msg
 	}
 
-	msg := "Model " + upstreamModel + " does not accept image input"
-	if alt := catalog.CheapestSupporting(true, 0); alt != "" {
-		msg += "; try " + kiro.PublicModelID(alt)
+	if limit := catalog.MaxInputTokens(upstreamModel); limit > 0 &&
+		estimatedTokens > int64(float64(limit)*kiroContextOverflowRatio) {
+		msg := fmt.Sprintf("Request is too large for %s: about %d input tokens vs a %d limit",
+			upstreamModel, estimatedTokens, limit)
+		if alt := catalog.CheapestSupporting(hasImages, estimatedTokens); alt != "" {
+			msg += "; try " + kiro.PublicModelID(alt)
+		}
+		slog.Info("kiro.preflight_rejected_context_overflow",
+			"account_id", accountIDOrZero(account), "model", upstreamModel,
+			"estimated_tokens", estimatedTokens, "limit", limit)
+		return msg
 	}
-	slog.Info("kiro.preflight_rejected_image_on_text_only_model",
-		"account_id", accountIDOrZero(account), "model", upstreamModel)
+
 	_ = ctx
-	return msg
+	return ""
 }
 
 func (s *KiroGatewayService) buildClient(ctx context.Context, account *Account) (*kiro.Client, error) {
@@ -411,4 +439,13 @@ func kiroErrorBody(status int, message string) []byte {
 		return []byte(`{"type":"error","error":{"type":"api_error","message":"Kiro upstream request failed"}}`)
 	}
 	return body
+}
+
+// NewTestClient 为后台「测试连接」构造一个上游客户端。
+//
+// 刻意复用 buildClient 这条生产路径：token provider（含刷新链）、
+// 「配置了代理但代理缺失即硬失败」这条红线、超时设置全都一致。
+// 另起一套测试专用逻辑的话，测过了也不能说明生产路径能走通。
+func (s *KiroGatewayService) NewTestClient(ctx context.Context, account *Account) (*kiro.Client, error) {
+	return s.buildClient(ctx, account)
 }

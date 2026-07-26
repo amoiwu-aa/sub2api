@@ -92,9 +92,12 @@ func TestCatalogCacheSingleFlight(t *testing.T) {
 		go func() { defer wg.Done(); c.Get(kiroCatalogAccount(7), fetch) }()
 	}
 	wg.Wait()
-	close(release)
 
+	// Get 是非阻塞的，返回时后台 goroutine 可能还没进到 fetch。
+	// 先等第一次拉取真正开始，再断言没有第二次——直接断言会有竞态。
+	waitFor(t, func() bool { return atomic.LoadInt32(&calls) >= 1 })
 	require.EqualValues(t, 1, atomic.LoadInt32(&calls), "并发只应触发一次拉取")
+	close(release)
 }
 
 // TestCatalogCachePerAccount 目录随账号等级变化，不能全局共用一份。
