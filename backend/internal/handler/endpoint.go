@@ -214,6 +214,12 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 			return EndpointGeminiModels
 		}
 		return EndpointMessages
+
+	case service.PlatformCursor, service.PlatformKiro:
+		// 这两个平台不转发到某个 REST 上游路径：cursor 走 AgentService/Run 的
+		// HTTP/2 双向流，kiro 走 Q GenerateAssistantResponse。上游请求由各自的
+		// 桥自行构造，这里保留入站端点仅用于日志与统计归类。
+		return inbound
 	}
 
 	// Unknown platform — fall back to inbound.

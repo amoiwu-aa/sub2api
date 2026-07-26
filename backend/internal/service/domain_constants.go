@@ -43,18 +43,26 @@ const (
 	PlatformGemini      = domain.PlatformGemini
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformGrok        = domain.PlatformGrok
+	PlatformCursor      = domain.PlatformCursor
+	PlatformKiro        = domain.PlatformKiro
 	PlatformComposite   = domain.PlatformComposite
 )
 
 // AllowedQuotaPlatforms 是允许设置 user × platform quota 的平台列表（单一权威来源）。
 // ent/schema/user_platform_quota.go 的 Validate 函数独立维护（构建期约束），
 // 若新增平台需同步修改该 schema。
+//
+// USD 限额只有在该平台的 usage 成本非 0 时才真正生效：
+// kiro 复用 anthropic 的 LiteLLM 价格；cursor 上游不返回 token 用量，
+// 其计费口径见 handler/admin/channel_handler.go 的 platform→provider 映射。
 var AllowedQuotaPlatforms = []string{
 	PlatformAnthropic,
 	PlatformOpenAI,
 	PlatformGemini,
 	PlatformAntigravity,
 	PlatformGrok,
+	PlatformCursor,
+	PlatformKiro,
 }
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。

@@ -22,7 +22,11 @@
                     ? 'from-purple-500 to-purple-600'
                     : isGrok
                       ? 'from-zinc-700 to-zinc-900'
-                      : 'from-orange-500 to-orange-600'
+                      : isCursor
+                        ? 'from-slate-600 to-slate-800'
+                        : isKiro
+                          ? 'from-teal-500 to-teal-600'
+                          : 'from-orange-500 to-orange-600'
             ]"
           >
             <Icon name="sparkles" size="md" class="text-white" />
@@ -41,7 +45,11 @@
                       ? t('admin.accounts.antigravityAccount')
                       : isGrok
                         ? t('admin.accounts.grokAccount')
-                        : t('admin.accounts.claudeCodeAccount')
+                        : isCursor
+                          ? t('admin.accounts.platforms.cursor')
+                          : isKiro
+                            ? t('admin.accounts.platforms.kiro')
+                            : t('admin.accounts.claudeCodeAccount')
               }}
             </span>
           </div>
@@ -248,6 +256,12 @@ const isGemini = computed(() => props.account?.platform === 'gemini')
 const isAnthropic = computed(() => props.account?.platform === 'anthropic')
 const isAntigravity = computed(() => props.account?.platform === 'antigravity')
 const isGrok = computed(() => props.account?.platform === 'grok')
+// cursor/kiro 没有 Anthropic 式的「授权 URL + 交换 code」流程：cursor 是浏览器
+// PKCE 登录后轮询，kiro 是粘贴本机 token JSON。二者都在建号弹窗里完成，
+// 这里只负责识别出它们并挡住兜底分支——否则会拿 Claude 的 token 覆盖掉凭证。
+const isCursor = computed(() => props.account?.platform === 'cursor')
+const isKiro = computed(() => props.account?.platform === 'kiro')
+const isNativeBridge = computed(() => isCursor.value || isKiro.value)
 
 // Computed - current OAuth state based on platform
 const currentAuthUrl = computed(() => {
@@ -349,6 +363,10 @@ const handleGenerateUrl = async () => {
     await antigravityOAuth.generateAuthUrl(props.account.proxy_id)
   } else if (isGrok.value) {
     await grokOAuth.generateAuthUrl(props.account.proxy_id)
+  } else if (isNativeBridge.value) {
+    // 兜底走 Claude 流程会把 Anthropic 的 token 写进 cursor/kiro 账号，
+    // 凭证直接报废。宁可明确拒绝，也不要默默换错平台。
+    appStore.showError(t('admin.accounts.reAuthUnsupportedPlatform'))
   } else {
     await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id)
   }
@@ -496,6 +514,9 @@ const handleExchangeCode = async () => {
       grokOAuth.error.value = error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
       appStore.showError(grokOAuth.error.value)
     }
+  } else if (isNativeBridge.value) {
+    // 见 handleGenerateUrl：这两个平台不参与 Anthropic 的 code 交换。
+    appStore.showError(t('admin.accounts.reAuthUnsupportedPlatform'))
   } else {
     // Claude OAuth flow
     const sessionId = claudeOAuth.sessionId.value

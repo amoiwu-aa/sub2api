@@ -85,6 +85,15 @@ type TokenRefreshService struct {
 	attemptTimeoutOverride time.Duration
 }
 
+// TokenRefreshProviders 携带那些不是每个调用点都需要构造的平台服务。
+// 用具名结构体而不是继续加位置参数，是为了让新增平台时「忘了注册刷新器」
+// 这个静默故障变成一处可见的、必须显式赋值的字段。
+type TokenRefreshProviders struct {
+	Grok   *GrokOAuthService
+	Kiro   *KiroOAuthService
+	Cursor *CursorOAuthService
+}
+
 // NewTokenRefreshService 创建token刷新服务
 func NewTokenRefreshService(
 	accountRepo AccountRepository,
@@ -96,7 +105,7 @@ func NewTokenRefreshService(
 	schedulerCache SchedulerCache,
 	cfg *config.Config,
 	tempUnschedCache TempUnschedCache,
-	grokOAuthServices ...*GrokOAuthService,
+	providers ...TokenRefreshProviders,
 ) *TokenRefreshService {
 	refreshCfg := &config.TokenRefreshConfig{}
 	if cfg != nil {
@@ -123,11 +132,13 @@ func NewTokenRefreshService(
 	claudeRefresher := NewClaudeTokenRefresher(oauthService)
 	geminiRefresher := NewGeminiTokenRefresher(geminiOAuthService)
 	agRefresher := NewAntigravityTokenRefresher(antigravityOAuthService)
-	var grokOAuthService *GrokOAuthService
-	if len(grokOAuthServices) > 0 {
-		grokOAuthService = grokOAuthServices[0]
+	var provided TokenRefreshProviders
+	if len(providers) > 0 {
+		provided = providers[0]
 	}
-	grokRefresher := NewGrokTokenRefresher(grokOAuthService)
+	grokRefresher := NewGrokTokenRefresher(provided.Grok)
+	kiroRefresher := NewKiroTokenRefresher(provided.Kiro)
+	cursorRefresher := NewCursorTokenRefresher(provided.Cursor)
 
 	// Each provider is registered exactly once. The same registry supplies both
 	// execution and repository eligibility, preventing future platform drift.
@@ -137,6 +148,8 @@ func NewTokenRefreshService(
 		{platform: PlatformGemini, refresher: geminiRefresher, executor: geminiRefresher},
 		{platform: PlatformAntigravity, refresher: agRefresher, executor: agRefresher},
 		{platform: PlatformGrok, refresher: grokRefresher, executor: grokRefresher},
+		{platform: PlatformKiro, refresher: kiroRefresher, executor: kiroRefresher},
+		{platform: PlatformCursor, refresher: cursorRefresher, executor: cursorRefresher},
 	}
 
 	return s

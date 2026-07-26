@@ -303,6 +303,8 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        cursor: 'Cursor',
+        kiro: 'Kiro',
       },
       types: {
         oauth: 'OAuth',
@@ -644,6 +646,30 @@ export default {
       grok: {
         baseUrlHint: 'Grok OAuth 账号会转发到官方 xAI API Base URL。',
         apiKeyHint: 'Grok 订阅支持使用 OAuth refresh token；API Key 账号不在本次范围内。'
+      },
+      kiro: {
+        intro: 'Kiro 没有可由服务端拉起的登录流程，请在本机登录 Kiro 后，把下面这个文件的内容整段粘贴进来：',
+        tokenJsonLabel: 'kiro-auth-token.json 内容',
+        clientRegistrationLabel: 'IdC 客户端注册',
+        clientRegistrationHint: '仅 IdC（企业版 / BuilderId）账号需要；服务器读不到本机 SSO 缓存，不填的话 token 过期后无法续期',
+        importAndCreate: '导入并创建',
+        importFailed: '导入 Kiro 凭证失败',
+      },
+      cursor: {
+        browserLogin: '浏览器登录',
+        pasteCookie: '粘贴 Cookie',
+        browserHint: '生成登录链接后在浏览器中打开并完成授权，本页会自动检测并建号。',
+        generateLoginUrl: '生成登录链接',
+        loginUrlLabel: '登录链接',
+        openInBrowser: '在浏览器打开',
+        waitingForLogin: '等待浏览器完成登录…',
+        pollStopped: '已停止等待，可重新生成登录链接。',
+        loginTimeout: '等待登录超时，请重新生成登录链接',
+        cookieHint: '从已登录 cursor.com 的浏览器里复制 WorkosCursorSessionToken，网页态令牌会自动换成 IDE 会话令牌。',
+        cookieLabel: 'WorkosCursorSessionToken 或 JWT',
+        teamIdLabel: '团队 ID',
+        importAndCreate: '导入并创建',
+        importFailed: '导入 Cursor 凭证失败',
       },
       anthropic: {
         apiKeyPassthrough: '自动透传（仅替换认证）',
@@ -1299,6 +1325,7 @@ export default {
       grokAccount: 'Grok 账号',
       inputMethod: '输入方式',
       reAuthorizedSuccess: '账号重新授权成功',
+      reAuthUnsupportedPlatform: '该平台不支持在此重新授权，请删除后通过「添加账号」重新导入凭证',
       // Test Modal
       testAccountConnection: '测试账号连接',
       account: '账号',

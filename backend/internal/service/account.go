@@ -257,6 +257,22 @@ func (a *Account) IsGrokOAuth() bool {
 	return a.IsGrok() && a.Type == AccountTypeOAuth
 }
 
+func (a *Account) IsCursor() bool {
+	return a.Platform == PlatformCursor
+}
+
+func (a *Account) IsCursorOAuth() bool {
+	return a.IsCursor() && a.Type == AccountTypeOAuth
+}
+
+func (a *Account) IsKiro() bool {
+	return a.Platform == PlatformKiro
+}
+
+func (a *Account) IsKiroOAuth() bool {
+	return a.IsKiro() && a.Type == AccountTypeOAuth
+}
+
 func (a *Account) IsOpenAICompatible() bool {
 	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok)
 }
@@ -1337,6 +1353,66 @@ func (a *Account) GetGrokRefreshToken() string {
 		return ""
 	}
 	return a.GetCredential("refresh_token")
+}
+
+func (a *Account) GetCursorAccessToken() string {
+	if !a.IsCursor() {
+		return ""
+	}
+	return a.GetCredential("access_token")
+}
+
+func (a *Account) GetCursorRefreshToken() string {
+	if !a.IsCursorOAuth() {
+		return ""
+	}
+	return a.GetCredential("refresh_token")
+}
+
+// CursorTokenCacheKey 是 cursor 账号 access token 的缓存键。
+func CursorTokenCacheKey(account *Account) string {
+	if account == nil {
+		return "cursor:account:0"
+	}
+	return "cursor:account:" + strconv.FormatInt(account.ID, 10)
+}
+
+func (a *Account) GetKiroAccessToken() string {
+	if !a.IsKiro() {
+		return ""
+	}
+	return a.GetCredential("access_token")
+}
+
+func (a *Account) GetKiroRefreshToken() string {
+	if !a.IsKiroOAuth() {
+		return ""
+	}
+	return a.GetCredential("refresh_token")
+}
+
+// GetKiroProfileArn 返回 Q API 必需的 profileArn；上游 region 由该 ARN 推导。
+func (a *Account) GetKiroProfileArn() string {
+	if !a.IsKiro() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetCredential("profile_arn"))
+}
+
+// GetKiroAuthMethod 返回 social / idc，决定走哪条刷新链。
+func (a *Account) GetKiroAuthMethod() string {
+	if !a.IsKiro() {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(a.GetCredential("auth_method")))
+}
+
+// KiroTokenCacheKey 是 kiro 账号 access token 的缓存键。
+func KiroTokenCacheKey(account *Account) string {
+	if account == nil {
+		return "kiro:account:0"
+	}
+	return "kiro:account:" + strconv.FormatInt(account.ID, 10)
 }
 
 func (a *Account) GetOpenAIIDToken() string {

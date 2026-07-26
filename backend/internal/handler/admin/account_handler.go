@@ -21,8 +21,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -1197,6 +1199,19 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	if account.IsCredentialShadow() {
 		return nil, "", infraerrors.BadRequest("SPARK_SHADOW_NO_REFRESH",
 			"cannot refresh spark shadow account; its credentials are managed by the parent account")
+	}
+
+	// 自有上游桥平台必须早拒，不能落到下面的 else。
+	//
+	// 这个函数末尾的兜底分支是 Anthropic 的 OAuth 刷新（h.oauthService），任何没有
+	// 显式分支的平台都会走到那里 —— 对 cursor/kiro 而言就是把它们的 refresh_token
+	// POST 到 Anthropic 的 token 端点，属于把凭证泄露给第三方，而且发生在「批量刷新」
+	// 这种日常操作上。这两个平台各有专属端点（/admin/{cursor,kiro}/accounts/:id/refresh），
+	// 前端已按平台分派，这里只做兜底防线。
+	if account.Platform == service.PlatformCursor || account.Platform == service.PlatformKiro {
+		return nil, "", infraerrors.BadRequest("PLATFORM_REFRESH_ENDPOINT_MISMATCH",
+			fmt.Sprintf("account platform %q must be refreshed through its dedicated endpoint "+
+				"(POST /api/v1/admin/%s/accounts/{id}/refresh)", account.Platform, account.Platform))
 	}
 
 	var newCredentials map[string]any
@@ -2503,6 +2518,18 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 			})
 		}
 		response.Success(c, models)
+		return
+	}
+
+	// cursor / kiro 有各自的内置模型目录，且模型名带命名空间前缀。
+	// 必须在下面的 Claude 兜底之前判掉，否则后台的模型下拉会列出一堆 Claude 名字，
+	// 管理员照着配进白名单后，调度期 IsModelSupported 一个都匹配不上。
+	switch account.Platform {
+	case service.PlatformCursor:
+		response.Success(c, cursor.DefaultModels())
+		return
+	case service.PlatformKiro:
+		response.Success(c, kiro.DefaultModels())
 		return
 	}
 

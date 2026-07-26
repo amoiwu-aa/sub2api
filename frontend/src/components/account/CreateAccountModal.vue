@@ -160,6 +160,32 @@
             <PlatformIcon platform="grok" size="sm" />
             Grok
           </button>
+          <button
+            type="button"
+            @click="form.platform = 'kiro'"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'kiro'
+                ? 'bg-white text-amber-600 shadow-sm dark:bg-dark-600 dark:text-amber-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="kiro" size="sm" />
+            Kiro
+          </button>
+          <button
+            type="button"
+            @click="form.platform = 'cursor'"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'cursor'
+                ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="cursor" size="sm" />
+            Cursor
+          </button>
         </div>
       </div>
 
@@ -3146,6 +3172,144 @@
 
     </form>
 
+    <!-- Step 2: Kiro credential paste.
+         Kiro has no server-initiated OAuth flow (neither does the reverse proxy),
+         so operators paste the token file that Kiro wrote on their own machine. -->
+    <div v-else-if="form.platform === 'kiro'" class="space-y-5">
+      <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+        <p class="text-sm text-amber-800 dark:text-amber-300">
+          {{ t('admin.accounts.kiro.intro') }}
+        </p>
+        <code class="mt-2 block text-xs text-amber-700 dark:text-amber-400">
+          ~/.aws/sso/cache/kiro-auth-token.json
+        </code>
+      </div>
+
+      <div>
+        <label class="input-label">{{ t('admin.accounts.kiro.tokenJsonLabel') }}</label>
+        <textarea
+          v-model="kiroTokenJson"
+          rows="9"
+          spellcheck="false"
+          class="input mt-1 font-mono text-xs"
+          :placeholder="kiroTokenJsonPlaceholder"
+        ></textarea>
+      </div>
+
+      <div>
+        <label class="input-label">
+          {{ t('admin.accounts.kiro.clientRegistrationLabel') }}
+          <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.kiro.clientRegistrationHint') }}
+          </span>
+        </label>
+        <textarea
+          v-model="kiroClientRegistrationJson"
+          rows="4"
+          spellcheck="false"
+          class="input mt-1 font-mono text-xs"
+          placeholder='{"clientId": "...", "clientSecret": "..."}'
+        ></textarea>
+      </div>
+
+      <p v-if="kiroImportError" class="text-sm text-red-600 dark:text-red-400">
+        {{ kiroImportError }}
+      </p>
+    </div>
+
+    <!-- Step 2: Cursor login.
+         Two paths to the same place — a browser PKCE login we poll for, or an
+         existing cookie. Either way the result must be a type=session JWT;
+         a type=web token is rejected by the Agent. -->
+    <div v-else-if="form.platform === 'cursor'" class="space-y-5">
+      <div class="flex gap-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-700">
+        <button
+          type="button"
+          @click="cursorAuthMode = 'browser'"
+          :class="[
+            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
+            cursorAuthMode === 'browser'
+              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
+              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+          ]"
+        >
+          {{ t('admin.accounts.cursor.browserLogin') }}
+        </button>
+        <button
+          type="button"
+          @click="cursorAuthMode = 'cookie'"
+          :class="[
+            'flex-1 rounded-md px-4 py-2 text-sm font-medium transition-all',
+            cursorAuthMode === 'cookie'
+              ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
+              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+          ]"
+        >
+          {{ t('admin.accounts.cursor.pasteCookie') }}
+        </button>
+      </div>
+
+      <div v-if="cursorAuthMode === 'browser'" class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.accounts.cursor.browserHint') }}
+        </p>
+        <button
+          v-if="!cursorLoginUrl"
+          type="button"
+          class="btn btn-secondary w-full"
+          :disabled="cursorBusy"
+          @click="handleCursorStartLogin"
+        >
+          {{ t('admin.accounts.cursor.generateLoginUrl') }}
+        </button>
+        <template v-else>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cursor.loginUrlLabel') }}</label>
+            <div class="mt-1 flex gap-2">
+              <input :value="cursorLoginUrl" readonly class="input flex-1 font-mono text-xs" />
+              <a :href="cursorLoginUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary shrink-0">
+                {{ t('admin.accounts.cursor.openInBrowser') }}
+              </a>
+            </div>
+          </div>
+          <p class="text-sm text-indigo-600 dark:text-indigo-400">
+            {{
+              cursorPolling
+                ? t('admin.accounts.cursor.waitingForLogin')
+                : t('admin.accounts.cursor.pollStopped')
+            }}
+          </p>
+        </template>
+      </div>
+
+      <div v-else class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.accounts.cursor.cookieHint') }}
+        </p>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.cursor.cookieLabel') }}</label>
+          <textarea
+            v-model="cursorCookie"
+            rows="4"
+            spellcheck="false"
+            class="input mt-1 font-mono text-xs"
+            placeholder="WorkosCursorSessionToken=user_01...::eyJ..."
+          ></textarea>
+        </div>
+        <div>
+          <label class="input-label">
+            {{ t('admin.accounts.cursor.teamIdLabel') }}
+            <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+              {{ t('common.optional') }}
+            </span>
+          </label>
+          <input v-model="cursorSelectedTeamId" class="input mt-1" />
+        </div>
+      </div>
+
+      <p v-if="cursorError" class="text-sm text-red-600 dark:text-red-400">{{ cursorError }}</p>
+    </div>
+
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
       <OAuthAuthorizationFlow
@@ -3229,7 +3393,41 @@
           {{ t('common.back') }}
         </button>
         <button
-          v-if="isManualInputMethod"
+          v-if="form.platform === 'cursor' && cursorAuthMode === 'cookie'"
+          type="button"
+          :disabled="cursorBusy || !cursorCookie.trim()"
+          class="btn btn-primary"
+          @click="handleCursorImport"
+        >
+          <svg v-if="cursorBusy" class="-ml-1 mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
+          </svg>
+          {{ cursorBusy ? t('admin.accounts.oauth.verifying') : t('admin.accounts.cursor.importAndCreate') }}
+        </button>
+        <button
+          v-else-if="form.platform === 'kiro'"
+          type="button"
+          :disabled="kiroImporting || !kiroTokenJson.trim()"
+          class="btn btn-primary"
+          @click="handleKiroImport"
+        >
+          <svg v-if="kiroImporting" class="-ml-1 mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
+          </svg>
+          {{ kiroImporting ? t('admin.accounts.oauth.verifying') : t('admin.accounts.kiro.importAndCreate') }}
+        </button>
+        <button
+          v-else-if="isManualInputMethod"
           type="button"
           :disabled="!canExchangeCode"
           class="btn btn-primary"
@@ -3496,7 +3694,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import {
@@ -4086,6 +4284,163 @@ const isOAuthFlow = computed(() => {
 
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
 
+// ── Kiro：粘贴式建号 ──────────────────────────────────────────────
+const kiroTokenJson = ref('')
+const kiroClientRegistrationJson = ref('')
+const kiroImporting = ref(false)
+const kiroImportError = ref('')
+
+const kiroTokenJsonPlaceholder = `{
+  "accessToken": "...",
+  "refreshToken": "...",
+  "expiresAt": "2026-01-01T00:00:00.000Z",
+  "authMethod": "Social",
+  "profileArn": "arn:aws:codewhisperer:us-east-1:...:profile/...",
+  "provider": "Google"
+}`
+
+const resetKiroImportState = () => {
+  kiroTokenJson.value = ''
+  kiroClientRegistrationJson.value = ''
+  kiroImportError.value = ''
+  kiroImporting.value = false
+}
+
+// ── Cursor：浏览器 PKCE 登录 / 粘贴 Cookie ─────────────────────────
+const cursorAuthMode = ref<'browser' | 'cookie'>('browser')
+const cursorLoginUrl = ref('')
+const cursorSessionId = ref('')
+const cursorCookie = ref('')
+const cursorSelectedTeamId = ref('')
+const cursorBusy = ref(false)
+const cursorError = ref('')
+const cursorPolling = ref(false)
+let cursorPollTimer: ReturnType<typeof setTimeout> | null = null
+
+const CURSOR_POLL_INTERVAL_MS = 1500
+// 服务端的登录会话 15 分钟过期，客户端比它先停，避免一直问一个已经不存在的会话。
+const CURSOR_POLL_MAX_ATTEMPTS = 400
+
+const stopCursorPolling = () => {
+  if (cursorPollTimer) {
+    clearTimeout(cursorPollTimer)
+    cursorPollTimer = null
+  }
+  cursorPolling.value = false
+}
+
+const resetCursorState = () => {
+  stopCursorPolling()
+  cursorAuthMode.value = 'browser'
+  cursorLoginUrl.value = ''
+  cursorSessionId.value = ''
+  cursorCookie.value = ''
+  cursorSelectedTeamId.value = ''
+  cursorError.value = ''
+  cursorBusy.value = false
+}
+
+const handleCursorStartLogin = async () => {
+  cursorBusy.value = true
+  cursorError.value = ''
+  try {
+    const result = await adminAPI.cursor.startLogin({ proxy_id: form.proxy_id })
+    cursorLoginUrl.value = result.login_url
+    cursorSessionId.value = result.session_id
+    // 浏览器登录没有回调地址可用，只能由前端轮询服务端的会话状态。
+    startCursorPolling()
+  } catch (error: any) {
+    cursorError.value =
+      error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    appStore.showError(cursorError.value)
+  } finally {
+    cursorBusy.value = false
+  }
+}
+
+const startCursorPolling = () => {
+  stopCursorPolling()
+  cursorPolling.value = true
+  let attempts = 0
+
+  const tick = async () => {
+    if (!cursorPolling.value || !cursorSessionId.value) return
+    attempts++
+    if (attempts > CURSOR_POLL_MAX_ATTEMPTS) {
+      stopCursorPolling()
+      cursorError.value = t('admin.accounts.cursor.loginTimeout')
+      return
+    }
+    try {
+      const result = await adminAPI.cursor.pollLogin(cursorSessionId.value)
+      if (result.pending) {
+        cursorPollTimer = setTimeout(tick, CURSOR_POLL_INTERVAL_MS)
+        return
+      }
+      stopCursorPolling()
+      if (result.credentials) {
+        await createAccountAndFinish('cursor', 'oauth', { ...result.credentials })
+      }
+    } catch (error: any) {
+      stopCursorPolling()
+      cursorError.value =
+        error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+      appStore.showError(cursorError.value)
+    }
+  }
+
+  cursorPollTimer = setTimeout(tick, CURSOR_POLL_INTERVAL_MS)
+}
+
+const handleCursorImport = async () => {
+  if (!cursorCookie.value.trim() || cursorBusy.value) return
+
+  cursorBusy.value = true
+  cursorError.value = ''
+  try {
+    // 后端会把 web 态令牌换成 session 态；Agent 只认后者。
+    const result = await adminAPI.cursor.importToken({
+      token: cursorCookie.value,
+      proxy_id: form.proxy_id,
+      selected_team_id: cursorSelectedTeamId.value.trim() || undefined
+    })
+    await createAccountAndFinish('cursor', 'oauth', { ...result.credentials })
+  } catch (error: any) {
+    cursorError.value =
+      error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.cursor.importFailed')
+    appStore.showError(cursorError.value)
+  } finally {
+    cursorBusy.value = false
+  }
+}
+
+// 组件被销毁时定时器还在跑的话，会持续打后端并持有已经无效的表单引用。
+onBeforeUnmount(stopCursorPolling)
+
+const handleKiroImport = async () => {
+  if (!kiroTokenJson.value.trim() || kiroImporting.value) return
+
+  kiroImporting.value = true
+  kiroImportError.value = ''
+  try {
+    // 后端会顺带跑一次真实刷新来验证凭证，所以这里拿到的 credentials 一定可用。
+    const result = await adminAPI.kiro.importToken({
+      token_json: kiroTokenJson.value,
+      client_registration_json: kiroClientRegistrationJson.value.trim() || undefined,
+      proxy_id: form.proxy_id
+    })
+    await createAccountAndFinish('kiro', 'oauth', { ...result.credentials })
+  } catch (error: any) {
+    kiroImportError.value =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      t('admin.accounts.kiro.importFailed')
+    appStore.showError(kiroImportError.value)
+  } finally {
+    kiroImporting.value = false
+  }
+}
+
 const isManualInputMethod = computed(() => {
   return oauthFlowRef.value?.inputMethod === 'manual'
 })
@@ -4207,6 +4562,18 @@ watch(
       form.concurrency = 1
       form.load_factor = null
     }
+    if (newPlatform === 'kiro' || newPlatform === 'cursor') {
+      // 两者都只有 OAuth 一种账号类型。
+      accountCategory.value = 'oauth-based'
+      addMethod.value = 'oauth'
+    }
+    if (newPlatform === 'cursor') {
+      // Agent 的 Run 是长连的 HTTP/2 双向流会话，单账号并跑多路容易被风控。
+      form.concurrency = 1
+      form.load_factor = null
+    }
+    resetKiroImportState()
+    resetCursorState()
     if (newPlatform !== 'gemini' && newPlatform !== 'anthropic' && accountCategory.value === 'service_account') {
       accountCategory.value = 'oauth-based'
     }
@@ -4715,6 +5082,9 @@ const resetForm = () => {
 const handleClose = () => {
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
+  // 粘贴的 token 是明文长期凭证，关掉弹窗就不要留在内存里。
+  resetKiroImportState()
+  resetCursorState()
   emit('close')
 }
 
@@ -5136,6 +5506,8 @@ const goBackToBasicInfo = () => {
   geminiOAuth.resetState()
   antigravityOAuth.resetState()
   grokOAuth.resetState()
+  // 退回第一步必须停掉轮询，否则登录完成时会往一个已经不在的表单里建号。
+  resetCursorState()
   oauthFlowRef.value?.reset()
 }
 

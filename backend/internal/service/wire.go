@@ -75,6 +75,8 @@ func ProvideTokenRefreshService(
 	geminiOAuthService *GeminiOAuthService,
 	antigravityOAuthService *AntigravityOAuthService,
 	grokOAuthService *GrokOAuthService,
+	kiroOAuthService *KiroOAuthService,
+	cursorOAuthService *CursorOAuthService,
 	cacheInvalidator TokenCacheInvalidator,
 	schedulerCache SchedulerCache,
 	cfg *config.Config,
@@ -84,7 +86,11 @@ func ProvideTokenRefreshService(
 	refreshAPI *OAuthRefreshAPI,
 	runtimeBlocker AccountRuntimeBlocker,
 ) *TokenRefreshService {
-	svc := NewTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthService)
+	svc := NewTokenRefreshService(
+		accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService,
+		cacheInvalidator, schedulerCache, cfg, tempUnschedCache,
+		TokenRefreshProviders{Grok: grokOAuthService, Kiro: kiroOAuthService, Cursor: cursorOAuthService},
+	)
 	// 注入 OpenAI privacy opt-out 依赖
 	svc.SetPrivacyDeps(privacyClientFactory, proxyRepo)
 	// 注入统一 OAuth 刷新 API（消除 TokenRefreshService 与 TokenProvider 之间的竞争条件）
@@ -248,6 +254,33 @@ func ProvideGrokTokenProvider(
 	executor := NewGrokTokenRefresher(grokOAuthService)
 	p.SetRefreshAPI(refreshAPI, executor)
 	p.SetRefreshPolicy(GrokProviderRefreshPolicy())
+	p.SetTempUnschedCache(tempUnschedCache)
+	return p
+}
+
+func ProvideKiroTokenProvider(
+	accountRepo AccountRepository,
+	tokenCache GeminiTokenCache,
+	kiroOAuthService *KiroOAuthService,
+	refreshAPI *OAuthRefreshAPI,
+	tempUnschedCache TempUnschedCache,
+) *KiroTokenProvider {
+	p := NewKiroTokenProvider(accountRepo, tokenCache)
+	// 与后台刷新共用同一个 refresher，保证请求路径与巡检路径的刷新语义一致。
+	p.SetRefreshAPI(refreshAPI, NewKiroTokenRefresher(kiroOAuthService))
+	p.SetTempUnschedCache(tempUnschedCache)
+	return p
+}
+
+func ProvideCursorTokenProvider(
+	accountRepo AccountRepository,
+	tokenCache GeminiTokenCache,
+	cursorOAuthService *CursorOAuthService,
+	refreshAPI *OAuthRefreshAPI,
+	tempUnschedCache TempUnschedCache,
+) *CursorTokenProvider {
+	p := NewCursorTokenProvider(accountRepo, tokenCache)
+	p.SetRefreshAPI(refreshAPI, NewCursorTokenRefresher(cursorOAuthService))
 	p.SetTempUnschedCache(tempUnschedCache)
 	return p
 }
@@ -707,6 +740,8 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAIOAuthService,
 	NewGrokOAuthService,
 	wire.Bind(new(GrokOAuthTokenService), new(*GrokOAuthService)),
+	NewKiroOAuthService,
+	NewCursorOAuthService,
 	NewGeminiOAuthService,
 	NewGeminiQuotaService,
 	NewCompositeTokenCacheInvalidator,
@@ -717,6 +752,10 @@ var ProviderSet = wire.NewSet(
 	NewGeminiMessagesCompatService,
 	ProvideAntigravityTokenProvider,
 	ProvideGrokTokenProvider,
+	ProvideKiroTokenProvider,
+	ProvideCursorTokenProvider,
+	NewKiroGatewayService,
+	NewCursorGatewayService,
 	ProvideOpenAITokenProvider,
 	ProvideOpenAIQuotaService,
 	ProvideGrokQuotaService,

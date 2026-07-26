@@ -162,6 +162,12 @@ const labelClass = computed(() => {
   if (props.platform === 'grok') {
     return `${base} bg-zinc-300/70 text-zinc-800 dark:bg-zinc-700/60 dark:text-zinc-200`
   }
+  if (props.platform === 'cursor') {
+    return `${base} bg-indigo-200/60 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-300`
+  }
+  if (props.platform === 'kiro') {
+    return `${base} bg-amber-200/60 text-amber-800 dark:bg-amber-800/40 dark:text-amber-300`
+  }
   if (props.platform === 'composite') {
     return `${base} bg-cyan-200/70 text-cyan-900 dark:bg-cyan-900/50 dark:text-cyan-300`
   }
@@ -199,6 +205,16 @@ const badgeClass = computed(() => {
     return isSubscription.value
       ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
       : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200'
+  }
+  if (props.platform === 'cursor') {
+    return isSubscription.value
+      ? 'bg-indigo-200 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300'
+      : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400'
+  }
+  if (props.platform === 'kiro') {
+    return isSubscription.value
+      ? 'bg-amber-200 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
   }
   if (props.platform === 'composite') {
     return isSubscription.value

@@ -160,6 +160,29 @@ const xaiModels = [
   'grok-imagine-video-1.5'
 ]
 
+// Kiro (Amazon Q Developer)
+// 对外一律带 kiro/ 前缀：上游模型就是 Claude 原名，不加前缀会被 composite
+// 分组的模型名推断判成 anthropic 而调度到 Claude 账号池。
+const kiroModels = [
+  'kiro/auto',
+  'kiro/claude-sonnet-4.6',
+  'kiro/claude-sonnet-4.5',
+  'kiro/claude-opus-4.6',
+  'kiro/claude-haiku-4.5'
+]
+
+// Cursor
+const cursorModels = [
+  'cursor/default',
+  'cursor/claude-fable-5',
+  'cursor/claude-opus-4-8',
+  'cursor/claude-sonnet-5',
+  'cursor/gpt-5.6-sol',
+  'cursor/gpt-5.6-terra',
+  'cursor/grok-4.5',
+  'cursor/composer-2.5'
+]
+
 // Cohere
 const cohereModels = [
   'command-a-03-2025',
@@ -240,6 +263,8 @@ const allModelsList: string[] = [
   ...mistralModels,
   ...metaModels,
   ...xaiModels,
+  ...kiroModels,
+  ...cursorModels,
   ...cohereModels,
   ...yiModels,
   ...moonshotModels,
@@ -423,6 +448,8 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'meta': return metaModels
     case 'xai':
     case 'grok': return xaiModels
+    case 'kiro': return kiroModels
+    case 'cursor': return cursorModels
     case 'cohere': return cohereModels
     case 'yi': return yiModels
     case 'moonshot': return moonshotModels

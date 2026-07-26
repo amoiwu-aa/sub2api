@@ -106,6 +106,13 @@ func DetectModelPlatform(model string) (string, bool) {
 			return PlatformGemini, true
 		case "xai", "x-ai", "grok":
 			return PlatformGrok, true
+		case "kiro":
+			// kiro 与 cursor 转发的上游模型就是 Claude / GPT 原名，
+			// 必须靠显式前缀区分，否则会被下面的 claude-/gpt- 分支判成
+			// anthropic/openai 而调度到错误的账号池。
+			return PlatformKiro, true
+		case "cursor":
+			return PlatformCursor, true
 		}
 		if rest != "" {
 			normalized = strings.TrimPrefix(rest, "models/")
@@ -179,7 +186,8 @@ func (s *GatewayService) resolveCompositeRouteDecision(ctx context.Context, grou
 
 func isConcreteRequestPlatform(platform string) bool {
 	switch platform {
-	case PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok:
+	case PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok,
+		PlatformCursor, PlatformKiro:
 		return true
 	default:
 		return false

@@ -54,6 +54,12 @@ func RegisterAdminRoutes(
 		// Grok OAuth
 		registerGrokOAuthRoutes(admin, h)
 
+		// Kiro（粘贴式导入，无服务端 OAuth 流程）
+		registerKiroRoutes(admin, h)
+
+		// Cursor（浏览器 PKCE 登录 + 粘贴 Cookie）
+		registerCursorRoutes(admin, h)
+
 		// 代理管理
 		registerProxyRoutes(admin, h, stepUpAuth)
 
@@ -468,6 +474,24 @@ func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		grok.GET("/accounts/:id/quota", h.Admin.GrokOAuth.QueryQuota)
 		grok.POST("/accounts/:id/reset-quota", h.Admin.GrokOAuth.ResetQuota)
 		grok.GET("/runtime-sanity", h.Admin.GrokOAuth.RuntimeSanity)
+	}
+}
+
+func registerKiroRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	kiro := admin.Group("/kiro")
+	{
+		kiro.POST("/import", h.Admin.Kiro.Import)
+		kiro.POST("/accounts/:id/refresh", h.Admin.Kiro.RefreshAccountToken)
+	}
+}
+
+func registerCursorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	cursor := admin.Group("/cursor")
+	{
+		cursor.POST("/oauth/start", h.Admin.Cursor.StartLogin)
+		cursor.POST("/oauth/poll", h.Admin.Cursor.PollLogin)
+		cursor.POST("/import", h.Admin.Cursor.Import)
+		cursor.POST("/accounts/:id/refresh", h.Admin.Cursor.RefreshAccountToken)
 	}
 }
 

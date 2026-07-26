@@ -25,6 +25,11 @@ func TestDetectModelPlatform(t *testing.T) {
 		{name: "learnlm", model: "learnlm-2.0-flash-experimental", platform: PlatformGemini, ok: true},
 		{name: "grok", model: "grok-4", platform: PlatformGrok, ok: true},
 		{name: "xai prefix", model: "xai/grok-4", platform: PlatformGrok, ok: true},
+		{name: "kiro prefix", model: "kiro/claude-sonnet-4.6", platform: PlatformKiro, ok: true},
+		{name: "cursor prefix", model: "cursor/claude-opus-4-8", platform: PlatformCursor, ok: true},
+		{name: "cursor prefix over gpt name", model: "cursor/gpt-5.6-sol", platform: PlatformCursor, ok: true},
+		// 没有前缀就无法与官方 Claude 区分，必须继续判成 anthropic。
+		{name: "kiro model without prefix stays anthropic", model: "claude-sonnet-4.6", platform: PlatformAnthropic, ok: true},
 		{name: "unknown", model: "llama-4-maverick", ok: false},
 	}
 
@@ -59,7 +64,16 @@ func TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets(t *testing.T) {
 		platforms = append(platforms, platform)
 	}
 	require.ElementsMatch(t,
-		[]string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok},
+		[]string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformCursor, PlatformKiro},
 		platforms,
 	)
+}
+
+// 调度快照的平台数组是硬编码长度，这里锁死它与 isConcreteRequestPlatform 同源，
+// 避免新增平台时只改了一处导致该平台的账号永远进不了调度桶。
+func TestSchedulerSnapshotPlatformsCoverConcretePlatforms(t *testing.T) {
+	for _, platform := range schedulerSnapshotPlatforms() {
+		require.True(t, isConcreteRequestPlatform(platform), "platform %s must be a concrete request platform", platform)
+	}
+	require.Len(t, schedulerSnapshotPlatforms(), 7)
 }

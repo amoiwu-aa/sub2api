@@ -203,6 +203,12 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.routeAntigravityTest(c, account, modelID, prompt)
 	}
 
+	// 兜底分支打的是 Anthropic 上游。新平台若不在这里显式登记，后台「测试连接」
+	// 会拿着该平台的凭证去打 Claude API，得到一个和真实故障无关的 401。
+	if account.Platform == PlatformCursor || account.Platform == PlatformKiro {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("platform %s connection test is not implemented yet", account.Platform))
+	}
+
 	return s.testClaudeAccountConnection(c, account, modelID)
 }
 

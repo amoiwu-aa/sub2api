@@ -104,6 +104,8 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        cursor: 'Cursor',
+        kiro: 'Kiro',
       },
       types: {
         oauth: 'OAuth',
@@ -584,6 +586,30 @@ export default {
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',
         apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.'
+      },
+      kiro: {
+        intro: 'Kiro has no server-initiated login flow. Sign in to Kiro on your own machine, then paste the full contents of this file:',
+        tokenJsonLabel: 'kiro-auth-token.json contents',
+        clientRegistrationLabel: 'IdC client registration',
+        clientRegistrationHint: 'Required for IdC (Enterprise / BuilderId) accounts only. The server cannot read your local SSO cache, so without this the token cannot be renewed once it expires.',
+        importAndCreate: 'Import and create',
+        importFailed: 'Failed to import Kiro credentials',
+      },
+      cursor: {
+        browserLogin: 'Browser login',
+        pasteCookie: 'Paste cookie',
+        browserHint: 'Generate a login link, open it in your browser and authorize. This page detects completion and creates the account automatically.',
+        generateLoginUrl: 'Generate login link',
+        loginUrlLabel: 'Login link',
+        openInBrowser: 'Open in browser',
+        waitingForLogin: 'Waiting for the browser login to finish…',
+        pollStopped: 'Stopped waiting. Generate a new login link to retry.',
+        loginTimeout: 'Timed out waiting for login. Generate a new login link.',
+        cookieHint: 'Copy WorkosCursorSessionToken from a browser signed in to cursor.com. A web-scoped token is exchanged for an IDE session token automatically.',
+        cookieLabel: 'WorkosCursorSessionToken or JWT',
+        teamIdLabel: 'Team ID',
+        importAndCreate: 'Import and create',
+        importFailed: 'Failed to import Cursor credentials',
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',
@@ -1255,6 +1281,8 @@ export default {
       grokAccount: 'Grok Account',
       inputMethod: 'Input Method',
       reAuthorizedSuccess: 'Account re-authorized successfully',
+      reAuthUnsupportedPlatform:
+        'This platform cannot be re-authorized here. Remove the account and re-import its credentials from "Add account".',
       // Test Modal
       testAccountConnection: 'Test Account Connection',
       account: 'Account',

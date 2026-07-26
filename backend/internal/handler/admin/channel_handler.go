@@ -515,6 +515,16 @@ var platformToLiteLLMProvider = map[string]string{
 	service.PlatformGemini:      "google",
 	service.PlatformAntigravity: "anthropic",
 	service.PlatformGrok:        "xai",
+	// Kiro 转发的就是 Claude 模型，直接复用 anthropic 的价格表。
+	service.PlatformKiro: "anthropic",
+	// Cursor 是包月订阅，按 token 的"真实成本"并不存在；这里的价格只是
+	// 用量分摊的尺子。LiteLLM 里没有 cursor provider，映射到 anthropic 是
+	// 取其模型表里占比最高的那一类（Claude）作为近似。
+	//
+	// 上游不返回 token 用量，数值由 pkg/cursor.EstimateTokens 本地估算。
+	// 不给价格的话 usage_logs 成本恒为 0，user_platform_quotas 上的 USD
+	// 限额就成了一个静默失效的开关——那比一个近似的价格更糟。
+	service.PlatformCursor: "anthropic",
 }
 
 // SyncPricingModels 返回 LiteLLM 定价目录中指定平台的最新模型列表

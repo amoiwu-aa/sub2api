@@ -50,6 +50,12 @@ vi.mock('@/components/common/BaseDialog.vue', () => ({
 
 import UserPlatformQuotaModal from '../UserPlatformQuotaModal.vue'
 import type { UserSubscription } from '@/types'
+// 平台清单以 api/admin/settings 的单一权威来源为准（对齐后端 service.AllowedQuotaPlatforms），
+// 避免测试自己抄一份数字而在新增平台时漂移
+import { PLATFORM_QUOTA_PLATFORMS } from '@/api/admin/settings'
+
+/** 每个平台渲染日/周/月三个 limit 输入框 */
+const QUOTA_WINDOWS_PER_PLATFORM = 3
 
 function makeUser(overrides: { subscriptions?: UserSubscription[] } = {}) {
   return { id: 99, email: 'u@example.com', ...overrides } as any
@@ -79,14 +85,12 @@ describe('UserPlatformQuotaModal', () => {
     expect(apiMocks.getPlatformQuotas).toHaveBeenCalledWith(99)
   })
 
-  it('空数据渲染 5 个 platform 行', async () => {
+  it('空数据渲染全部 platform 行', async () => {
     const w = await mountAndOpen()
     const html = w.html()
-    expect(html).toContain('anthropic')
-    expect(html).toContain('openai')
-    expect(html).toContain('gemini')
-    expect(html).toContain('antigravity')
-    expect(html).toContain('grok')
+    for (const p of PLATFORM_QUOTA_PLATFORMS) {
+      expect(html).toContain(p)
+    }
   })
 
   it('已有数据正确填充 limit input', async () => {
@@ -98,13 +102,13 @@ describe('UserPlatformQuotaModal', () => {
     })
     const w = await mountAndOpen()
     const inputs = w.findAll('input[type=number]')
-    // 5 platforms × 3 windows = 15 inputs
-    expect(inputs.length).toBe(15)
+    // platforms × 日/周/月 三档
+    expect(inputs.length).toBe(PLATFORM_QUOTA_PLATFORMS.length * QUOTA_WINDOWS_PER_PLATFORM)
     // 第一个 input 是 anthropic.daily = 10
     expect((inputs[0].element as HTMLInputElement).value).toBe('10')
   })
 
-  it('保存提交完整 5 platform payload', async () => {
+  it('保存提交完整 platform payload', async () => {
     apiMocks.getPlatformQuotas.mockResolvedValueOnce({
       platform_quotas: [
         { platform: 'openai', daily_limit_usd: null, weekly_limit_usd: 20, monthly_limit_usd: null,
@@ -121,7 +125,9 @@ describe('UserPlatformQuotaModal', () => {
     expect(apiMocks.updatePlatformQuotas).toHaveBeenCalledTimes(1)
     const [uid, payload] = apiMocks.updatePlatformQuotas.mock.calls[0]
     expect(uid).toBe(99)
-    expect(payload).toHaveLength(5) // 5 platforms always submitted
+    // 全平台整体提交（后端为整体替换语义，少一个平台就会抹掉该平台的限额）
+    expect(payload).toHaveLength(PLATFORM_QUOTA_PLATFORMS.length)
+    expect(payload.map((p: any) => p.platform)).toEqual([...PLATFORM_QUOTA_PLATFORMS])
     const openai = payload.find((p: any) => p.platform === 'openai')
     expect(openai.weekly_limit_usd).toBe(20)
   })

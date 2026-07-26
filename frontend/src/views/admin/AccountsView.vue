@@ -501,6 +501,7 @@ import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vu
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
+import { requiresDedicatedTokenRefresh } from '@/components/account/credentialsBuilder'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
@@ -1508,14 +1509,54 @@ const handleBulkResetStatus = async () => {
     appStore.showError(String(error))
   }
 }
+/**
+ * 按平台派发 token 刷新。
+ * 通用 /admin/accounts/{id}/refresh 对未登记的平台会兜底走 Anthropic OAuth，
+ * 等于把 cursor/kiro 的 refresh_token 发到 Anthropic 的 token 端点，
+ * 因此这两个平台必须走各自的专属刷新接口。
+ */
+const refreshAccountCredentials = (account: Account): Promise<Account> => {
+  if (!requiresDedicatedTokenRefresh(account.platform)) {
+    return adminAPI.accounts.refreshCredentials(account.id)
+  }
+  return account.platform === 'cursor'
+    ? adminAPI.cursor.refreshAccountToken(account.id)
+    : adminAPI.kiro.refreshAccountToken(account.id)
+}
 const handleBulkRefreshToken = async () => {
   if (!confirm(t('common.confirm'))) return
   try {
-    const result = await adminAPI.accounts.batchRefresh(selIds.value)
-    if (result.failed > 0) {
-      appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success: result.success, failed: result.failed }))
+    // 按平台切分：cursor/kiro 逐个走专属端点，其余仍走批量端点。
+    // 当前页解析不到的选中项（跨页选择）沿用批量端点，与 selPlatforms 的口径一致。
+    const dedicated = accounts.value.filter(
+      account => isSelected(account.id) && requiresDedicatedTokenRefresh(account.platform)
+    )
+    const dedicatedIds = new Set(dedicated.map(account => account.id))
+    const genericIds = selIds.value.filter(id => !dedicatedIds.has(id))
+
+    let success = 0
+    let failed = 0
+    if (genericIds.length > 0) {
+      const result = await adminAPI.accounts.batchRefresh(genericIds)
+      success += result.success
+      failed += result.failed
+    }
+    if (dedicated.length > 0) {
+      const results = await Promise.allSettled(dedicated.map(refreshAccountCredentials))
+      for (const item of results) {
+        if (item.status === 'fulfilled') {
+          success++
+        } else {
+          failed++
+          console.error('Failed to refresh credentials:', item.reason)
+        }
+      }
+    }
+
+    if (failed > 0) {
+      appStore.showError(t('admin.accounts.bulkActions.partialSuccess', { success, failed }))
     } else {
-      appStore.showSuccess(t('admin.accounts.bulkActions.refreshTokenSuccess', { count: result.success }))
+      appStore.showSuccess(t('admin.accounts.bulkActions.refreshTokenSuccess', { count: success }))
       clearSelection()
     }
     reload()
@@ -1927,7 +1968,7 @@ const handleDuplicateAccount = async (a: Account) => {
 }
 const handleRefresh = async (a: Account) => {
   try {
-    const updated = await adminAPI.accounts.refreshCredentials(a.id)
+    const updated = await refreshAccountCredentials(a)
     patchAccountInList(updated)
     enterAutoRefreshSilentWindow()
   } catch (error) {

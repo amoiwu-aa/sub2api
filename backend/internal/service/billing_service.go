@@ -777,10 +777,48 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	return nil
 }
 
+// namespacedPricingPrefixes 是自有上游桥平台的模型命名空间前缀。
+//
+// cursor / kiro 的对外模型名一律带前缀（cursor/claude-sonnet-5、kiro/claude-sonnet-4.6），
+// 这是刻意的：composite 分组用 DetectModelPlatform 按模型名前缀反推平台，不加命名空间
+// 会把 kiro 的 claude-* 判成 anthropic 而调度到 Claude 账号池。
+var namespacedPricingPrefixes = []string{"cursor/", "kiro/"}
+
+// autoModelPricingAlias 是两个平台"自动选模"别名的计价锚点。
+//
+// 上游都不告诉我们 Auto 最终选了哪个模型，任何价目表里也不会有 default/auto 条目。
+// 锚到 Sonnet 与 channel_handler.go 把这两个平台映射到 anthropic provider 出于同一
+// 理由：这两家都是订阅制，按 token 的"真实成本"本就不存在，价格只是分摊用量的尺子。
+// 留空的代价要大得多——成本记 0 会让 user_platform_quotas 上的 USD 限额变成一个
+// 静默失效的开关。
+const autoModelPricingAlias = "claude-sonnet-4"
+
+// normalizeNamespacedPricingModel 剥掉 cursor/ kiro/ 前缀，返回计价目录认得的模型名。
+// 第二个返回值表示该模型确实属于某个自有桥平台——这类模型即便查不到价也不能记 0。
+func normalizeNamespacedPricingModel(modelLower string) (string, bool) {
+	for _, prefix := range namespacedPricingPrefixes {
+		rest, ok := strings.CutPrefix(modelLower, prefix)
+		if !ok {
+			continue
+		}
+		bare := strings.TrimSpace(rest)
+		switch bare {
+		case "", "default", "auto":
+			return autoModelPricingAlias, true
+		}
+		return bare, true
+	}
+	return modelLower, false
+}
+
 // GetModelPricing 获取模型价格配置
 func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	// 标准化模型名称（转小写）
 	model = strings.ToLower(model)
+
+	// 命名空间前缀必须在查价前剥掉：LiteLLM 目录与下面的 fallback 表都只认裸名，
+	// 带着 "kiro/" 去查一路查不到，最后 fail-closed 成本记 0。
+	model, namespaced := normalizeNamespacedPricingModel(model)
 
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {
@@ -830,6 +868,20 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 			log.Printf("[Billing] Using fallback pricing for model: %s", model)
 		}
 		return s.applyModelSpecificPricingPolicy(model, fallback), nil
+	}
+
+	// 3. cursor / kiro 兜底：这两个平台的模型表随上游变动（Cursor 的 composer-*、
+	// Kiro 的 ListAvailableModels 都可能冒出新名字），而它们又都是订阅制、上游不
+	// 返回单价。对其他平台 fail-closed 是对的——记 0 不如报错；但对这两个平台
+	// fail-closed 等于整条请求不计费，配额限额随之失效。锚到 Sonnet 至少让用量
+	// 按一把统一的尺子分摊。
+	if namespaced {
+		if anchor := s.fallbackPrices[autoModelPricingAlias]; anchor != nil {
+			if _, seen := s.fallbackWarnSeen.LoadOrStore("namespaced:"+model, struct{}{}); !seen {
+				log.Printf("[Billing] Unknown cursor/kiro model %q, billing at %s rates", model, autoModelPricingAlias)
+			}
+			return s.applyModelSpecificPricingPolicy(model, anchor), nil
+		}
 	}
 
 	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)

@@ -155,7 +155,24 @@ export default {
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
+        openaiCompatible: 'OpenAI 兼容',
         opencode: 'OpenCode'
+      },
+      cursor: {
+        description:
+          'Cursor 分组仅提供 OpenAI 兼容的 /v1/chat/completions 接口。请将以下环境变量配置到支持 OpenAI 兼容端点的客户端中。',
+        modelComment: '模型 id 必须带 cursor/ 前缀，cursor/default 即 Auto 档',
+        note: 'Cursor 不支持 Claude Code：/v1/messages 与 /v1/responses 都会返回 404。请使用 OpenAI 兼容客户端，并确保模型名带 cursor/ 前缀。'
+      },
+      kiro: {
+        description:
+          'Kiro 分组同时提供 OpenAI 兼容的 /v1/chat/completions 接口。请将以下环境变量配置到支持 OpenAI 兼容端点的客户端中。',
+        claudeDescription:
+          '配置 Claude Code，让 Messages API 请求通过当前 Kiro 分组发送。所有模型档位均已锁定到 kiro/claude-sonnet-4.6。',
+        modelComment: '模型 id 必须带 kiro/ 前缀，kiro/auto 为自动选择',
+        note: '这些环境变量将在当前终端会话中生效。请确保模型名带 kiro/ 前缀，否则上游会判为未知模型。',
+        claudeNote:
+          '二选一即可：终端命令仅在当前会话生效；保存 settings.json 可作为用户级持久配置。Kiro 的模型 id 带 kiro/ 前缀，因此必须锁定各档位模型。'
       },
       antigravity: {
         description: '为 Antigravity 分组配置 API 访问。请根据您使用的客户端选择对应的配置方式。',

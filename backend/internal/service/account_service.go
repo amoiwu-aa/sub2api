@@ -203,6 +203,20 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 	}
 }
 
+// groupPlatformEnforcesOAuthOnly 报告某平台的 require_oauth_only 分组是否拒收 apikey 账号。
+// 新增平台必须在这里登记，否则该平台的 OAuth-only 分组会静默失效。
+// 与 groupSupportsOAuthOnlyFilter 的区别：后者含 composite（用于后台筛选开关的可见性），
+// 这里只针对具体平台做准入校验。
+func groupPlatformEnforcesOAuthOnly(platform string) bool {
+	switch platform {
+	case PlatformOpenAI, PlatformAntigravity, PlatformAnthropic, PlatformGemini, PlatformGrok,
+		PlatformCursor, PlatformKiro:
+		return true
+	default:
+		return false
+	}
+}
+
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
 	// 验证分组是否存在（如果指定了分组）
@@ -243,7 +257,7 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 			if err != nil {
 				return nil, err
 			}
-			if g.RequireOAuthOnly && (g.Platform == PlatformOpenAI || g.Platform == PlatformAntigravity || g.Platform == PlatformAnthropic || g.Platform == PlatformGemini || g.Platform == PlatformGrok) {
+			if g.RequireOAuthOnly && groupPlatformEnforcesOAuthOnly(g.Platform) {
 				return nil, fmt.Errorf("分组 [%s] 仅允许 OAuth 账号，apikey 类型账号无法加入", g.Name)
 			}
 		}
@@ -366,7 +380,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 			if err != nil {
 				return nil, err
 			}
-			if g.RequireOAuthOnly && (g.Platform == PlatformOpenAI || g.Platform == PlatformAntigravity || g.Platform == PlatformAnthropic || g.Platform == PlatformGemini || g.Platform == PlatformGrok) {
+			if g.RequireOAuthOnly && groupPlatformEnforcesOAuthOnly(g.Platform) {
 				return nil, fmt.Errorf("分组 [%s] 仅允许 OAuth 账号，apikey 类型账号无法加入", g.Name)
 			}
 		}
@@ -494,6 +508,9 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 		return nil
 	case PlatformGrok:
 		// Grok OAuth credentials are validated via token exchange/refresh and request-path probes.
+		return nil
+	case PlatformCursor, PlatformKiro:
+		// 与 Grok 同理：凭证有效性由刷新链与请求路径探测校验。
 		return nil
 	default:
 		return fmt.Errorf("unsupported platform: %s", account.Platform)

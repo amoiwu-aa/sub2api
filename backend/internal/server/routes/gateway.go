@@ -56,12 +56,36 @@ func RegisterGatewayRoutes(
 	isOpenAIGatewayPlatform := func(c *gin.Context) bool {
 		return getGroupPlatform(c) == service.PlatformOpenAI
 	}
+	// cursor 与 kiro 有各自的上游桥（Cursor AgentService/Run、Amazon Q），
+	// 不是任何一个 Anthropic/OpenAI 兼容端点。没有专用分支的端点必须显式 404：
+	// 让它们 fallthrough 到 h.Gateway.* 会拿着该平台的凭证去打 Claude 上游。
+	isSelfBridgedGatewayPlatform := func(c *gin.Context) bool {
+		switch getGroupPlatform(c) {
+		case service.PlatformCursor, service.PlatformKiro:
+			return true
+		default:
+			return false
+		}
+	}
+	writeUnsupportedForPlatform := func(c *gin.Context, api string) {
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": gin.H{
+				"type":    "not_found_error",
+				"message": api + " is not supported for this platform",
+			},
+		})
+	}
 	countTokensHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI:
 			h.OpenAIGateway.CountTokens(c)
-		case service.PlatformGrok:
+		case service.PlatformGrok, service.PlatformKiro:
+			// 两者都用本地估算：Grok 上游没有该端点，Kiro 的上游模型是 Claude，
+			// Anthropic 形状的本地估算是最接近的近似。
 			h.OpenAIGateway.GrokCountTokens(c)
+		case service.PlatformCursor:
+			writeUnsupportedForPlatform(c, "Count tokens API")
 		default:
 			h.Gateway.CountTokens(c)
 		}
@@ -164,10 +188,17 @@ func RegisterGatewayRoutes(
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)
 	{
-		// /v1/messages: auto-route based on group platform
+		// /v1/messages: auto-route based on group platform.
+		// kiro 走 h.Gateway.Messages 的公共链路（选号/并发/计费/failover），
+		// 在 handler 里按账号 platform 分派到自己的上游桥；cursor 只提供
+		// OpenAI chat/completions，这里显式拒绝。
 		gateway.POST("/messages", func(c *gin.Context) {
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Messages(c)
+				return
+			}
+			if getGroupPlatform(c) == service.PlatformCursor {
+				writeUnsupportedForPlatform(c, "Messages API")
 				return
 			}
 			h.Gateway.Messages(c)
@@ -188,11 +219,19 @@ func RegisterGatewayRoutes(
 				h.OpenAIGateway.Responses(c)
 				return
 			}
+			if isSelfBridgedGatewayPlatform(c) {
+				writeUnsupportedForPlatform(c, "Responses API")
+				return
+			}
 			h.Gateway.Responses(c)
 		})
 		gateway.POST("/responses/*subpath", func(c *gin.Context) {
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Responses(c)
+				return
+			}
+			if isSelfBridgedGatewayPlatform(c) {
+				writeUnsupportedForPlatform(c, "Responses API")
 				return
 			}
 			h.Gateway.Responses(c)
@@ -264,6 +303,10 @@ func RegisterGatewayRoutes(
 	responsesHandler := func(c *gin.Context) {
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.Responses(c)
+			return
+		}
+		if isSelfBridgedGatewayPlatform(c) {
+			writeUnsupportedForPlatform(c, "Responses API")
 			return
 		}
 		h.Gateway.Responses(c)

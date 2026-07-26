@@ -333,10 +333,23 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 }
 
 func normalizeAccountConcurrency(platform, accountType string, concurrency int) int {
-	if platform == PlatformGrok && accountType == AccountTypeOAuth {
+	if accountType != AccountTypeOAuth {
+		return concurrency
+	}
+	switch platform {
+	case PlatformGrok:
 		if concurrency <= 0 {
 			return 1
 		}
+	case PlatformCursor:
+		// Cursor 的 AgentService/Run 是 HTTP/2 双向流会话，单账号并跑多路会话
+		// 容易被风控。与 Grok 一致：未显式配置时默认 1，运营方可手动放宽。
+		if concurrency <= 0 {
+			return 1
+		}
+	case PlatformKiro:
+		// Kiro 走普通请求/响应（Q GenerateAssistantResponse），不需要收紧到 1，
+		// 沿用全局默认。
 	}
 	return concurrency
 }

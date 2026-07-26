@@ -378,6 +378,13 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		return usage, err
 	}
 
+	// Cursor / Kiro 上游都没有账号级配额查询接口：Cursor Agent 完全不下发用量，
+	// Kiro 只在每次响应的 summary 里给 meteringUsage（已归集进 usage_logs）。
+	// 必须在这里拦住，否则会掉进下面的 Anthropic usage API 分支去查错的上游。
+	if account.Platform == PlatformCursor || account.Platform == PlatformKiro {
+		return nil, fmt.Errorf("platform %s does not support account usage query", account.Platform)
+	}
+
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
 	if account.CanGetUsage() {
 		var apiResp *ClaudeUsageResponse
