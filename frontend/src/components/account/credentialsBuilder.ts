@@ -55,11 +55,15 @@ export function requiresDedicatedTokenRefresh(platform: string | undefined | nul
 
 /**
  * 后端是否实现了该平台的连接测试。
- * account_test_service 对 cursor/kiro 直接早退报 "not implemented yet"，
- * 定时测试走同一条链路，因此两个入口都应隐藏。
+ *
+ * cursor / kiro 现已实现（account_test_native_bridge.go）：
+ * kiro 走 ListAvailableModels（GET，不消耗推理额度），
+ * cursor 跑一轮最小 Agent 对话（它没有只读探活接口，而"凭证没过期"
+ * 并不等于"Agent 真能跑"）。所以这里对所有平台都返回 true——
+ * 保留这个函数是为了下次接入新平台时有个显式的登记点。
  */
-export function supportsConnectionTest(platform: string | undefined | null): boolean {
-  return !isNativeBridgePlatform(platform)
+export function supportsConnectionTest(_platform: string | undefined | null): boolean {
+  return true
 }
 
 /**

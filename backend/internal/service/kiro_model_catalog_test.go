@@ -28,7 +28,10 @@ func kiroCatalogAccount(id int64) *Account {
 }
 
 // waitFor 等后台刷新落库，避免依赖固定 sleep。
-func waitFor(t *testing.T, cond func() bool) {
+// waitForCatalog 是本文件专用的便捷等待（固定 3s）。
+// 不叫 waitFor：service 包里已有一个 waitFor(t, timeout, msg, cond)
+// （channel_monitor_runner_test.go），同名会让整个测试包编译不过。
+func waitForCatalog(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -65,7 +68,7 @@ func TestCatalogCacheServesAfterRefresh(t *testing.T) {
 	fetch := func(context.Context) ([]kiro.AvailableModel, error) { return catalogModels(), nil }
 
 	require.Nil(t, c.Get(kiroCatalogAccount(1), fetch))
-	waitFor(t, func() bool { return c.Get(kiroCatalogAccount(1), fetch) != nil })
+	waitForCatalog(t, func() bool { return c.Get(kiroCatalogAccount(1), fetch) != nil })
 
 	cat := c.Get(kiroCatalogAccount(1), fetch)
 	require.NotNil(t, cat)
@@ -95,7 +98,7 @@ func TestCatalogCacheSingleFlight(t *testing.T) {
 
 	// Get 是非阻塞的，返回时后台 goroutine 可能还没进到 fetch。
 	// 先等第一次拉取真正开始，再断言没有第二次——直接断言会有竞态。
-	waitFor(t, func() bool { return atomic.LoadInt32(&calls) >= 1 })
+	waitForCatalog(t, func() bool { return atomic.LoadInt32(&calls) >= 1 })
 	require.EqualValues(t, 1, atomic.LoadInt32(&calls), "并发只应触发一次拉取")
 	close(release)
 }
@@ -110,7 +113,7 @@ func TestCatalogCachePerAccount(t *testing.T) {
 
 	c.Get(kiroCatalogAccount(1), full)
 	c.Get(kiroCatalogAccount(2), limited)
-	waitFor(t, func() bool {
+	waitForCatalog(t, func() bool {
 		return c.Get(kiroCatalogAccount(1), full) != nil && c.Get(kiroCatalogAccount(2), limited) != nil
 	})
 
@@ -129,7 +132,7 @@ func TestCatalogCacheFailureBackoff(t *testing.T) {
 	}
 
 	require.Nil(t, c.Get(kiroCatalogAccount(3), fetch))
-	waitFor(t, func() bool { return atomic.LoadInt32(&calls) == 1 })
+	waitForCatalog(t, func() bool { return atomic.LoadInt32(&calls) == 1 })
 
 	for i := 0; i < 5; i++ {
 		require.Nil(t, c.Get(kiroCatalogAccount(3), fetch))
@@ -151,18 +154,18 @@ func TestCatalogCacheKeepsStaleOnFailure(t *testing.T) {
 	}
 
 	c.Get(kiroCatalogAccount(4), fetch)
-	waitFor(t, func() bool { return c.Get(kiroCatalogAccount(4), fetch) != nil })
+	waitForCatalog(t, func() bool { return c.Get(kiroCatalogAccount(4), fetch) != nil })
 
 	fail.Store(true)
 	c.Invalidate(4)
 	require.Nil(t, c.Get(kiroCatalogAccount(4), fetch)) // 刚失效，还没有快照
-	waitFor(t, func() bool { return true })
+	waitForCatalog(t, func() bool { return true })
 
 	// 再走一遍成功路径，确认失败不会永久毁掉缓存
 	fail.Store(false)
 	c.Invalidate(4)
 	c.Get(kiroCatalogAccount(4), fetch)
-	waitFor(t, func() bool { return c.Get(kiroCatalogAccount(4), fetch) != nil })
+	waitForCatalog(t, func() bool { return c.Get(kiroCatalogAccount(4), fetch) != nil })
 	require.NotNil(t, c.Get(kiroCatalogAccount(4), fetch))
 }
 

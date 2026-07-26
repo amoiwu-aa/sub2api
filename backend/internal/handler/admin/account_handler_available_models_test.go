@@ -63,6 +63,8 @@ func setupSyncUpstreamModelsRouter(adminSvc service.AdminService, upstream servi
 		nil,
 		nil,
 		upstream,
+		nil, // kiroGatewayService
+		nil, // cursorGatewayService
 		&config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 		nil,
 	)

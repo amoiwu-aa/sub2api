@@ -185,6 +185,8 @@ func ProvideAccountTestService(
 	grokTokenProvider *GrokTokenProvider,
 	antigravityGatewayService *AntigravityGatewayService,
 	httpUpstream HTTPUpstream,
+	kiroGatewayService *KiroGatewayService,
+	cursorGatewayService *CursorGatewayService,
 	cfg *config.Config,
 	tlsFPProfileService *TLSFingerprintProfileService,
 	openAIGatewayService *OpenAIGatewayService,
@@ -196,6 +198,8 @@ func ProvideAccountTestService(
 		grokTokenProvider,
 		antigravityGatewayService,
 		httpUpstream,
+		kiroGatewayService,
+		cursorGatewayService,
 		cfg,
 		tlsFPProfileService,
 	)

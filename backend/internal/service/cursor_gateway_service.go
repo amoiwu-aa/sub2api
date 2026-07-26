@@ -374,3 +374,12 @@ func cursorGatewayErrorBody(status int, message string) []byte {
 	}
 	return body
 }
+
+// NewTestAgentOptions 为后台「测试连接」构造 Agent 参数。
+//
+// 与 NewTestClient 同理，复用 agentOptions：包含 ForceAttemptHTTP2
+// （Agent 是 HTTP/2 双向流，退回 h1 根本建不起来）、账号代理、
+// 以及以 access token 为种子的设备指纹。
+func (s *CursorGatewayService) NewTestAgentOptions(ctx context.Context, account *Account) (*cursor.AgentOptions, error) {
+	return s.agentOptions(ctx, account)
+}
