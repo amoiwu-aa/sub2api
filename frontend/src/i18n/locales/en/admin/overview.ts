@@ -49,6 +49,8 @@ export default {
       standard: 'Standard',
       accountCost: 'Cost',
       noDataAvailable: 'No data available',
+      noDataModelHint: 'Once requests flow through the gateway, usage is broken down by model here.',
+      noDataTrendHint: 'Token consumption over time appears here once there is usage.',
       recentUsage: 'Recent Usage',
       viewModelDistribution: 'Model Distribution',
       viewSpendingRanking: 'User Spending Ranking',

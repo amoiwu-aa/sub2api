@@ -43,6 +43,8 @@ export default {
       tokenUsageTrend: 'Token 使用趋势',
       userUsageTrend: '用户使用趋势（Top 12）',
       noDataAvailable: '暂无数据',
+      noDataModelHint: '有请求经过网关后，这里会按模型展示调用分布。',
+      noDataTrendHint: '产生用量后，这里会展示 Token 消耗随时间的变化。',
       model: '模型',
       group: '分组',
       noGroup: '无分组',

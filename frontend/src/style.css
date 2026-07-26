@@ -220,17 +220,23 @@
   }
 
   /* ============ 卡片样式 ============ */
+  /* 后台是密集型数据界面，卡片的职责是「划分区域」，不是「制造层次感」。
+   * 原来 rounded-2xl(16px) + gray-100 边框 + 几乎看不见的阴影，结果是
+   * 卡片既不够利落、边界又不明确，只能靠留白硬撑开。
+   * 改为更紧的圆角 + 更明确的边框，阴影退到辅助位置。 */
   .card {
     @apply bg-white dark:bg-dark-800/50;
-    @apply rounded-2xl;
-    @apply border border-gray-100 dark:border-dark-700/50;
+    @apply rounded-xl;
+    @apply border border-gray-200/80 dark:border-dark-700/60;
     @apply shadow-card;
-    @apply transition-all duration-300;
+    @apply transition-colors duration-200;
   }
 
+  /* hover 不再位移。密集列表里几十张卡片各自上下浮动会让页面「发抖」，
+   * 而且位移会触发重排；只改边框和阴影，安静得多。 */
   .card-hover {
-    @apply hover:-translate-y-0.5 hover:shadow-card-hover;
-    @apply hover:border-gray-200 dark:hover:border-dark-600;
+    @apply hover:border-gray-300 hover:shadow-card-hover;
+    @apply dark:hover:border-dark-600;
   }
 
   .card-glass {

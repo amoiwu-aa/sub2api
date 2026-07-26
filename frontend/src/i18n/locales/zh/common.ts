@@ -174,6 +174,13 @@ export default {
     promoCodes: '优惠码',
     settings: '系统设置',
     myAccount: '我的账户',
+    section: {
+      overview: '概览',
+      customers: '用户与分组',
+      resources: '资源',
+      growth: '增长与营收',
+      system: '系统与安全',
+    },
     lightMode: '浅色模式',
     darkMode: '深色模式',
     collapse: '收起',

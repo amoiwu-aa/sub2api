@@ -166,11 +166,12 @@
         </table>
       </div>
     </div>
-    <div
-      v-else-if="activeView === 'model_distribution'"
-      class="flex h-48 items-center justify-center text-sm text-gray-500 dark:text-gray-400"
-    >
-      {{ t('admin.dashboard.noDataAvailable') }}
+    <div v-else-if="activeView === 'model_distribution'" class="h-48">
+      <ChartEmptyState
+        icon="chart"
+        :title="t('admin.dashboard.noDataAvailable')"
+        :hint="t('admin.dashboard.noDataModelHint')"
+      />
     </div>
 
     <div v-else-if="rankingLoading" class="flex h-48 items-center justify-center">
@@ -233,11 +234,8 @@
         </table>
       </div>
     </div>
-    <div
-      v-else
-      class="flex h-48 items-center justify-center text-sm text-gray-500 dark:text-gray-400"
-    >
-      {{ t('admin.dashboard.noDataAvailable') }}
+    <div v-else class="h-48">
+      <ChartEmptyState icon="users" :title="t('admin.dashboard.noDataAvailable')" />
     </div>
   </div>
 </template>
@@ -245,6 +243,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ChartEmptyState from '@/components/common/ChartEmptyState.vue'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'

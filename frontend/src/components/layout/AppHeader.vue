@@ -47,10 +47,10 @@
         <!-- Balance Display -->
         <div
           v-if="user"
-          class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
+          class="balance-chip group relative hidden items-center gap-2 rounded-lg px-2.5 py-1.5 sm:flex"
         >
           <svg
-            class="h-4 w-4 text-primary-600 dark:text-primary-400"
+            class="balance-chip__icon h-4 w-4"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -62,7 +62,7 @@
               d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"
             />
           </svg>
-          <span class="text-sm font-semibold text-primary-700 dark:text-primary-300">
+          <span class="balance-chip__amount">
             {{ formatHeaderMoney(availableBalance) }}
           </span>
           <span
@@ -379,5 +379,49 @@ onBeforeUnmount(() => {
 .dropdown-leave-to {
   opacity: 0;
   transform: scale(0.95) translateY(-4px);
+}
+</style>
+
+<style scoped>
+/* 余额原本是一枚 primary-50 底色的绿色胶囊，在顶栏里比页面标题还抢眼。
+ * 余额是「随时可查的状态」，不是「需要立刻处理的告警」——降到中性描边，
+ * 数字本身用 tabular-nums 保证位数变化时不抖动。 */
+.balance-chip {
+  border: 1px solid rgb(226 232 240);
+  background: transparent;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.balance-chip:hover {
+  border-color: rgb(203 213 225);
+  background: rgb(248 250 252);
+}
+
+:global(.dark) .balance-chip {
+  border-color: rgb(51 65 85 / 0.7);
+}
+
+:global(.dark) .balance-chip:hover {
+  border-color: rgb(71 85 105);
+  background: rgb(30 41 59 / 0.5);
+}
+
+.balance-chip__icon {
+  color: #94a3b8;
+}
+
+:global(.dark) .balance-chip__icon {
+  color: #64748b;
+}
+
+.balance-chip__amount {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+}
+
+:global(.dark) .balance-chip__amount {
+  color: #e2e8f0;
 }
 </style>

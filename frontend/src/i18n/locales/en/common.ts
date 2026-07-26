@@ -174,6 +174,13 @@ export default {
     promoCodes: 'Promo Codes',
     settings: 'Settings',
     myAccount: 'My Account',
+    section: {
+      overview: 'Overview',
+      customers: 'Users & Groups',
+      resources: 'Resources',
+      growth: 'Growth & Revenue',
+      system: 'System & Security',
+    },
     lightMode: 'Light Mode',
     darkMode: 'Dark Mode',
     collapse: 'Collapse',
