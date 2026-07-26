@@ -104,10 +104,18 @@ type antigravityUsageCache struct {
 	timestamp time.Time
 }
 
+// kiroUsageCache 缓存 Kiro 额度数据
+type kiroUsageCache struct {
+	usageInfo *UsageInfo
+	timestamp time.Time
+}
+
 const (
 	apiCacheTTL             = 3 * time.Minute
 	apiErrorCacheTTL        = 1 * time.Minute        // 负缓存 TTL：429 等错误缓存 1 分钟
 	antigravityErrorTTL     = 1 * time.Minute        // Antigravity 错误缓存 TTL（可恢复错误）
+	kiroCacheTTL            = 3 * time.Minute        // Kiro 额度缓存 TTL
+	kiroErrorTTL            = 1 * time.Minute        // Kiro 错误缓存 TTL（负缓存，避免重试风暴）
 	apiQueryMaxJitter       = 800 * time.Millisecond // 用量查询最大随机延迟
 	windowStatsCacheTTL     = 1 * time.Minute
 	openAIProbeCacheTTL     = 10 * time.Minute
@@ -121,8 +129,10 @@ type UsageCache struct {
 	apiCache          sync.Map           // accountID -> *apiUsageCache
 	windowStatsCache  sync.Map           // accountID -> *windowStatsCache
 	antigravityCache  sync.Map           // accountID -> *antigravityUsageCache
+	kiroCache         sync.Map           // accountID -> *kiroUsageCache
 	apiFlight         singleflight.Group // 防止同一账号的并发请求击穿缓存（Anthropic）
 	antigravityFlight singleflight.Group // 防止同一 Antigravity 账号的并发请求击穿缓存
+	kiroFlight        singleflight.Group // 防止同一 Kiro 账号的并发请求击穿缓存
 	openAIProbeCache  sync.Map           // accountID -> time.Time
 	grokProbeCache    sync.Map           // accountID -> last billing probe attempt
 }
@@ -214,6 +224,16 @@ type UsageInfo struct {
 	GrokLocalUsageMonthly  *WindowStats        `json:"grok_local_usage_monthly,omitempty"`
 	GrokBilling            *xai.BillingSummary `json:"grok_billing,omitempty"`
 
+	// Kiro credit 额度（GET /getUsageLimits）
+	KiroCredits         *UsageProgress `json:"kiro_credits,omitempty"`           // credit 用量进度（含重置时间）
+	KiroCreditsUsed     float64        `json:"kiro_credits_used,omitempty"`      // 已消耗 credit（高精度）
+	KiroCreditsLimit    float64        `json:"kiro_credits_limit,omitempty"`     // credit 上限
+	KiroOverageEnabled  bool           `json:"kiro_overage_enabled,omitempty"`   // 是否开启超额消费
+	KiroExhausted       bool           `json:"kiro_exhausted,omitempty"`         // 额度用尽且无超额兜底 → 该轮换
+	KiroOverageRate     float64        `json:"kiro_overage_rate,omitempty"`      // 超额单价
+	KiroCurrency        string         `json:"kiro_currency,omitempty"`          // 计价货币
+	KiroFreeTrialStatus string         `json:"kiro_free_trial_status,omitempty"` // 试用状态 ACTIVE/EXPIRED
+
 	// Antigravity 账号级信息
 	SubscriptionTier    string `json:"subscription_tier,omitempty"`     // 归一化订阅等级: FREE/PRO/ULTRA/UNKNOWN
 	SubscriptionTierRaw string `json:"subscription_tier_raw,omitempty"` // 上游原始订阅等级名称
@@ -294,6 +314,7 @@ type AccountUsageService struct {
 	usageFetcher            ClaudeUsageFetcher
 	geminiQuotaService      *GeminiQuotaService
 	antigravityQuotaFetcher *AntigravityQuotaFetcher
+	kiroQuotaFetcher        *KiroQuotaFetcher
 	grokQuotaFetcher        *GrokQuotaFetcher
 	grokQuotaService        *GrokQuotaService
 	openAIQuotaService      *OpenAIQuotaService
@@ -311,6 +332,7 @@ func NewAccountUsageService(
 	usageFetcher ClaudeUsageFetcher,
 	geminiQuotaService *GeminiQuotaService,
 	antigravityQuotaFetcher *AntigravityQuotaFetcher,
+	kiroQuotaFetcher *KiroQuotaFetcher,
 	grokQuotaFetcher *GrokQuotaFetcher,
 	grokQuotaService *GrokQuotaService,
 	openAIQuotaService *OpenAIQuotaService,
@@ -324,6 +346,7 @@ func NewAccountUsageService(
 		usageFetcher:            usageFetcher,
 		geminiQuotaService:      geminiQuotaService,
 		antigravityQuotaFetcher: antigravityQuotaFetcher,
+		kiroQuotaFetcher:        kiroQuotaFetcher,
 		grokQuotaFetcher:        grokQuotaFetcher,
 		grokQuotaService:        grokQuotaService,
 		openAIQuotaService:      openAIQuotaService,
@@ -378,10 +401,21 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		return usage, err
 	}
 
-	// Cursor / Kiro 上游都没有账号级配额查询接口：Cursor Agent 完全不下发用量，
-	// Kiro 只在每次响应的 summary 里给 meteringUsage（已归集进 usage_logs）。
+	// Kiro 有账号级额度接口：GET /getUsageLimits，与 GenerateAssistantResponse
+	// 同一个 q.<region> 端点、同一份 bearer 凭证。
+	// （每次响应 summary 里的 meteringUsage 仍然照常归集进 usage_logs，
+	// 两者对得上：那边记增量，这边给账号总量与重置时间。）
+	if account.Platform == PlatformKiro {
+		usage, err := s.getKiroUsage(ctx, account)
+		if err == nil && usage != nil && usage.Error == "" {
+			s.tryClearRecoverableAccountError(ctx, account)
+		}
+		return usage, err
+	}
+
+	// Cursor Agent 完全不下发用量，没有账号级配额查询接口。
 	// 必须在这里拦住，否则会掉进下面的 Anthropic usage API 分支去查错的上游。
-	if account.Platform == PlatformCursor || account.Platform == PlatformKiro {
+	if account.Platform == PlatformCursor {
 		return nil, fmt.Errorf("platform %s does not support account usage query", account.Platform)
 	}
 
@@ -894,6 +928,88 @@ func (s *AccountUsageService) getGeminiUsage(ctx context.Context, account *Accou
 }
 
 // getAntigravityUsage 获取 Antigravity 账户额度
+// getKiroUsage 查 Kiro 账号额度。
+//
+// 缓存 + singleflight 的意图与 Antigravity 一致：额度面板会被频繁刷新，
+// 而上游是按账号计费的真实接口，不能每次渲染都打一发。
+func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
+	if s.kiroQuotaFetcher == nil || !s.kiroQuotaFetcher.CanFetch(account) {
+		now := time.Now()
+		return &UsageInfo{UpdatedAt: &now}, nil
+	}
+
+	if usage, ok := s.loadKiroCache(account.ID); ok {
+		return usage, nil
+	}
+
+	flightKey := fmt.Sprintf("kiro-usage:%d", account.ID)
+	result, flightErr, _ := s.cache.kiroFlight.Do(flightKey, func() (any, error) {
+		// 等待 singleflight 期间可能已被别的请求填充。
+		if usage, ok := s.loadKiroCache(account.ID); ok {
+			return usage, nil
+		}
+
+		// 用独立 context：调用方 cancel 不该让共享同一 flight 的其他请求一起失败。
+		fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		proxyURL, err := s.kiroQuotaFetcher.GetProxyURL(fetchCtx, account)
+		if err != nil {
+			// 配置了代理却拿不到，绝不能退化成直连去打上游。
+			return nil, err
+		}
+
+		usage, err := s.kiroQuotaFetcher.FetchQuota(fetchCtx, account, proxyURL)
+		if err != nil {
+			return nil, err
+		}
+		enrichUsageWithAccountError(usage, account)
+		s.cache.kiroCache.Store(account.ID, &kiroUsageCache{usageInfo: usage, timestamp: time.Now()})
+		return usage, nil
+	})
+	if flightErr != nil {
+		return nil, flightErr
+	}
+
+	usage, _ := result.(*UsageInfo)
+	recalcKiroRemainingSeconds(usage)
+	return usage, nil
+}
+
+// loadKiroCache 读缓存并重算剩余秒数；已失效返回 false。
+// 降级结果（带 Error）用更短的 TTL，让账号恢复后能较快反映出来。
+func (s *AccountUsageService) loadKiroCache(accountID int64) (*UsageInfo, bool) {
+	cached, ok := s.cache.kiroCache.Load(accountID)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := cached.(*kiroUsageCache)
+	if !ok {
+		return nil, false
+	}
+	ttl := kiroCacheTTL
+	if entry.usageInfo != nil && entry.usageInfo.Error != "" {
+		ttl = kiroErrorTTL
+	}
+	if time.Since(entry.timestamp) >= ttl {
+		return nil, false
+	}
+	recalcKiroRemainingSeconds(entry.usageInfo)
+	return entry.usageInfo, true
+}
+
+// recalcKiroRemainingSeconds 重算距重置的剩余秒数，避免返回缓存里过时的值。
+func recalcKiroRemainingSeconds(usage *UsageInfo) {
+	if usage == nil || usage.KiroCredits == nil || usage.KiroCredits.ResetsAt == nil {
+		return
+	}
+	remaining := int(time.Until(*usage.KiroCredits.ResetsAt).Seconds())
+	if remaining < 0 {
+		remaining = 0
+	}
+	usage.KiroCredits.RemainingSeconds = remaining
+}
+
 func (s *AccountUsageService) getAntigravityUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
 	if s.antigravityQuotaFetcher == nil || !s.antigravityQuotaFetcher.CanFetch(account) {
 		now := time.Now()
