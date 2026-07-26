@@ -726,18 +726,6 @@ watch(
   opacity: 0.75;
 }
 
-/* Keep deep-space cosmos even in light theme — only UI chrome changes */
-:global(html:not(.dark)) .galaxy__void {
-  background:
-    radial-gradient(ellipse 95% 75% at 50% 42%, rgba(18, 36, 78, 0.5), transparent 62%),
-    linear-gradient(180deg, #01030c 0%, #06102a 42%, #030816 100%);
-}
-
-:global(html:not(.dark)) .galaxy__vignette {
-  background:
-    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 36%, rgba(2, 6, 23, 0.2) 78%, rgba(2, 6, 23, 0.58) 100%),
-    linear-gradient(180deg, rgba(2, 6, 23, 0.12), transparent 22%, transparent 80%, rgba(2, 6, 23, 0.3));
-}
 
 @keyframes milky-drift {
   0% {
@@ -843,5 +831,22 @@ watch(
   .galaxy__shoot {
     animation: none !important;
   }
+}
+</style>
+
+<!-- 浅色主题下仍保持深空底色——星系是品牌资产，不跟随 UI 主题反色。
+     必须放在**无作用域**块里：scoped 块中 `:global(X) Y` 形态的规则会被
+     Vue 的 scoped-CSS 编译整条丢弃（见 src/__tests__/scoped-global-selector.spec.ts）。 -->
+<style>
+html:not(.dark) .galaxy__void {
+  background:
+    radial-gradient(ellipse 95% 75% at 50% 42%, rgba(18, 36, 78, 0.5), transparent 62%),
+    linear-gradient(180deg, #01030c 0%, #06102a 42%, #030816 100%);
+}
+
+html:not(.dark) .galaxy__vignette {
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 36%, rgba(2, 6, 23, 0.2) 78%, rgba(2, 6, 23, 0.58) 100%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.12), transparent 22%, transparent 80%, rgba(2, 6, 23, 0.3));
 }
 </style>

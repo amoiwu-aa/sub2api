@@ -968,10 +968,6 @@ onUnmounted(() => {
   animation: shimmer-kv 1.8s ease-in-out infinite;
   border-radius: 8px;
 }
-:global(.dark) .skeleton {
-  background: linear-gradient(90deg, #334155 25%, #1e293b 50%, #334155 75%);
-  background-size: 200% 100%;
-}
 
 /* Fade up animation */
 @keyframes fade-up-kv {
@@ -999,5 +995,15 @@ onUnmounted(() => {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+}
+</style>
+
+<!-- 骨架屏的深色配色。放在无作用域块里的原因同 GalaxyBackground：
+     scoped 块中的 `:global(.dark) .skeleton` 会被编译丢弃，深色下骨架屏
+     一直是浅灰的。 -->
+<style>
+.dark .skeleton {
+  background: linear-gradient(90deg, #334155 25%, #1e293b 50%, #334155 75%);
+  background-size: 200% 100%;
 }
 </style>

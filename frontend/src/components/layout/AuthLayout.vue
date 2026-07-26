@@ -103,8 +103,10 @@ onMounted(() => {
 <style scoped>
 /* 主题色板以 CSS 变量下发给表单。
  *
- * 不用 `:global(html:not(.dark)) .login-input` 那套：Vue 的 scoped CSS 在
- * :global() 里嵌 :not() 时会把整条规则丢掉（实测编译产物里一条都不剩），
+ * 不用 `:global(html:not(.dark)) .login-input` 那套：本项目的 scoped CSS 编译
+ * 会把 `:global(X) Y`（:global 作为前导、后面还跟后代）这种规则整条丢弃，
+ * 与 :not() 无关——生产构建产物里一条都不剩（护栏见
+ * src/__tests__/scoped-global-selector.spec.ts），
  * 结果是登录表单的浅色样式从来没生效过——无论切到哪个主题，输入框都渲染
  * 深色底，压在浅色卡片上就是几块灰疙瘩。
  * 自定义属性的继承不受作用域约束，父组件定义、子组件消费，天然可靠。 */
