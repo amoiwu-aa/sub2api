@@ -211,11 +211,14 @@ func (c *Client) ListAvailableProfiles(ctx context.Context) ([]Profile, error) {
 
 // RateMultiplierByModel 把模型目录压成 modelId -> 计费倍率的表。
 //
-// 用途是按真实成本做路由与计费：实测同样输入重复请求，credit 消耗逐位
-// 相同，说明它是输入规模与倍率的确定性函数——成本可以在请求发出前算准，
-// 不必事后统计。
+// 倍率跨度很大（实测 0.05 ~ 2.4，相差 48 倍），选模型是最直接的省钱手段，
+// 这张表让路由与计费能用上游的真实倍率而不是估算。
 //
-// 倍率跨度很大（实测 0.05 ~ 2.4，相差 48 倍），拿它换模型是最直接的省钱手段。
+// 但**不能拿它在请求发出前算准成本**：credit 消耗同时取决于输出长度。
+// 早先一组实验里五次请求的 credit 逐位相同，让人以为计费是输入的确定性
+// 函数——那只是因为都要求「用一个词回答」，输出长度恰好一样。换成长度
+// 不定的回答后，同样输入的 credit 就不同了（实测 0.082114 vs 0.110121）。
+// 真实成本仍以 meteringEvent 为准。
 func RateMultiplierByModel(models []AvailableModel) map[string]float64 {
 	if len(models) == 0 {
 		return nil
