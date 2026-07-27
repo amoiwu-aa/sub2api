@@ -147,6 +147,7 @@ func parseExecServerMessage(payload []byte) (*ExecRequest, error) {
 		return nil, err
 	}
 	exec := &ExecRequest{}
+	unknownArgField := 0
 	for _, field := range fields {
 		switch {
 		case field.Number == 1 && field.WireType == wireVarint:
@@ -157,8 +158,16 @@ func parseExecServerMessage(payload []byte) (*ExecRequest, error) {
 			if kind, ok := execArgFields[field.Number]; ok && exec.ArgFieldNum == 0 {
 				exec.ArgFieldNum = field.Number
 				exec.Kind = kind
+			} else if field.WireType == wireBytes && unknownArgField == 0 {
+				unknownArgField = field.Number
 			}
 		}
+	}
+	// execArgFields 只覆盖了已知工具，上游随时可能加新的。认不出就不回执的话
+	// 上游会一直等，整轮对话挂死——退而求其次，把结果放回请求里出现的第一个
+	// bytes 字段上，语义未必对，但至少这一轮能收尾。
+	if exec.ArgFieldNum == 0 {
+		exec.ArgFieldNum = unknownArgField
 	}
 	return exec, nil
 }

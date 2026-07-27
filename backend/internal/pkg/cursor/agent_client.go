@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,17 @@ const (
 	heartbeatInterval = 10 * time.Second
 	// turnEndGrace 是收到 turn_ended 后再等一小会儿，让尾随的 checkpoint 帧到齐。
 	turnEndGrace = 400 * time.Millisecond
+)
+
+// 看门狗的两档超时。做成变量只为让测试能压到毫秒级。
+var (
+	// streamStallTimeout 是「久久没有新帧」的兜底上限。生成过程中文本增量会
+	// 不断刷新它，留得宽是为了不误伤长时间的思考阶段。上游发来的心跳不刷新它：
+	// 上游一边心跳一边等我们回执，正是要兜住的那种挂死。
+	streamStallTimeout = 120 * time.Second
+	// execStallTimeout 用在一次 exec 没能回执之后。此时上游在等一个永远不会到来
+	// 的回复，没必要再等满 streamStallTimeout。
+	execStallTimeout = 15 * time.Second
 )
 
 // AgentOptions 是一次 Agent 调用的传输与身份配置。
@@ -67,6 +79,11 @@ type AgentTurnResult struct {
 	// ConversationState 是最后一个 checkpoint，下一轮要原样带上。
 	ConversationState []byte
 	ExecHandled       int
+	// ExecUnanswered 是没能回执的 exec 数。非 0 说明 execArgFields 漏了上游的新
+	// 工具，这一轮多半是被看门狗收尾的。
+	ExecUnanswered int
+	// Stalled 为 true 说明这一轮是看门狗超时中止的，不是上游正常结束。
+	Stalled bool
 }
 
 // RunAgentTurn 发起一轮对话，把增量交给 onDelta。
@@ -260,7 +277,17 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 	result := &AgentTurnResult{}
 	var text, thinking strings.Builder
 	var graceTimer *time.Timer
+
+	// 上游在等一个我们给不出的回执时，这条流会永远不再有新帧，读循环就一直阻塞
+	// 在 Next() 上。看门狗到点关掉 body 解除阻塞，把「客户端挂死」降级成
+	// 「这一轮输出不完整」——后者调用方已经能正常收尾。
+	var stalled atomic.Bool
+	stallTimer := time.AfterFunc(streamStallTimeout, func() {
+		stalled.Store(true)
+		s.close()
+	})
 	defer func() {
+		stallTimer.Stop()
 		if graceTimer != nil {
 			graceTimer.Stop()
 		}
@@ -276,8 +303,13 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 	for {
 		envelope, err := s.reader.Next()
 		if err != nil {
-			// turn_ended 后宽限期到点会关掉 body，读出的错误就是预期的收尾信号。
+			// turn_ended 后宽限期到点会关掉 body，读出的错误就是预期的收尾信号；
+			// 看门狗关 body 同理，只是这一轮要标成不完整。
 			if errors.Is(err, io.EOF) || result.TurnEnded {
+				break
+			}
+			if stalled.Load() {
+				result.Stalled = true
 				break
 			}
 			return nil, err
@@ -298,6 +330,7 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 
 		switch message.Kind {
 		case KindTextDelta:
+			stallTimer.Reset(streamStallTimeout)
 			if message.TextDelta != "" {
 				text.WriteString(message.TextDelta)
 				if err := emit(AgentDelta{Text: message.TextDelta}); err != nil {
@@ -305,6 +338,7 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 				}
 			}
 		case KindThinkingDelta:
+			stallTimer.Reset(streamStallTimeout)
 			if message.ThinkingDelta != "" {
 				thinking.WriteString(message.ThinkingDelta)
 				if err := emit(AgentDelta{Thinking: message.ThinkingDelta}); err != nil {
@@ -313,19 +347,33 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 			}
 		case KindExec:
 			// 不回执上游会一直等，整轮对话就挂在那里。
-			for _, reply := range StubExecReplies(message.Exec) {
+			replies := StubExecReplies(message.Exec)
+			answered := len(replies) > 0
+			for _, reply := range replies {
 				if err := s.send(reply); err != nil {
+					answered = false
 					break
 				}
 				result.ExecHandled++
 			}
+			if answered {
+				stallTimer.Reset(streamStallTimeout)
+				break
+			}
+			// 认不出的工具，或者回执没写出去：上游在等一个不会到来的回复，
+			// 让看门狗早点收尾，别让客户端干等两分钟。
+			result.ExecUnanswered++
+			stallTimer.Reset(execStallTimeout)
 		case KindCheckpoint:
+			stallTimer.Reset(streamStallTimeout)
 			result.ConversationState = message.ConversationState
 		case KindTurnEnded:
 			if result.TurnEnded {
 				continue
 			}
 			result.TurnEnded = true
+			// 收尾交给 graceTimer，看门狗不必再盯着。
+			stallTimer.Stop()
 			// 半关闭写侧告诉上游我们说完了。
 			s.writeMu.Lock()
 			_ = s.writer.Close()

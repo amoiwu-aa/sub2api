@@ -47,6 +47,25 @@ func execServerMessage(id uint64, execID string, argFieldNum int) []byte {
 	))
 }
 
+// execServerMessageWithoutArgs 构造一条我们无从回执的 exec：连参数字段都没有，
+// 挑不出结果该放在哪个字段号上。
+func execServerMessageWithoutArgs(id uint64, execID string) []byte {
+	return EncodeBytesField(2, concat(
+		EncodeVarintField(1, id),
+		EncodeStringField(15, execID),
+	))
+}
+
+// shrinkStallTimeouts 把看门狗压到毫秒级，让超时用例能在测试里跑完。
+func shrinkStallTimeouts(t *testing.T, stream, exec time.Duration) {
+	t.Helper()
+	originalStream, originalExec := streamStallTimeout, execStallTimeout
+	streamStallTimeout, execStallTimeout = stream, exec
+	t.Cleanup(func() {
+		streamStallTimeout, execStallTimeout = originalStream, originalExec
+	})
+}
+
 // agentTestServer 是一个最小的 Agent 桩：按脚本回帧，并记录客户端写入的帧。
 type agentTestServer struct {
 	t *testing.T
@@ -54,6 +73,9 @@ type agentTestServer struct {
 	script [][]byte
 	// endStreamPayload 非空时作为结束帧的内容。
 	endStreamPayload []byte
+	// hangAfterScript 复现上游「等一个不会到来的回执」的样子：脚本发完既不再发帧，
+	// 也不结束流，把连接一直吊着。
+	hangAfterScript bool
 
 	mu       sync.Mutex
 	received [][]byte
@@ -95,6 +117,14 @@ func (s *agentTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 给客户端一点时间处理（例如回 exec 回执），模拟真实的交错。
 		time.Sleep(5 * time.Millisecond)
 	}
+	if s.hangAfterScript {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+		return
+	}
+
 	_, _ = w.Write(EncodeEnvelope(s.endStreamPayload, connectFlagEndStream))
 	flusher.Flush()
 
@@ -243,6 +273,87 @@ func TestRunAgentTurnShellStreamSendsThreeFrames(t *testing.T) {
 		AgentTurnInput{Text: "run", ConversationID: "conv-1"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, 3, result.ExecHandled)
+}
+
+func TestRunAgentTurnRepliesToExecWithUnrecognizedArgField(t *testing.T) {
+	// execArgFields 只覆盖已知工具。上游加一个新工具时，认不出也必须回执——
+	// 否则上游一直等，整轮对话挂死。
+	server := &agentTestServer{t: t, script: [][]byte{
+		execServerMessage(5, "exec-new", 61), // 61 不在 execArgFields 里
+		textDeltaMessage("done"),
+		turnEndedMessage(),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "hi", ConversationID: "conv-1"}, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.ExecHandled)
+	require.Zero(t, result.ExecUnanswered)
+	require.True(t, result.TurnEnded)
+	require.Equal(t, "done", result.Text)
+
+	// 结果字段号回落到请求里出现的那个未知字段上。
+	message, err := ParseServerMessage(execServerMessage(5, "exec-new", 61))
+	require.NoError(t, err)
+	require.Equal(t, 61, message.Exec.ArgFieldNum)
+	require.Empty(t, message.Exec.Kind)
+}
+
+func TestRunAgentTurnWatchdogEndsTurnWhenExecCannotBeAnswered(t *testing.T) {
+	// 无参数的 exec 挑不出结果字段号，回执发不出去；上游随后彻底沉默。
+	// 看门狗必须把这一轮收掉，而不是让调用方一直阻塞。
+	shrinkStallTimeouts(t, 5*time.Second, 150*time.Millisecond)
+
+	server := &agentTestServer{t: t, hangAfterScript: true, script: [][]byte{
+		textDeltaMessage("查一下北京的天气"),
+		execServerMessageWithoutArgs(9, "exec-stuck"),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	done := make(chan struct{})
+	var (
+		result *AgentTurnResult
+		err    error
+	)
+	go func() {
+		defer close(done)
+		result, err = RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+			AgentTurnInput{Text: "hi", ConversationID: "conv-1"}, nil)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(4 * time.Second):
+		t.Fatal("readTurn hung: watchdog did not fire")
+	}
+
+	require.NoError(t, err)
+	require.True(t, result.Stalled)
+	require.False(t, result.TurnEnded)
+	require.Equal(t, 1, result.ExecUnanswered)
+	// 已经产出的文本要留住：调用方靠它给客户端补一个正常的收尾。
+	require.Equal(t, "查一下北京的天气", result.Text)
+}
+
+func TestRunAgentTurnWatchdogDoesNotCutHealthyStream(t *testing.T) {
+	// 每帧之间的间隔小于 stall 超时，看门狗不该误伤正常生成。
+	shrinkStallTimeouts(t, 300*time.Millisecond, 300*time.Millisecond)
+
+	server := &agentTestServer{t: t, script: [][]byte{
+		textDeltaMessage("a"),
+		textDeltaMessage("b"),
+		textDeltaMessage("c"),
+		turnEndedMessage(),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "hi", ConversationID: "conv-1"}, nil)
+	require.NoError(t, err)
+	require.False(t, result.Stalled)
+	require.True(t, result.TurnEnded)
+	require.Equal(t, "abc", result.Text)
 }
 
 func TestRunAgentTurnSurfacesEndStreamError(t *testing.T) {
