@@ -3312,7 +3312,8 @@
     <!-- Step 2: Kiro。
          网页登录是首选：portal 只放行 localhost 回调，服务器收不到，所以
          回调页在管理员本机打不开——但授权码就在地址栏里，粘回来即可。
-         IdC（企业版）仍需走粘贴文件那条路，它要额外的 clientId/clientSecret。 -->
+         企业（IAM Identity Center）账号要走两段：portal 那次回调只是交接，
+         真正的授权码在随后 AWS 那次回调里，所以这里会再要一次回调地址。 -->
     <div v-else-if="form.platform === 'kiro'" class="space-y-5">
       <!-- 网页登录 -->
       <div v-if="kiroAuthMode === 'web'" class="space-y-4">
@@ -3329,8 +3330,21 @@
           {{ t('admin.accounts.kiro.generateLoginUrl') }}
         </button>
         <template v-else>
+          <!-- 第二段：portal 认出这是企业账号之后才出现 -->
+          <div
+            v-if="kiroLoginStage === 'idc'"
+            class="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20"
+          >
+            <p class="text-xs text-blue-800 dark:text-blue-300">
+              {{ t('admin.accounts.kiro.idcRequiredHint', { provider: kiroIdcProvider }) }}
+            </p>
+          </div>
           <div>
-            <label class="input-label">{{ t('admin.accounts.kiro.loginUrlLabel') }}</label>
+            <label class="input-label">
+              {{ kiroLoginStage === 'idc'
+                ? t('admin.accounts.kiro.idcLoginUrlLabel')
+                : t('admin.accounts.kiro.loginUrlLabel') }}
+            </label>
             <div class="mt-1 flex gap-2">
               <input :value="kiroLoginUrl" readonly class="input flex-1 font-mono text-xs" />
               <a :href="kiroLoginUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary shrink-0">
@@ -3343,7 +3357,7 @@
               {{ t('admin.accounts.kiro.callbackHint') }}
             </p>
             <code class="mt-1 block break-all text-xs text-amber-700 dark:text-amber-400">
-              {{ kiroCallbackPrefix }}/oauth/callback?login_option=…&amp;code=…
+              {{ kiroCallbackExample }}
             </code>
           </div>
           <div>
@@ -3353,7 +3367,7 @@
               rows="3"
               spellcheck="false"
               class="input mt-1 font-mono text-xs"
-              :placeholder="kiroCallbackPrefix + '/oauth/callback?login_option=google&code=...'"
+              :placeholder="kiroCallbackExample"
             ></textarea>
           </div>
         </template>
@@ -4448,8 +4462,13 @@ const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlo
 
 // ── Kiro：粘贴式建号 ──────────────────────────────────────────────
 // 'web' = portal 网页登录（默认，不需要本机装 Kiro）；'paste' = 粘贴本机凭证文件。
-// IdC（企业版）只能走 paste：它额外需要 clientId/clientSecret，portal 不返回。
+//
+// 网页登录对企业（IAM Identity Center）账号要走两段，kiroLoginStage 记着走到哪了：
+// 'portal' 等 Kiro portal 那次回调，'idc' 等随后 AWS OIDC 那次。两段共用同一个
+// session_id，服务端靠它把第一段注册出来的 clientId/clientSecret 带到第二段。
 const kiroAuthMode = ref<'web' | 'paste'>('web')
+const kiroLoginStage = ref<'portal' | 'idc'>('portal')
+const kiroIdcProvider = ref('')
 const kiroLoginUrl = ref('')
 const kiroSessionId = ref('')
 const kiroCallbackPrefix = ref('http://localhost:3128')
@@ -4470,6 +4489,8 @@ const kiroTokenJsonPlaceholder = `{
 
 const resetKiroImportState = () => {
   kiroAuthMode.value = 'web'
+  kiroLoginStage.value = 'portal'
+  kiroIdcProvider.value = ''
   kiroLoginUrl.value = ''
   kiroSessionId.value = ''
   kiroCallback.value = ''
@@ -4597,6 +4618,8 @@ const handleKiroStartWebLogin = async () => {
   kiroImportError.value = ''
   try {
     const result = await adminAPI.kiro.startWebLogin({ proxy_id: form.proxy_id })
+    kiroLoginStage.value = 'portal'
+    kiroIdcProvider.value = ''
     kiroLoginUrl.value = result.login_url
     kiroSessionId.value = result.session_id
     kiroCallbackPrefix.value = result.callback_prefix
@@ -4611,7 +4634,10 @@ const handleKiroStartWebLogin = async () => {
   }
 }
 
-// 用粘回来的回调地址换 token 并建号。
+// 用粘回来的回调地址把登录推进一步。
+//
+// 社交账号一次就建号；企业账号第一次拿到的是 idc_required——那说明 portal
+// 只做了交接，还得去 AWS 再登录一次，所以这里换上第二段的链接继续等回调。
 const handleKiroCompleteWebLogin = async () => {
   if (!kiroCallback.value.trim() || kiroImporting.value) return
   kiroImporting.value = true
@@ -4621,6 +4647,15 @@ const handleKiroCompleteWebLogin = async () => {
       session_id: kiroSessionId.value,
       callback: kiroCallback.value.trim()
     })
+    if (result.status === 'idc_required') {
+      kiroLoginStage.value = 'idc'
+      kiroIdcProvider.value = result.provider || ''
+      kiroLoginUrl.value = result.next_login_url || ''
+      kiroCallbackPrefix.value = result.callback_prefix || kiroCallbackPrefix.value
+      // 上一段的回调已经用掉了，留着只会被误当成第二段的答案提交上去。
+      kiroCallback.value = ''
+      return
+    }
     await createAccountAndFinish('kiro', 'oauth', { ...result.credentials })
   } catch (error: any) {
     kiroImportError.value =
@@ -4629,6 +4664,8 @@ const handleKiroCompleteWebLogin = async () => {
       t('admin.accounts.kiro.importFailed')
     appStore.showError(kiroImportError.value)
     // 授权码是一次性的：换失败就必须重新走一遍登录，这里清掉链接避免误导。
+    kiroLoginStage.value = 'portal'
+    kiroIdcProvider.value = ''
     kiroLoginUrl.value = ''
     kiroSessionId.value = ''
     kiroCallback.value = ''
@@ -4666,6 +4703,14 @@ const kiroSubmitReady = computed(() =>
   kiroAuthMode.value === 'web'
     ? !!kiroSessionId.value && !!kiroCallback.value.trim()
     : !!kiroTokenJson.value.trim()
+)
+
+// 两段回调的地址长得不一样：portal 那次带 login_option，AWS 那次不带，
+// 且主机名是 127.0.0.1 而不是 localhost。照着贴错了会被判 redirect_uri 不匹配。
+const kiroCallbackExample = computed(() =>
+  kiroLoginStage.value === 'idc'
+    ? `${kiroCallbackPrefix.value}?code=...&state=...`
+    : `${kiroCallbackPrefix.value}/oauth/callback?login_option=google&code=...`
 )
 
 const isManualInputMethod = computed(() => {

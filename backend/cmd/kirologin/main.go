@@ -319,7 +319,7 @@ func login(opts options, client *http.Client, open func(string) error) (authToke
 	// IdC 那几条路 portal 不发 token，只回 issuer_url + idc_region，
 	// 要接着自己跑一遍 authorization_code 流程。
 	// 先把 portal 的回调服务关掉，IdC 那条链要重新占用同一批端口。
-	if isIdCLoginOption(cb.LoginOption) {
+	if kiro.IsIdCLoginOption(cb.LoginOption) {
 		srv.close()
 		fmt.Printf("这是 IAM Identity Center 账号，继续 IdC 登录（issuer=%s, region=%s）...\n\n",
 			cb.IssuerURL, cb.IdcRegion)

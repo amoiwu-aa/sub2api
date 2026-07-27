@@ -54,7 +54,7 @@ export async function refreshAccountToken(id: number): Promise<Account> {
 export default { importToken, refreshAccountToken, startWebLogin, completeWebLogin }
 
 export interface KiroWebLoginStartResponse {
-  /** 在浏览器里打开这个地址完成 Google / GitHub 登录 */
+  /** 在浏览器里打开这个地址完成登录 */
   login_url: string
   session_id: string
   /** 登录完成后浏览器会跳到这个开头的地址（本机没监听，打不开是正常的） */
@@ -68,11 +68,45 @@ export async function startWebLogin(payload: {
   return data
 }
 
+export interface KiroProfile {
+  arn: string
+  name?: string
+}
+
+/**
+ * 一次「推进一步」的结果。
+ *
+ * Google / GitHub 账号一次就到 `completed`；企业（IAM Identity Center）账号
+ * 的第一次回调只是交接，会返回 `idc_required` 和第二段登录链接——那次回调由
+ * Kiro portal 发出，不带授权码，真正的授权码在随后 AWS 那次回调里。
+ */
+export interface KiroWebLoginResult {
+  status: 'completed' | 'idc_required'
+  session_id: string
+
+  /** status=completed */
+  token_info?: KiroTokenInfo
+  credentials?: Record<string, unknown>
+  /** 账号在 Amazon Q 上的可用 profile，多于一个时已取第一个 */
+  profiles?: KiroProfile[]
+
+  /** status=idc_required：需要在浏览器里再登录一次 */
+  next_login_url?: string
+  callback_prefix?: string
+  /** Enterprise / BuilderId / Internal */
+  provider?: string
+}
+
+/**
+ * 把网页登录推进一步。
+ *
+ * 企业账号要调两次，第二次带**同一个** session_id。
+ */
 export async function completeWebLogin(payload: {
   session_id: string
   /** 浏览器地址栏里那条打不开的回调地址，或只有其中的 code */
   callback: string
-}): Promise<KiroImportResponse> {
-  const { data } = await apiClient.post<KiroImportResponse>('/admin/kiro/oauth/complete', payload)
+}): Promise<KiroWebLoginResult> {
+  const { data } = await apiClient.post<KiroWebLoginResult>('/admin/kiro/oauth/complete', payload)
   return data
 }

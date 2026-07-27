@@ -136,6 +136,8 @@ type KiroWebLoginStartRequest struct {
 //
 // 服务端收不到 portal 的 localhost 回调（只放行本机端口），所以这里只负责
 // 生成链接与保存 PKCE；管理员在浏览器登录后把回调地址粘回来，走 CompleteWebLogin。
+//
+// 企业（IAM Identity Center）账号还要再走一段，见 CompleteWebLogin。
 func (h *KiroHandler) StartWebLogin(c *gin.Context) {
 	var req KiroWebLoginStartRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -155,7 +157,16 @@ type KiroWebLoginCompleteRequest struct {
 	Callback string `json:"callback"`
 }
 
-// CompleteWebLogin 用回调里的授权码换凭证，返回可直接建号的 credentials。
+// CompleteWebLogin 用回调里的授权码把登录推进一步。
+//
+// 返回体里的 status 决定前端怎么走：
+//
+//	completed    —— 凭证已到手，credentials 可以直接拿去建号；
+//	idc_required —— 这是企业账号，next_login_url 要再登录一次，
+//	                第二条回调用**同一个 session_id** 再调一次本接口。
+//
+// 之所以不是一次调用就结束：IdC 账号的第一次回调由 Kiro portal 发出，
+// 只带 issuer_url + idc_region 而没有授权码，真正的授权码在 AWS 那次回调里。
 func (h *KiroHandler) CompleteWebLogin(c *gin.Context) {
 	var req KiroWebLoginCompleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -166,13 +177,10 @@ func (h *KiroHandler) CompleteWebLogin(c *gin.Context) {
 		response.BadRequest(c, "session_id and callback are required")
 		return
 	}
-	tokenInfo, err := h.kiroOAuthService.CompleteWebLogin(c.Request.Context(), req.SessionID, req.Callback)
+	result, err := h.kiroOAuthService.CompleteWebLogin(c.Request.Context(), req.SessionID, req.Callback)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, KiroImportResponse{
-		TokenInfo:   tokenInfo,
-		Credentials: h.kiroOAuthService.BuildAccountCredentials(tokenInfo),
-	})
+	response.Success(c, result)
 }

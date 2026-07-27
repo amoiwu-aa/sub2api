@@ -100,17 +100,33 @@ func BuildPortalURL(pkce *PKCE, port int) string {
 }
 
 // CallbackParams 是从回调地址里解析出来的东西。
+//
+// 两条链的回调形状不同：social 回调带 code，IdC 回调只是个交接信息，
+// 带的是 issuer_url + idc_region，告诉你接着该去哪个 Identity Center 实例。
 type CallbackParams struct {
 	Code        string
 	State       string
 	LoginOption string
 	Port        int
+
+	// 以下三项只有 IdC 的交接回调（login_option=builderid/awsidc/internal）会带。
+	IssuerURL string
+	IdCRegion string
+	ClientID  string
+}
+
+// IsIdCHandoff 报告这是不是 portal 交给 IdC 链的那次回调。
+func (p *CallbackParams) IsIdCHandoff() bool {
+	return p != nil && IsIdCLoginOption(p.LoginOption)
 }
 
 // ParseCallback 从管理员粘回来的内容里取出 code / state / login_option。
 //
 // 尽量宽容：既接受整条回调 URL（最常见——直接从地址栏复制），
 // 也接受只有 query 的片段，还接受光秃秃的一个 code。
+//
+// IdC 的交接回调不带 code，所以只有非 IdC 的回调才强制要求 code；
+// 缺 issuer_url 之类的 IdC 字段由调用方按自己的流程去判断。
 func ParseCallback(raw string) (*CallbackParams, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -147,16 +163,19 @@ func ParseCallback(raw string) (*CallbackParams, error) {
 		return nil, fmt.Errorf("kiro portal returned an error: %s", msg)
 	}
 
-	code := strings.TrimSpace(values.Get("code"))
-	if code == "" {
-		return nil, fmt.Errorf("no authorization code found in the callback")
-	}
-	return &CallbackParams{
-		Code:        code,
+	params := &CallbackParams{
+		Code:        strings.TrimSpace(values.Get("code")),
 		State:       strings.TrimSpace(values.Get("state")),
 		LoginOption: strings.TrimSpace(values.Get("login_option")),
 		Port:        port,
-	}, nil
+		IssuerURL:   strings.TrimSpace(values.Get("issuer_url")),
+		IdCRegion:   strings.TrimSpace(values.Get("idc_region")),
+		ClientID:    strings.TrimSpace(values.Get("client_id")),
+	}
+	if params.Code == "" && !params.IsIdCHandoff() {
+		return nil, fmt.Errorf("no authorization code found in the callback")
+	}
+	return params, nil
 }
 
 // ExchangeRedirectURI 是换 token 时用的 redirect_uri。
