@@ -793,6 +793,12 @@ var namespacedPricingPrefixes = []string{"cursor/", "kiro/"}
 // 静默失效的开关。
 const autoModelPricingAlias = "claude-sonnet-4"
 
+// maxModePricingSuffix 与 cursor.MaxModeSuffix 同值。
+//
+// 这里不 import internal/pkg/cursor：namespacedPricingPrefixes 也是硬编码的
+// 字符串，计价层刻意不依赖具体平台包。
+const maxModePricingSuffix = "-max"
+
 // normalizeNamespacedPricingModel 剥掉 cursor/ kiro/ 前缀，返回计价目录认得的模型名。
 // 第二个返回值表示该模型确实属于某个自有桥平台——这类模型即便查不到价也不能记 0。
 func normalizeNamespacedPricingModel(modelLower string) (string, bool) {
@@ -876,6 +882,16 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	// fail-closed 等于整条请求不计费，配额限额随之失效。锚到 Sonnet 至少让用量
 	// 按一把统一的尺子分摊。
 	if namespaced {
+		// MAX 变体（cursor/grok-4.5-max）是对外拼出来的名字，价目表里不会有。
+		// 先按基础模型再查一遍，而不是直接滑到 Sonnet 锚点——同一个模型开不开
+		// MAX 落在两个差很远的单价上，账单没法解释。
+		// 想给 MAX 单独定价的话，显式配一条 grok-4.5-max 即可：那样前面几步就
+		// 命中了，根本走不到这里。
+		if base, found := strings.CutSuffix(model, maxModePricingSuffix); found && base != "" {
+			if basePricing, baseErr := s.GetModelPricing(base); baseErr == nil {
+				return basePricing, nil
+			}
+		}
 		if anchor := s.fallbackPrices[autoModelPricingAlias]; anchor != nil {
 			if _, seen := s.fallbackWarnSeen.LoadOrStore("namespaced:"+model, struct{}{}); !seen {
 				log.Printf("[Billing] Unknown cursor/kiro model %q, billing at %s rates", model, autoModelPricingAlias)

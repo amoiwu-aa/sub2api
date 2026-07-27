@@ -117,7 +117,7 @@ func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account
 	if publicModel == "" {
 		publicModel = cursor.PublicModelPrefix + cursor.AutoModelID
 	}
-	upstreamModel := cursor.UpstreamModelID(publicModel)
+	selection := cursor.ResolveModel(publicModel)
 
 	s.setupSSEHeaders(c)
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: publicModel})
@@ -132,9 +132,11 @@ func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account
 	result, err := cursor.RunAgentTurn(ctx, options, cursor.AgentTurnInput{
 		Text:           "Reply with the single word: ok",
 		ConversationID: uuid.NewString(),
-		ModelID:        upstreamModel,
-		// Auto 模式不带 effort/fast 这类具名模型参数。
-		ModelParams: cursorTestModelParams(upstreamModel),
+		// 与生产路径同一份解析：探活要验的就是那条真实链路，
+		// 包括 MAX 变体能不能被上游接受。
+		ModelID:     selection.ModelID,
+		ModelParams: selection.Params,
+		MaxMode:     selection.MaxMode,
 	}, func(delta cursor.AgentDelta) error {
 		if delta.Text == "" {
 			return nil
@@ -166,12 +168,4 @@ func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account
 		Data:    map[string]any{"duration_ms": elapsed.Milliseconds()},
 	})
 	return nil
-}
-
-// cursorTestModelParams 与生产路径同一规则：Auto 不带具名模型的参数。
-func cursorTestModelParams(upstreamModel string) []cursor.ModelParam {
-	if upstreamModel == cursor.AutoModelID {
-		return []cursor.ModelParam{}
-	}
-	return cursor.DefaultModelParams()
 }

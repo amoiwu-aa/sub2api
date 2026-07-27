@@ -23,8 +23,14 @@ func TestSelectedModelMapsToUpstream(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4.6", kiro.UpstreamModelID("kiro/claude-sonnet-4.6"))
 }
 
-// Auto 不能带 effort/fast 这类具名模型参数——与生产路径同一规则。
-func TestCursorTestModelParams(t *testing.T) {
-	require.Empty(t, cursorTestModelParams(cursor.AutoModelID))
-	require.NotEmpty(t, cursorTestModelParams("claude-sonnet-5"))
+// 探活与生产路径共用 cursor.ResolveModel，这里守住三条规则：
+// Auto 不带具名模型参数、具名模型带、MAX 变体的开关能传下去。
+func TestCursorTestSelectionMatchesGatewayRules(t *testing.T) {
+	require.Empty(t, cursor.ResolveModel(cursor.PublicModelPrefix+cursor.AutoModelID).Params)
+	require.NotEmpty(t, cursor.ResolveModel("cursor/claude-sonnet-5").Params)
+
+	maxSelection := cursor.ResolveModel("cursor/grok-4.5" + cursor.MaxModeSuffix)
+	require.Equal(t, "grok-4.5", maxSelection.ModelID)
+	require.NotNil(t, maxSelection.MaxMode)
+	require.True(t, *maxSelection.MaxMode)
 }

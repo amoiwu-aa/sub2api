@@ -84,7 +84,8 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	}
 
 	publicModel := req.Model
-	upstreamModel := cursor.UpstreamModelID(publicModel)
+	selection := cursor.ResolveModel(publicModel)
+	upstreamModel := selection.ModelID
 
 	options, err := s.agentOptions(ctx, account)
 	if err != nil {
@@ -102,12 +103,9 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	input := cursor.AgentTurnInput{
 		Text:           prompt,
 		ConversationID: conversationID,
-		ModelID:        upstreamModel,
-		ModelParams:    cursor.DefaultModelParams(),
-	}
-	// Auto 模式不该带 effort/fast 这类具名模型的参数。
-	if upstreamModel == cursor.AutoModelID {
-		input.ModelParams = []cursor.ModelParam{}
+		ModelID:        selection.ModelID,
+		ModelParams:    selection.Params,
+		MaxMode:        selection.MaxMode,
 	}
 
 	if req.Stream {
