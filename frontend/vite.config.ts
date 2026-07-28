@@ -125,8 +125,15 @@ export default defineConfig(({ mode }) => {
             }
 
             // UI 工具库（较大，单独分离）
-            if (id.includes('/@vueuse/') || id.includes('/xlsx/')) {
+            if (id.includes('/@vueuse/')) {
               return 'vendor-ui'
+            }
+
+            // xlsx 只在管理端导出时动态加载，必须独立成块：与首屏同步依赖
+            // （如 @vueuse）合并会让它进入关键路径，抵消动态 import 的收益，
+            // 也会使 .github/audit-exceptions.yml 中的 CVE 缓解措施失效。
+            if (id.includes('/xlsx/')) {
+              return 'vendor-xlsx'
             }
 
             // 图表库
