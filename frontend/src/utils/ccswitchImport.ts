@@ -29,6 +29,10 @@ function withV1Endpoint(baseUrl: string): string {
   return normalizedBaseUrl.endsWith('/v1') ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`
 }
 
+function withoutV1Suffix(endpoint: string): string {
+  return endpoint.replace(/\/v1$/, '')
+}
+
 export function resolveCcSwitchImportConfig(
   platform: GroupPlatform | undefined | null,
   clientType: CcSwitchClientType,
@@ -100,6 +104,15 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
 
   if (config.model) {
     entries.splice(2, 0, ['model', config.model])
+  }
+
+  // usageScript 里写的是 `{{baseUrl}}/v1/usage`，而 CC-Switch 的 {{baseUrl}} 在没有
+  // usageBaseUrl 时回落到 provider 的 endpoint。cursor / grok 的 endpoint 本身就带
+  // /v1，回落会拼出 /v1/v1/usage —— 网关对它是 404，表现为「查询失败」。
+  // 显式给用量查询一个不带 /v1 的基址，脚本与端点就不会再各拼一次。
+  const usageBaseUrl = withoutV1Suffix(config.endpoint)
+  if (usageBaseUrl !== config.endpoint) {
+    entries.push(['usageBaseUrl', usageBaseUrl])
   }
 
   return `ccswitch://v1/import?${new URLSearchParams(entries).toString()}`

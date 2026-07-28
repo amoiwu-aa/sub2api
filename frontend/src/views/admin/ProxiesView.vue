@@ -533,6 +533,14 @@
       <!-- Batch Add Form -->
       <div v-else class="space-y-5">
         <div>
+          <label class="input-label">{{ t('admin.proxies.batchDefaultProtocol') }}</label>
+          <Select v-model="batchDefaultProtocol" :options="protocolSelectOptions" />
+          <p class="input-hint mt-2">
+            {{ t('admin.proxies.batchDefaultProtocolHint') }}
+          </p>
+        </div>
+
+        <div>
           <label class="input-label">{{ t('admin.proxies.batchInput') }}</label>
           <textarea
             v-model="batchInput"
@@ -584,6 +592,24 @@
                 {{ t('admin.proxies.duplicateCount', { count: batchParseResult.duplicate }) }}
               </span>
             </div>
+          </div>
+
+          <div
+            v-if="batchParseResult.failures.length > 0"
+            class="mt-3 border-t border-gray-200 pt-3 dark:border-dark-600"
+          >
+            <p class="text-xs text-amber-600 dark:text-amber-400">
+              {{ t('admin.proxies.invalidLinesTitle') }}
+            </p>
+            <ul class="mt-1.5 max-h-32 space-y-1 overflow-y-auto">
+              <li
+                v-for="failure in batchParseResult.failures"
+                :key="failure.line"
+                class="truncate font-mono text-xs text-gray-500 dark:text-gray-400"
+              >
+                {{ t('admin.proxies.invalidLineItem', { line: failure.line, text: failure.text }) }}
+              </li>
+            </ul>
           </div>
         </div>
 
@@ -964,7 +990,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -988,6 +1014,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
+import { parseProxyList, type ProxyParseFailure } from '@/utils/proxyParse'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1107,6 +1134,8 @@ const qualityReport = ref<ProxyQualityCheckResult | null>(null)
 // Batch import state
 const createMode = ref<'standard' | 'batch'>('standard')
 const batchInput = ref('')
+// 粘贴的 host:port:user:pass 不带协议，由这里决定按哪种协议入库
+const batchDefaultProtocol = ref<ProxyProtocol>('http')
 const batchParseResult = reactive({
   total: 0,
   valid: 0,
@@ -1118,7 +1147,8 @@ const batchParseResult = reactive({
     port: number
     username: string
     password: string
-  }>
+  }>,
+  failures: [] as ProxyParseFailure[]
 })
 
 const createForm = reactive({
@@ -1263,11 +1293,13 @@ const closeCreateModal = () => {
   createForm.expiry_warn_days = 7
   createPasswordVisible.value = false
   batchInput.value = ''
+  batchDefaultProtocol.value = 'http'
   batchParseResult.total = 0
   batchParseResult.valid = 0
   batchParseResult.invalid = 0
   batchParseResult.duplicate = 0
   batchParseResult.proxies = []
+  batchParseResult.failures = []
 }
 
 const handleDataImported = () => {
@@ -1275,68 +1307,17 @@ const handleDataImported = () => {
   loadProxies()
 }
 
-// Parse proxy URL: protocol://user:pass@host:port or protocol://host:port
-const parseProxyUrl = (
-  line: string
-): {
-  protocol: ProxyProtocol
-  host: string
-  port: number
-  username: string
-  password: string
-} | null => {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-
-  // Regex to parse proxy URL (supports http, https, socks5, socks5h)
-  const regex = /^(https?|socks5h?):\/\/(?:([^:@]+):([^@]+)@)?([^:]+):(\d+)$/i
-  const match = trimmed.match(regex)
-
-  if (!match) return null
-
-  const [, protocol, username, password, host, port] = match
-  const portNum = parseInt(port, 10)
-
-  if (portNum < 1 || portNum > 65535) return null
-
-  return {
-    protocol: protocol.toLowerCase() as ProxyProtocol,
-    host: host.trim(),
-    port: portNum,
-    username: username?.trim() || '',
-    password: password?.trim() || ''
-  }
-}
+// 切换默认协议后，已粘贴的无前缀行要按新协议重新归类
+watch(batchDefaultProtocol, () => parseBatchInput())
 
 const parseBatchInput = () => {
-  const lines = batchInput.value.split('\n').filter((l) => l.trim())
-  const seen = new Set<string>()
-  const proxies: typeof batchParseResult.proxies = []
-  let invalid = 0
-  let duplicate = 0
-
-  for (const line of lines) {
-    const parsed = parseProxyUrl(line)
-    if (!parsed) {
-      invalid++
-      continue
-    }
-
-    // Check for duplicates (same host:port:username:password)
-    const key = `${parsed.host}:${parsed.port}:${parsed.username}:${parsed.password}`
-    if (seen.has(key)) {
-      duplicate++
-      continue
-    }
-    seen.add(key)
-    proxies.push(parsed)
-  }
-
-  batchParseResult.total = lines.length
-  batchParseResult.valid = proxies.length
-  batchParseResult.invalid = invalid
-  batchParseResult.duplicate = duplicate
-  batchParseResult.proxies = proxies
+  const result = parseProxyList(batchInput.value, batchDefaultProtocol.value)
+  batchParseResult.total = result.total
+  batchParseResult.valid = result.valid
+  batchParseResult.invalid = result.invalid
+  batchParseResult.duplicate = result.duplicate
+  batchParseResult.proxies = result.proxies
+  batchParseResult.failures = result.failures
 }
 
 const handleBatchCreate = async () => {

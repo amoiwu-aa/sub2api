@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -452,6 +453,14 @@ func normalizeStdLogMessage(raw string) string {
 	return strings.Join(strings.Fields(msg), " ")
 }
 
+// 关键词紧跟 `=` 或 `_` 时是字段名而非状态，不能据此判级别。"[OpsCleanup] cleanup
+// complete: error_logs=0" 和 "[TokenRefresh] cycle complete total=1 failed=0" 都是
+// 成功消息，早先的 strings.Contains 会把它们打成 ERROR，污染后台的错误分布统计。
+var (
+	stdLogErrorWords = regexp.MustCompile(`\b(?:failed|errors?|panic|fatal)(?:$|[^0-9a-z_=])`)
+	stdLogWarnWords  = regexp.MustCompile(`\b(?:warn(?:ing)?s?|queue full|fallback)(?:$|[^0-9a-z_=])`)
+)
+
 func inferStdLogLevel(msg string) Level {
 	lower := strings.ToLower(strings.TrimSpace(msg))
 	if lower == "" {
@@ -468,10 +477,10 @@ func inferStdLogLevel(msg string) Level {
 		return LevelError
 	}
 
-	if strings.Contains(lower, " failed") || strings.Contains(lower, "error") || strings.Contains(lower, "panic") || strings.Contains(lower, "fatal") {
+	if stdLogErrorWords.MatchString(lower) {
 		return LevelError
 	}
-	if strings.Contains(lower, "warning") || strings.Contains(lower, "warn") || strings.Contains(lower, " queue full") || strings.Contains(lower, "fallback") {
+	if stdLogWarnWords.MatchString(lower) {
 		return LevelWarn
 	}
 	return LevelInfo

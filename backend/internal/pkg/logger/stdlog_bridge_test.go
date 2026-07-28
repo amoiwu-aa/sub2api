@@ -19,6 +19,12 @@ func TestInferStdLogLevel(t *testing.T) {
 		{msg: "[OpenAI WS Mode] reconnect_retry account_id=22 retry=1 max_retries=5", want: LevelInfo},
 		{msg: "service started", want: LevelInfo},
 		{msg: "debug: cache miss", want: LevelDebug},
+		// 计数字段名不是状态：这两条都是任务成功完成的记录。
+		{msg: "[OpsCleanup] cleanup complete: error_logs=0 ingress_rejects=0 system_metrics=0", want: LevelInfo},
+		{msg: "[TokenRefresh] cycle complete total=1 failed=0", want: LevelInfo},
+		{msg: "[Pricing] Fallback merge skipped: no such file or directory", want: LevelWarn},
+		{msg: "[OpsCleanup] cleanup failed: context deadline exceeded", want: LevelError},
+		{msg: "[Turnstile] Verification failed, error codes: [invalid-input]", want: LevelError},
 	}
 
 	for _, tc := range cases {

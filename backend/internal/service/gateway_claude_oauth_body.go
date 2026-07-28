@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropicfp"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -16,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 
 	"github.com/gin-gonic/gin"
 )
@@ -1195,11 +1198,54 @@ func (s *GatewayService) normalizeClientDatelineIfEnabled(ctx context.Context, a
 	if !s.shouldNormalizeClientDateline(ctx, account) {
 		return nil, false
 	}
-	next, _, changed := anthropicfp.NormalizeDateline(body)
+	next, hits, changed := anthropicfp.NormalizeDateline(body)
 	if !changed {
 		return nil, false
 	}
+	recordDatelineHits(ctx, account, hits)
 	return next, true
+}
+
+// datelineHitCounts 按 "账号|撇号变体|日期分隔符" 累计命中次数，进程级。
+var datelineHitCounts sync.Map // string -> *atomic.Int64
+
+// recordDatelineHits 记录被抹掉的隐写指纹。抹除只解决了「不外传」，命中数据
+// 本身才是判断上游是否已经标记本站的一手证据：撇号变体区分域名清单命中与
+// AI 实验室关键词命中，日期分隔符换成 "/" 说明系统时区已被识破。
+//
+// 客户端一旦开始打标就是每个请求都打，全量记录会淹掉日志（本项目已有过这个
+// 教训），所以每种组合只在首次出现和命中数跨越 10 的整数次幂时各记一条，
+// 既能第一时间看到新出现的指纹类型，又能从数量级看出规模。
+func recordDatelineHits(ctx context.Context, account *Account, hits []anthropicfp.DatelineHit) {
+	if len(hits) == 0 || account == nil {
+		return
+	}
+	for _, hit := range hits {
+		key := fmt.Sprintf("%d|%s|%s", account.ID, hit.ApostropheVariant, hit.DateSeparator)
+		value, _ := datelineHitCounts.LoadOrStore(key, new(atomic.Int64))
+		total := value.(*atomic.Int64).Add(1)
+		if !isFirstOrPowerOfTen(total) {
+			continue
+		}
+		logger.FromContext(ctx).With(
+			zap.Int64("account_id", account.ID),
+			zap.String("apostrophe_variant", hit.ApostropheVariant),
+			zap.String("date_separator", hit.DateSeparator),
+			// 非 ASCII 撇号 = 客户端认出了这是中转；"/" 分隔符 = 认出了中国时区
+			zap.Bool("relay_flagged", hit.ApostropheVariant != "ascii"),
+			zap.Bool("timezone_flagged", hit.DateSeparator == "/"),
+			zap.Int64("total_hits", total),
+		).Warn("anthropic_fp.client_dateline_fingerprint_stripped")
+	}
+}
+
+func isFirstOrPowerOfTen(n int64) bool {
+	for p := int64(1); p <= n; p *= 10 {
+		if p == n {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GatewayService) claudeOAuthSystemPromptInjectionSettings(ctx context.Context) (bool, string, string) {

@@ -125,12 +125,17 @@ func (m *ConfigManager) Reload(ctx context.Context) error {
 		return err
 	}
 	now := m.clock.Now()
+	previous := m.snapshot.Load()
 	m.snapshot.Store(&activeConfigSnapshot{storage: cloneStorageConfig(storage), active: cloneActiveConfig(active), loadedAt: now})
-	m.configUntrusted.Store(false)
+	recovered := m.configUntrusted.Swap(false)
 	m.clearLoadError()
-	LogInfo(EventConfigLoaded, map[string]any{
-		"config_version": storage.ConfigVersion, "status": "loaded",
-	})
+	// refreshLoop 每 5 秒重载一次，版本没变时这条日志会淹掉其他记录（实测占生产
+	// 日志总量的八成）。只在首次加载、版本变化、或从 untrusted 恢复时才记。
+	if previous == nil || previous.storage.ConfigVersion != storage.ConfigVersion || recovered {
+		LogInfo(EventConfigLoaded, map[string]any{
+			"config_version": storage.ConfigVersion, "status": "loaded",
+		})
+	}
 	return nil
 }
 

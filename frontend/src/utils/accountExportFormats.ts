@@ -129,7 +129,7 @@ export function buildCsvContent(payload: AdminDataPayload): string {
 
   // BOM：没有它 Excel 会按本地代码页解析，中文账号名直接变乱码。
   // CRLF：RFC 4180 的行分隔符，也是 Excel 唯一不会把多行备注读错行的写法。
-  return `﻿${rows.join('\r\n')}\r\n`
+  return `\uFEFF${rows.join('\r\n')}\r\n`
 }
 
 // ── 原生凭证 ────────────────────────────────────────────────────────────

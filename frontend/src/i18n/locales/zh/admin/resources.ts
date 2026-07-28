@@ -161,11 +161,16 @@ export default {
       batchAdd: '快捷添加',
       batchInput: '代理列表',
       batchInputPlaceholder:
-        "每行输入一个代理，支持以下格式：\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080\nhttps://user:pass{'@'}proxy.example.com:443",
-      batchInputHint: "支持 http、https、socks5 协议，格式：协议://[用户名:密码{'@'}]主机:端口",
+        "每行输入一个代理，直接粘贴即可，支持以下格式：\n192.168.1.1:1080:user:pass\n192.168.1.1:8080\nuser:pass{'@'}192.168.1.1:1080\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttps://proxy.example.com:443",
+      batchInputHint:
+        "主机与端口后面可以直接跟用户名、密码，分隔符支持冒号、空格、逗号和竖线；不写协议前缀时按上面选择的默认协议入库。",
+      batchDefaultProtocol: '默认协议',
+      batchDefaultProtocolHint: '仅对没有写 http:// 或 socks5:// 前缀的行生效。填错协议会导致代理连接失败。',
       parsedCount: '有效 {count} 个',
       invalidCount: '无效 {count} 个',
       duplicateCount: '重复 {count} 个',
+      invalidLinesTitle: '以下行无法识别，已跳过：',
+      invalidLineItem: '第 {line} 行：{text}',
       importing: '导入中...',
       importProxies: '导入 {count} 个代理',
       batchImportSuccess: '成功导入 {created} 个代理，跳过 {skipped} 个重复',

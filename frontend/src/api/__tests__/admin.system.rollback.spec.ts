@@ -36,12 +36,20 @@ describe('admin system rollback API', () => {
     expect(result.versions).toEqual(versions)
   })
 
+  // 回退要从 GitHub 拉整个发行包，全局 30s 超时会把下载掐断（#4504），
+  // 所以这里一并断言 15 分钟超时，避免又被改回默认值。
+  const longTimeout = { timeout: 15 * 60 * 1000 }
+
   it('rollback posts the target version in the request body', async () => {
     post.mockResolvedValue({ data: { message: 'ok', need_restart: true } })
 
     const result = await rollback('0.1.146')
 
-    expect(post).toHaveBeenCalledWith('/admin/system/rollback', { version: '0.1.146' })
+    expect(post).toHaveBeenCalledWith(
+      '/admin/system/rollback',
+      { version: '0.1.146' },
+      longTimeout
+    )
     expect(result.need_restart).toBe(true)
   })
 
@@ -50,6 +58,6 @@ describe('admin system rollback API', () => {
 
     await rollback()
 
-    expect(post).toHaveBeenCalledWith('/admin/system/rollback', undefined)
+    expect(post).toHaveBeenCalledWith('/admin/system/rollback', undefined, longTimeout)
   })
 })

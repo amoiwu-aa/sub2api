@@ -2,9 +2,12 @@
 
 VERSION ?= $(shell ./scripts/resolve-version.sh)
 LDFLAGS ?= -s -w -X main.Version=$(VERSION)
+# 传 BUILD_TAGS=embed 才会把 internal/web/dist 嵌进二进制；
+# 默认留空，方便只编后端时不必先跑一遍前端构建。
+BUILD_TAGS ?=
 
 build:
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -trimpath -o bin/server ./cmd/server
+	CGO_ENABLED=0 go build -tags="$(BUILD_TAGS)" -ldflags="$(LDFLAGS)" -trimpath -o bin/server ./cmd/server
 
 generate:
 	go generate ./ent
