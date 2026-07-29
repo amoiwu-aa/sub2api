@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/anthropicfp"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -16,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 
 	"github.com/gin-gonic/gin"
 )
@@ -854,26 +857,42 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 	return nil
 }
 
+func extractSystemTextAndCacheControl(system any) (string, any) {
+	switch v := system.(type) {
+	case string:
+		return strings.TrimSpace(v), nil
+	case []any:
+		var parts []string
+		var cacheControl any
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			text, ok := m["text"].(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				continue
+			}
+			parts = append(parts, text)
+			// system blocks are collapsed into one messages text block below.
+			// Preserve the last original breakpoint as the closest equivalent
+			// boundary, including its client-selected TTL.
+			if cc, exists := m["cache_control"]; exists && cc != nil {
+				cacheControl = cc
+			}
+		}
+		return strings.Join(parts, "\n\n"), cacheControl
+	default:
+		return "", nil
+	}
+}
+
 func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string) []byte {
 	system = normalizeSystemParam(system)
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
 
-	// 1. 提取原始 system prompt 文本
-	var originalSystemText string
-	switch v := system.(type) {
-	case string:
-		originalSystemText = strings.TrimSpace(v)
-	case []any:
-		var parts []string
-		for _, item := range v {
-			if m, ok := item.(map[string]any); ok {
-				if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
-					parts = append(parts, text)
-				}
-			}
-		}
-		originalSystemText = strings.Join(parts, "\n\n")
-	}
+	// 1. 提取原始 system prompt 文本及其缓存断点
+	originalSystemText, originalSystemCacheControl := extractSystemTextAndCacheControl(system)
 
 	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的 3-block 形态：
 	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli;）
@@ -906,10 +925,17 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	//    模型仍通过 messages 接收完整指令，保留客户端功能
 	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
 	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
+		instructionBlock := map[string]any{
+			"type": "text",
+			"text": "[System Instructions]\n" + originalSystemText,
+		}
+		if originalSystemCacheControl != nil {
+			instructionBlock["cache_control"] = originalSystemCacheControl
+		}
 		instrMsg, err1 := json.Marshal(map[string]any{
 			"role": "user",
 			"content": []map[string]any{
-				{"type": "text", "text": "[System Instructions]\n" + originalSystemText},
+				instructionBlock,
 			},
 		})
 		ackMsg, err2 := json.Marshal(map[string]any{
@@ -1195,11 +1221,54 @@ func (s *GatewayService) normalizeClientDatelineIfEnabled(ctx context.Context, a
 	if !s.shouldNormalizeClientDateline(ctx, account) {
 		return nil, false
 	}
-	next, _, changed := anthropicfp.NormalizeDateline(body)
+	next, hits, changed := anthropicfp.NormalizeDateline(body)
 	if !changed {
 		return nil, false
 	}
+	recordDatelineHits(ctx, account, hits)
 	return next, true
+}
+
+// datelineHitCounts 按 "账号|撇号变体|日期分隔符" 累计命中次数，进程级。
+var datelineHitCounts sync.Map // string -> *atomic.Int64
+
+// recordDatelineHits 记录被抹掉的隐写指纹。抹除只解决了「不外传」，命中数据
+// 本身才是判断上游是否已经标记本站的一手证据：撇号变体区分域名清单命中与
+// AI 实验室关键词命中，日期分隔符换成 "/" 说明系统时区已被识破。
+//
+// 客户端一旦开始打标就是每个请求都打，全量记录会淹掉日志（本项目已有过这个
+// 教训），所以每种组合只在首次出现和命中数跨越 10 的整数次幂时各记一条，
+// 既能第一时间看到新出现的指纹类型，又能从数量级看出规模。
+func recordDatelineHits(ctx context.Context, account *Account, hits []anthropicfp.DatelineHit) {
+	if len(hits) == 0 || account == nil {
+		return
+	}
+	for _, hit := range hits {
+		key := fmt.Sprintf("%d|%s|%s", account.ID, hit.ApostropheVariant, hit.DateSeparator)
+		value, _ := datelineHitCounts.LoadOrStore(key, new(atomic.Int64))
+		total := value.(*atomic.Int64).Add(1)
+		if !isFirstOrPowerOfTen(total) {
+			continue
+		}
+		logger.FromContext(ctx).With(
+			zap.Int64("account_id", account.ID),
+			zap.String("apostrophe_variant", hit.ApostropheVariant),
+			zap.String("date_separator", hit.DateSeparator),
+			// 非 ASCII 撇号 = 客户端认出了这是中转；"/" 分隔符 = 认出了中国时区
+			zap.Bool("relay_flagged", hit.ApostropheVariant != "ascii"),
+			zap.Bool("timezone_flagged", hit.DateSeparator == "/"),
+			zap.Int64("total_hits", total),
+		).Warn("anthropic_fp.client_dateline_fingerprint_stripped")
+	}
+}
+
+func isFirstOrPowerOfTen(n int64) bool {
+	for p := int64(1); p <= n; p *= 10 {
+		if p == n {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GatewayService) claudeOAuthSystemPromptInjectionSettings(ctx context.Context) (bool, string, string) {
@@ -1207,4 +1276,29 @@ func (s *GatewayService) claudeOAuthSystemPromptInjectionSettings(ctx context.Co
 		return true, "", ""
 	}
 	return s.settingService.GetClaudeOAuthSystemPromptInjectionSettings(ctx)
+}
+
+// systemHasBillingAttributionBlock 检查请求体的 system 字段中是否包含真实 Claude Code
+// 客户端注入的 billing attribution block。该 block 格式稳定（见 gateway_billing_block.go），
+// 仅由真实 Claude Code CLI 生成；第三方客户端（opencode 等）不会生成此 block。
+//
+// 用于识别被上游 API 网关代理的真实 Claude Code 流量：此类请求的 User-Agent 被网关替换
+// 为 Go-http-client，但 body 保留了完整的客户端特征。如果不识别这类请求而走 mimicry
+// 重写 system，会破坏 Anthropic prompt cache 的前缀一致性，导致 messages 级缓存永不命中。
+func systemHasBillingAttributionBlock(body []byte) bool {
+	system := gjson.GetBytes(body, "system")
+	if !system.IsArray() {
+		return false
+	}
+	found := false
+	system.ForEach(func(_, item gjson.Result) bool {
+		text := item.Get("text").String()
+		if strings.HasPrefix(text, claudeCodeBillingHeaderPrefix) &&
+			strings.Contains(text, claudeCodeEntrypointMarker) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }

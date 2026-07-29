@@ -71,6 +71,8 @@ type AccountTestService struct {
 	grokTokenProvider         *GrokTokenProvider
 	antigravityGatewayService *AntigravityGatewayService
 	httpUpstream              HTTPUpstream
+	kiroGatewayService        *KiroGatewayService
+	cursorGatewayService      *CursorGatewayService
 	cfg                       *config.Config
 	tlsFPProfileService       *TLSFingerprintProfileService
 	agentIdentityTaskMu       sync.Mutex
@@ -85,6 +87,8 @@ func NewAccountTestService(
 	grokTokenProvider *GrokTokenProvider,
 	antigravityGatewayService *AntigravityGatewayService,
 	httpUpstream HTTPUpstream,
+	kiroGatewayService *KiroGatewayService,
+	cursorGatewayService *CursorGatewayService,
 	cfg *config.Config,
 	tlsFPProfileService *TLSFingerprintProfileService,
 ) *AccountTestService {
@@ -95,6 +99,8 @@ func NewAccountTestService(
 		grokTokenProvider:         grokTokenProvider,
 		antigravityGatewayService: antigravityGatewayService,
 		httpUpstream:              httpUpstream,
+		kiroGatewayService:        kiroGatewayService,
+		cursorGatewayService:      cursorGatewayService,
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
 	}
@@ -186,6 +192,20 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 
+	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
+	// interactions, but intentionally do not send their placeholder credentials
+	// to an upstream provider.
+	if account.IsSyntheticUITest() {
+		testModelID := modelID
+		if testModelID == "" {
+			testModelID = claude.DefaultTestModel
+		}
+		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+		s.sendEvent(c, TestEvent{Type: "content", Text: "Synthetic Anthropic OAuth account is healthy and interactive."})
+		s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+		return nil
+	}
+
 	// Route to platform-specific test method
 	if account.IsOpenAI() {
 		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
@@ -201,6 +221,16 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 
 	if account.Platform == PlatformAntigravity {
 		return s.routeAntigravityTest(c, account, modelID, prompt)
+	}
+
+	// 兜底分支打的是 Anthropic 上游。新平台若不在这里显式登记，后台「测试连接」
+	// 会拿着该平台的凭证去打 Claude API，得到一个和真实故障无关的 401。
+	if account.Platform == PlatformKiro {
+		return s.testKiroAccountConnection(c, account, modelID)
+	}
+
+	if account.Platform == PlatformCursor {
+		return s.testCursorAccountConnection(c, account, modelID)
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
@@ -794,6 +824,16 @@ func (s *AccountTestService) testGrokAccountConnection(c *gin.Context, account *
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusPaymentRequired && s.accountRepo != nil {
+			stateCtx, cancel := openAIAccountStateContext(ctx)
+			defer cancel()
+			_ = s.accountRepo.SetTempUnschedulable(
+				stateCtx,
+				account.ID,
+				time.Now().Add(30*time.Minute),
+				"grok payment required",
+			)
+		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API returned %d: %s", resp.StatusCode, string(body)))
 	}
 

@@ -18,9 +18,11 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	pkgerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/kiro"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -43,6 +45,8 @@ type GatewayHandler struct {
 	openAIGatewayService      *service.OpenAIGatewayService
 	geminiCompatService       *service.GeminiMessagesCompatService
 	antigravityGatewayService *service.AntigravityGatewayService
+	kiroGatewayService        *service.KiroGatewayService
+	cursorGatewayService      *service.CursorGatewayService
 	userService               *service.UserService
 	billingCacheService       *service.BillingCacheService
 	usageService              *service.UsageService
@@ -65,6 +69,8 @@ func NewGatewayHandler(
 	openAIGatewayService *service.OpenAIGatewayService,
 	geminiCompatService *service.GeminiMessagesCompatService,
 	antigravityGatewayService *service.AntigravityGatewayService,
+	kiroGatewayService *service.KiroGatewayService,
+	cursorGatewayService *service.CursorGatewayService,
 	userService *service.UserService,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
@@ -101,6 +107,8 @@ func NewGatewayHandler(
 		openAIGatewayService:      openAIGatewayService,
 		geminiCompatService:       geminiCompatService,
 		antigravityGatewayService: antigravityGatewayService,
+		kiroGatewayService:        kiroGatewayService,
+		cursorGatewayService:      cursorGatewayService,
 		userService:               userService,
 		billingCacheService:       billingCacheService,
 		usageService:              usageService,
@@ -811,9 +819,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
+			switch {
+			case account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey:
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
-			} else {
+			case account.Platform == service.PlatformKiro:
+				// Kiro 走自有上游桥（Amazon Q），不是某个 Anthropic 兼容端点。
+				result, err = h.kiroGatewayService.Forward(requestCtx, c, account, attemptBody)
+			default:
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
 
@@ -1076,6 +1088,22 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		writeGrokModelsList(c, xai.DefaultModelIDs())
 		return
 	}
+	// cursor / kiro 的模型名带 cursor/ kiro/ 命名空间前缀，且都不是 Claude 目录里的东西。
+	// 漏掉这两个分支会让客户端拿到一份 Claude 模型表，照着点名后每一次请求都选不到号。
+	if platform == service.PlatformCursor {
+		c.JSON(http.StatusOK, gin.H{
+			"object": "list",
+			"data":   cursor.DefaultModels(),
+		})
+		return
+	}
+	if platform == service.PlatformKiro {
+		c.JSON(http.StatusOK, gin.H{
+			"object": "list",
+			"data":   kiro.DefaultModels(),
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
@@ -1090,7 +1118,7 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
 	schedulablePlatforms := h.gatewayService.GetSchedulablePlatforms(ctx, groupID)
-	for _, platform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok} {
+	for _, platform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok, service.PlatformCursor, service.PlatformKiro} {
 		platformModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
 		if len(platformModels) == 0 {
 			if _, ok := schedulablePlatforms[platform]; ok {
@@ -1115,6 +1143,11 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 	if platform == service.PlatformGrok {
 		writeGrokModelsList(c, modelIDs)
+		return
+	}
+	// 与 Models 里的分支同源：这两个平台不该被塞进 Claude 的模型结构。
+	if platform == service.PlatformCursor || platform == service.PlatformKiro {
+		writeOpenAIShapedModelsList(c, platform, modelIDs)
 		return
 	}
 	models := make([]claude.Model, 0, len(modelIDs))
@@ -1151,6 +1184,48 @@ type grokModelListItem struct {
 	SupportsReasoningEffort bool                        `json:"supportsReasoningEffort,omitempty"`
 	ReasoningEffort         string                      `json:"reasoningEffort,omitempty"`
 	ReasoningEfforts        []grokReasoningEffortOption `json:"reasoningEfforts,omitempty"`
+}
+
+// writeOpenAIShapedModelsList 按 OpenAI 的 /models 形状输出 cursor / kiro 的模型表。
+//
+// 已知模型带上内置目录里的 display_name，未知的（分组白名单里手写的）也照样列出，
+// 否则管理员在分组里配了模型却在 /v1/models 里看不到，会以为没生效。
+func writeOpenAIShapedModelsList(c *gin.Context, platform string, modelIDs []string) {
+	type openAIShapedModel struct {
+		ID          string `json:"id"`
+		Object      string `json:"object"`
+		OwnedBy     string `json:"owned_by"`
+		DisplayName string `json:"display_name,omitempty"`
+	}
+
+	ownedBy := "cursor-agent"
+	defaultsByID := make(map[string]openAIShapedModel)
+	if platform == service.PlatformKiro {
+		ownedBy = "amazon"
+		for _, model := range kiro.DefaultModels() {
+			defaultsByID[model.ID] = openAIShapedModel{
+				ID: model.ID, Object: "model", OwnedBy: model.OwnedBy, DisplayName: model.DisplayName,
+			}
+		}
+	} else {
+		for _, model := range cursor.DefaultModels() {
+			defaultsByID[model.ID] = openAIShapedModel{
+				ID: model.ID, Object: "model", OwnedBy: model.OwnedBy, DisplayName: model.DisplayName,
+			}
+		}
+	}
+
+	models := make([]openAIShapedModel, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		if model, ok := defaultsByID[modelID]; ok {
+			models = append(models, model)
+			continue
+		}
+		models = append(models, openAIShapedModel{
+			ID: modelID, Object: "model", OwnedBy: ownedBy, DisplayName: modelID,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": models})
 }
 
 func writeGrokModelsList(c *gin.Context, modelIDs []string) {
@@ -1312,10 +1387,14 @@ func defaultModelIDsForPlatform(platform string) []string {
 		return mergeModelIDs(ids, nil)
 	case service.PlatformGrok:
 		return xai.DefaultModelIDs()
+	case service.PlatformCursor:
+		return cursor.DefaultModelIDs()
+	case service.PlatformKiro:
+		return kiro.DefaultModelIDs()
 	case service.PlatformComposite:
 		ids := make([]string, 0)
 		seen := make(map[string]struct{})
-		for _, concretePlatform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok} {
+		for _, concretePlatform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok, service.PlatformCursor, service.PlatformKiro} {
 			for _, id := range defaultModelIDsForPlatform(concretePlatform) {
 				if _, ok := seen[id]; ok {
 					continue
@@ -2126,22 +2205,22 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 
 	switch interceptType {
 	case InterceptTypeSuggestionMode:
-		msgID = "msg_mock_suggestion"
+		msgID = generateRealisticMsgID()
 		outputTokens = 1
 		textDeltas = []string{""} // 空内容
 	default: // InterceptTypeWarmup
-		msgID = "msg_mock_warmup"
+		msgID = generateRealisticMsgID()
 		outputTokens = 2
 		textDeltas = []string{"New", " Conversation"}
 	}
 
-	// Build message_start event with fixed schema.
-	messageStartJSON := `{"type":"message_start","message":{"id":` + strconv.Quote(msgID) + `,"type":"message","role":"assistant","model":` + strconv.Quote(model) + `,"content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}`
+	// Build message_start event — field order matches real Anthropic API response.
+	messageStartJSON := `{"type":"message_start","message":{"model":` + strconv.Quote(model) + `,"id":` + strconv.Quote(msgID) + `,"type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}`
 
 	// Build events
 	events := []string{
 		`event: message_start` + "\n" + `data: ` + string(messageStartJSON),
-		`event: content_block_start` + "\n" + `data: {"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"}`,
+		`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
 	}
 
 	// Add text deltas
@@ -2151,7 +2230,7 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	}
 
 	// Add final events
-	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":10,"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
+	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
 
 	events = append(events,
 		`event: content_block_stop`+"\n"+`data: {"index":0,"type":"content_block_stop"}`,
@@ -2166,20 +2245,20 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	}
 }
 
-// generateRealisticMsgID 生成仿真的消息 ID（msg_bdrk_XXXXXXX 格式）
-// 格式与 Claude API 真实响应一致，24 位随机字母数字
+// generateRealisticMsgID 生成仿真的消息 ID（msg_01XXXXXXX 格式）
+// 格式与 Anthropic API 官方响应一致：msg_01 + 22 位 Base62 随机字符
 func generateRealisticMsgID() string {
 	const charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	const idLen = 24
+	const idLen = 22
 	randomBytes := make([]byte, idLen)
 	if _, err := rand.Read(randomBytes); err != nil {
-		return fmt.Sprintf("msg_bdrk_%d", time.Now().UnixNano())
+		return fmt.Sprintf("msg_01%d", time.Now().UnixNano())
 	}
 	b := make([]byte, idLen)
 	for i := range b {
 		b[i] = charset[int(randomBytes[i])%len(charset)]
 	}
-	return "msg_bdrk_" + string(b)
+	return "msg_01" + string(b)
 }
 
 // sendMockInterceptResponse 发送非流式 mock 响应（用于请求拦截）
@@ -2189,7 +2268,7 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 
 	switch interceptType {
 	case InterceptTypeSuggestionMode:
-		msgID = "msg_mock_suggestion"
+		msgID = generateRealisticMsgID()
 		text = ""
 		outputTokens = 1
 		stopReason = "end_turn"
@@ -2199,13 +2278,13 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 		outputTokens = 1
 		stopReason = "max_tokens" // max_tokens=1 探测请求的 stop_reason 应为 max_tokens
 	default: // InterceptTypeWarmup
-		msgID = "msg_mock_warmup"
+		msgID = generateRealisticMsgID()
 		text = "New Conversation"
 		outputTokens = 2
 		stopReason = "end_turn"
 	}
 
-	// 构建完整的响应格式（与 Claude API 响应格式一致）
+	// 构建完整的响应格式（与 Anthropic API 官方响应格式一致）
 	response := gin.H{
 		"model":         model,
 		"id":            msgID,
@@ -2214,6 +2293,7 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 		"content":       []gin.H{{"type": "text", "text": text}},
 		"stop_reason":   stopReason,
 		"stop_sequence": nil,
+		"stop_details":  nil,
 		"usage": gin.H{
 			"input_tokens":                10,
 			"cache_creation_input_tokens": 0,
@@ -2223,7 +2303,6 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 				"ephemeral_1h_input_tokens": 0,
 			},
 			"output_tokens": outputTokens,
-			"total_tokens":  10 + outputTokens,
 		},
 	}
 

@@ -127,6 +127,8 @@ security:
       - "api.openai.com"
       - "api.anthropic.com"
       - "api.kimi.com"
+      - "api.moonshot.ai"
+      - "api.moonshot.cn"
       - "open.bigmodel.cn"
       - "api.minimaxi.com"
       - "generativelanguage.googleapis.com"
@@ -174,6 +176,42 @@ security:
     # 辅助服务（更新检查、定价数据拉取）代理初始化失败时是否允许回退直连。
     # 不影响 AI 账号网关连接。默认 false：fail-fast 防止 IP 泄露。
     allow_direct_on_error: false
+  ip_reputation:
+    # Look up the reputation of a proxy's exit address (datacenter vs residential,
+    # VPN/proxy/Tor endpoints, abuse history, risk score) during quality checks.
+    # Lookups go out over the server's own connection, not through the proxy.
+    # 代理质量检测时查询出口 IP 的信誉（机房/住宅、VPN/代理/Tor、滥用历史、风险分）。
+    # 查询走服务器直连，不穿被检测的代理。
+    enabled: true
+    # How long a merged report stays valid. Reputation data moves on the order of
+    # days; the cache is keyed by exit address, so proxies sharing one exit share
+    # a single lookup.
+    # 信誉结果缓存时长（小时）。缓存按出口 IP 命中，共用出口的代理只消耗一次配额。
+    cache_ttl_hours: 24
+    # Overall timeout for one fan-out across all providers, not per provider.
+    # 一次并发扇出的整体超时（秒），不是单个数据源的超时。
+    timeout_seconds: 8
+    # ipapi.is — 1000 lookups/day without a key. Reports is_datacenter / is_vpn /
+    # is_proxy / is_tor / is_abuser plus an abuser score.
+    # ipapi.is —— 无需 key，免费 1000 次/天，提供机房/VPN/代理/Tor/滥用判定和滥用评分。
+    ipapi_is:
+      enabled: true
+      api_key: ""
+    # proxycheck.io — only 100 lookups/day without a key, which one batch check
+    # exhausts, so it stays off until you supply a free key (1000/day).
+    # proxycheck.io —— 不带 key 仅 100 次/天，一次批量检测就会打光，因此默认关闭；
+    # 申请免费 key 后额度为 1000 次/天。
+    proxycheck:
+      enabled: false
+      api_key: ""
+    # IPQualityScore — requires a key, 5000 lookups/month on the free tier.
+    # IPQualityScore —— 必须提供 key，免费额度 5000 次/月。
+    ipqualityscore:
+      enabled: false
+      api_key: ""
+      # IPQS strictness level 0-3: higher catches more proxies and more false positives.
+      # IPQS 严格度 0-3：越高抓到的代理越多，误报也越多。
+      strictness: 1
 
 # =============================================================================
 # Gateway Configuration

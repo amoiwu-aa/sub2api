@@ -272,6 +272,17 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:     false,
 	}
 
+	// Gemini 3.6 Flash (Google AI pricing: $1.50 input / $7.50 output /
+	// $0.15 cached input per MTok). Antigravity's -high/-low/-medium/-tiered
+	// aliases are matched below so unavailable remote pricing never records
+	// token-bearing requests at $0.
+	s.fallbackPrices["gemini-3.6-flash"] = &ModelPricing{
+		InputPricePerToken:     1.5e-6,
+		OutputPricePerToken:    7.5e-6,
+		CacheReadPricePerToken: 0.15e-6,
+		SupportsCacheBreakdown: false,
+	}
+
 	// OpenAI GPT-5.4（业务指定价格）
 	s.fallbackPrices["gpt-5.4"] = &ModelPricing{
 		InputPricePerToken:             2.5e-6,  // $2.5 per MTok
@@ -474,6 +485,15 @@ func (s *BillingService) initFallbackPricing() {
 	//       交叉验证：https://www.tmtpost.com/7961404.html (USD 口径)
 	// Moonshot V1 (¥2/¥5/¥10 多 tier) 公开页未直接标注 USD 价，本分支不覆盖，避免误计价。
 	// K2-0905 / K2-0711 官方页面未保留定价，不覆盖。
+	// Kimi K3 国际站 USD 价目：https://platform.kimi.ai/docs/pricing/chat-k3.md
+	// Kimi Code bare aliases（k3 / k3-256k）官方无按 token 价目；复用 API Platform
+	// kimi-k3 档位作代理计费 fallback（同 kimi-for-coding 对 K2.6 的处理口径）。
+	s.fallbackPrices["kimi-k3"] = &ModelPricing{
+		InputPricePerToken:     3e-6,    // $3.00 per MTok (cache miss)
+		OutputPricePerToken:    15e-6,   // $15.00 per MTok
+		CacheReadPricePerToken: 0.30e-6, // $0.30 per MTok (cache hit)
+		SupportsCacheBreakdown: false,
+	}
 	s.fallbackPrices["kimi-k2.6"] = &ModelPricing{
 		InputPricePerToken:     0.95e-6, // $0.95 per MTok (cache miss)
 		OutputPricePerToken:    4e-6,    // $4.00 per MTok
@@ -630,6 +650,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if strings.Contains(modelLower, "gemini-3.1-pro") || strings.Contains(modelLower, "gemini-3-1-pro") {
 		return s.fallbackPrices["gemini-3.1-pro"]
 	}
+	if strings.Contains(modelLower, "gemini-3.6-flash") || strings.Contains(modelLower, "gemini-3-6-flash") {
+		return s.fallbackPrices["gemini-3.6-flash"]
+	}
 
 	// DeepSeek V4 系列：仅匹配已知 V4 Pro/Flash 与官方兼容别名
 	// （deepseek-chat / deepseek-reasoner → V4 Flash），未知 deepseek-* 型号不回退，避免误计价。
@@ -689,10 +712,18 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		return s.fallbackPrices["glm-4-32b-0414-128k"]
 	}
 
-	// 月之暗面 Kimi（kimi-k2.6 / kimi-for-coding / kimi-k2.5 / kimi-k2-thinking / kimi-k2）
+	// 月之暗面 Kimi（kimi-k3 / k3 / k3-256k / kimi-k2.6 / kimi-for-coding / kimi-k2.5 / kimi-k2-thinking / kimi-k2）
 	// K2-0905 / K2-0711 官方未保留定价，不进入 fallback。
+	// K3 规则置于 K2 前：API Platform 仅官方 kimi-k3（及 / 路径后缀）；
+	// Code bare aliases 仅精确 k3 / k3-256k 或 /k3|/k3-256k 后缀，避免 kimi-k30 等未知型号误命中。
+	// 注意：kimi-k3[1m] 是 Claude Code 上下文选择语法，不是 Kimi API 模型 ID，不进入 fallback。
 	if strings.Contains(modelLower, "kimi-for-coding") {
 		return s.fallbackPrices["kimi-for-coding"]
+	}
+	if modelLower == "kimi-k3" || strings.HasSuffix(modelLower, "/kimi-k3") ||
+		modelLower == "k3" || modelLower == "k3-256k" ||
+		strings.HasSuffix(modelLower, "/k3") || strings.HasSuffix(modelLower, "/k3-256k") {
+		return s.fallbackPrices["kimi-k3"]
 	}
 	if strings.Contains(modelLower, "kimi-k2.6") || strings.Contains(modelLower, "kimi-k2-6") {
 		return s.fallbackPrices["kimi-k2.6"]
@@ -777,10 +808,54 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	return nil
 }
 
+// namespacedPricingPrefixes 是自有上游桥平台的模型命名空间前缀。
+//
+// cursor / kiro 的对外模型名一律带前缀（cursor/claude-sonnet-5、kiro/claude-sonnet-4.6），
+// 这是刻意的：composite 分组用 DetectModelPlatform 按模型名前缀反推平台，不加命名空间
+// 会把 kiro 的 claude-* 判成 anthropic 而调度到 Claude 账号池。
+var namespacedPricingPrefixes = []string{"cursor/", "kiro/"}
+
+// autoModelPricingAlias 是两个平台"自动选模"别名的计价锚点。
+//
+// 上游都不告诉我们 Auto 最终选了哪个模型，任何价目表里也不会有 default/auto 条目。
+// 锚到 Sonnet 与 channel_handler.go 把这两个平台映射到 anthropic provider 出于同一
+// 理由：这两家都是订阅制，按 token 的"真实成本"本就不存在，价格只是分摊用量的尺子。
+// 留空的代价要大得多——成本记 0 会让 user_platform_quotas 上的 USD 限额变成一个
+// 静默失效的开关。
+const autoModelPricingAlias = "claude-sonnet-4"
+
+// maxModePricingSuffix 与 cursor.MaxModeSuffix 同值。
+//
+// 这里不 import internal/pkg/cursor：namespacedPricingPrefixes 也是硬编码的
+// 字符串，计价层刻意不依赖具体平台包。
+const maxModePricingSuffix = "-max"
+
+// normalizeNamespacedPricingModel 剥掉 cursor/ kiro/ 前缀，返回计价目录认得的模型名。
+// 第二个返回值表示该模型确实属于某个自有桥平台——这类模型即便查不到价也不能记 0。
+func normalizeNamespacedPricingModel(modelLower string) (string, bool) {
+	for _, prefix := range namespacedPricingPrefixes {
+		rest, ok := strings.CutPrefix(modelLower, prefix)
+		if !ok {
+			continue
+		}
+		bare := strings.TrimSpace(rest)
+		switch bare {
+		case "", "default", "auto":
+			return autoModelPricingAlias, true
+		}
+		return bare, true
+	}
+	return modelLower, false
+}
+
 // GetModelPricing 获取模型价格配置
 func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	// 标准化模型名称（转小写）
 	model = strings.ToLower(model)
+
+	// 命名空间前缀必须在查价前剥掉：LiteLLM 目录与下面的 fallback 表都只认裸名，
+	// 带着 "kiro/" 去查一路查不到，最后 fail-closed 成本记 0。
+	model, namespaced := normalizeNamespacedPricingModel(model)
 
 	// 1. 优先从动态价格服务获取
 	if s.pricingService != nil {
@@ -830,6 +905,30 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 			log.Printf("[Billing] Using fallback pricing for model: %s", model)
 		}
 		return s.applyModelSpecificPricingPolicy(model, fallback), nil
+	}
+
+	// 3. cursor / kiro 兜底：这两个平台的模型表随上游变动（Cursor 的 composer-*、
+	// Kiro 的 ListAvailableModels 都可能冒出新名字），而它们又都是订阅制、上游不
+	// 返回单价。对其他平台 fail-closed 是对的——记 0 不如报错；但对这两个平台
+	// fail-closed 等于整条请求不计费，配额限额随之失效。锚到 Sonnet 至少让用量
+	// 按一把统一的尺子分摊。
+	if namespaced {
+		// MAX 变体（cursor/grok-4.5-max）是对外拼出来的名字，价目表里不会有。
+		// 先按基础模型再查一遍，而不是直接滑到 Sonnet 锚点——同一个模型开不开
+		// MAX 落在两个差很远的单价上，账单没法解释。
+		// 想给 MAX 单独定价的话，显式配一条 grok-4.5-max 即可：那样前面几步就
+		// 命中了，根本走不到这里。
+		if base, found := strings.CutSuffix(model, maxModePricingSuffix); found && base != "" {
+			if basePricing, baseErr := s.GetModelPricing(base); baseErr == nil {
+				return basePricing, nil
+			}
+		}
+		if anchor := s.fallbackPrices[autoModelPricingAlias]; anchor != nil {
+			if _, seen := s.fallbackWarnSeen.LoadOrStore("namespaced:"+model, struct{}{}); !seen {
+				log.Printf("[Billing] Unknown cursor/kiro model %q, billing at %s rates", model, autoModelPricingAlias)
+			}
+			return s.applyModelSpecificPricingPolicy(model, anchor), nil
+		}
 	}
 
 	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)

@@ -31,9 +31,12 @@ const (
 	EndpointGeminiModels      = "/v1beta/models"
 )
 
+const EndpointAntigravityGenerateContent = "/v1internal:streamGenerateContent"
+
 // gin.Context keys used by the middleware and helpers below.
 const (
-	ctxKeyInboundEndpoint = "_gateway_inbound_endpoint"
+	ctxKeyInboundEndpoint        = "_gateway_inbound_endpoint"
+	ctxKeyActualUpstreamEndpoint = "_gateway_actual_upstream_endpoint"
 )
 
 // ──────────────────────────────────────────────────────────
@@ -214,6 +217,12 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 			return EndpointGeminiModels
 		}
 		return EndpointMessages
+
+	case service.PlatformCursor, service.PlatformKiro:
+		// 这两个平台不转发到某个 REST 上游路径：cursor 走 AgentService/Run 的
+		// HTTP/2 双向流，kiro 走 Q GenerateAssistantResponse。上游请求由各自的
+		// 桥自行构造，这里保留入站端点仅用于日志与统计归类。
+		return inbound
 	}
 
 	// Unknown platform — fall back to inbound.
@@ -297,10 +306,29 @@ func GetInboundEndpoint(c *gin.Context) string {
 // and the account platform. Handlers call this after scheduling an
 // account, passing account.Platform.
 func GetUpstreamEndpoint(c *gin.Context, platform string) string {
+	if c != nil {
+		if value, ok := c.Get(ctxKeyActualUpstreamEndpoint); ok {
+			if endpoint, ok := value.(string); ok && endpoint != "" {
+				return endpoint
+			}
+		}
+	}
 	inbound := GetInboundEndpoint(c)
 	rawPath := ""
 	if c != nil && c.Request != nil && c.Request.URL != nil {
 		rawPath = c.Request.URL.Path
 	}
 	return DeriveUpstreamEndpoint(inbound, rawPath, platform)
+}
+
+func setActualUpstreamEndpoint(c *gin.Context, endpoint string) {
+	if c != nil {
+		c.Set(ctxKeyActualUpstreamEndpoint, strings.TrimSpace(endpoint))
+	}
+}
+
+func shouldUseAntigravityCompat(account *service.Account) bool {
+	return account != nil &&
+		account.Platform == service.PlatformAntigravity &&
+		account.Type == service.AccountTypeOAuth
 }

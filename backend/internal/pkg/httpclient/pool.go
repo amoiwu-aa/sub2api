@@ -48,6 +48,14 @@ type Options struct {
 	ValidateResolvedIP    bool          // 是否校验解析后的 IP（防止 DNS Rebinding）
 	AllowPrivateHosts     bool          // 允许私有地址解析（与 ValidateResolvedIP 一起使用）
 
+	// ForceAttemptHTTP2 强制协商 HTTP/2。
+	//
+	// 必须显式开启：net/http 只在 Transport 没有自定义 DialContext/DialTLS/TLSClientConfig
+	// 时才自动启用 h2，而这里恒定设置了 DialContext（为了 dial 超时），所以默认拿到的
+	// 是纯 HTTP/1.1 的 Transport。对普通请求/响应无所谓，但双向流（如 Cursor 的
+	// Connect bidi）在 h1 上根本建不起来——请求体会被缓冲，上游也不接受。
+	ForceAttemptHTTP2 bool
+
 	// 可选的连接池参数（不设置则使用默认值）
 	MaxIdleConns        int // 最大空闲连接总数（默认 100）
 	MaxIdleConnsPerHost int // 每主机最大空闲连接（默认 10）
@@ -121,6 +129,7 @@ func buildTransport(opts Options) (*http.Transport, error) {
 		MaxConnsPerHost:       opts.MaxConnsPerHost, // 0 表示无限制
 		IdleConnTimeout:       defaultIdleConnTimeout,
 		ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
+		ForceAttemptHTTP2:     opts.ForceAttemptHTTP2,
 	}
 
 	if opts.InsecureSkipVerify {
@@ -144,7 +153,8 @@ func buildTransport(opts Options) (*http.Transport, error) {
 }
 
 func buildClientKey(opts Options) string {
-	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%d|%d|%d",
+	// ForceAttemptHTTP2 必须进 key：否则先被缓存的 h1 客户端会被复用给要求 h2 的调用方。
+	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%d|%d|%d|%t",
 		strings.TrimSpace(opts.ProxyURL),
 		opts.Timeout.String(),
 		opts.ResponseHeaderTimeout.String(),
@@ -154,6 +164,7 @@ func buildClientKey(opts Options) string {
 		opts.MaxIdleConns,
 		opts.MaxIdleConnsPerHost,
 		opts.MaxConnsPerHost,
+		opts.ForceAttemptHTTP2,
 	)
 }
 

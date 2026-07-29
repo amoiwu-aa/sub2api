@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -120,4 +121,45 @@ func TestGatewayClientDatelineNormalization_LeavesUserProseUntouched(t *testing.
 	require.False(t, changed)
 	require.Empty(t, hits)
 	require.Equal(t, body, out)
+}
+
+// TestDatelineHitLogThrottle 覆盖命中日志的节流判据：只在首次和跨越 10 的
+// 整数次幂时放行，避免客户端每个请求都打标时把日志淹掉。
+func TestDatelineHitLogThrottle(t *testing.T) {
+	var logged []int64
+	for n := int64(1); n <= 1000; n++ {
+		if isFirstOrPowerOfTen(n) {
+			logged = append(logged, n)
+		}
+	}
+	require.Equal(t, []int64{1, 10, 100, 1000}, logged)
+	require.False(t, isFirstOrPowerOfTen(0))
+	require.False(t, isFirstOrPowerOfTen(-1))
+}
+
+// TestRecordDatelineHits_CountsPerVariant 确认计数按「账号 + 撇号变体 + 分隔符」
+// 分桶：同一账号的不同指纹组合各自独立累计，互不干扰。
+func TestRecordDatelineHits_CountsPerVariant(t *testing.T) {
+	datelineHitCounts.Range(func(k, _ any) bool { datelineHitCounts.Delete(k); return true })
+	ctx := context.Background()
+	account := &Account{ID: 42}
+
+	for i := 0; i < 3; i++ {
+		recordDatelineHits(ctx, account, []anthropicfp.DatelineHit{{ApostropheVariant: "u2019", DateSeparator: "/"}})
+	}
+	recordDatelineHits(ctx, account, []anthropicfp.DatelineHit{{ApostropheVariant: "ascii", DateSeparator: "/"}})
+
+	countOf := func(key string) int64 {
+		v, ok := datelineHitCounts.Load(key)
+		require.True(t, ok, "missing counter for %s", key)
+		return v.(*atomic.Int64).Load()
+	}
+	require.Equal(t, int64(3), countOf("42|u2019|/"))
+	require.Equal(t, int64(1), countOf("42|ascii|/"))
+
+	// nil 账号与空命中都不应建桶
+	recordDatelineHits(ctx, nil, []anthropicfp.DatelineHit{{ApostropheVariant: "u2019", DateSeparator: "-"}})
+	recordDatelineHits(ctx, account, nil)
+	_, ok := datelineHitCounts.Load("42|u2019|-")
+	require.False(t, ok)
 }

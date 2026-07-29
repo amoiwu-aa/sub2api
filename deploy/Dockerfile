@@ -18,7 +18,11 @@ ARG GOSUMDB=sum.golang.google.cn
 FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
-ENV NODE_OPTIONS=--max-old-space-size=1536
+# 上游合并后前端体量增长，1536MB 已经不够：vite build 会在
+# "Ineffective mark-compacts near heap limit" 处 OOM（exit 134），
+# 且与本仓库的改动无关——在合并提交上复现同样失败。
+# 根目录的 Dockerfile 没有设这个上限，所以一直构建正常。
+ENV NODE_OPTIONS=--max-old-space-size=4096
 
 # Install pnpm. Keep this pinned to the lockfile-compatible major version so
 # Docker builds remain reproducible when pnpm changes config validation rules.

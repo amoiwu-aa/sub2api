@@ -240,6 +240,11 @@ const activeClientTab = ref<string>('claude')
 type CodexAuthMode = 'legacy' | 'api-key'
 const codexAuthMode = ref<CodexAuthMode>('legacy')
 
+// 原生桥接平台的模型 id 带平台命名空间前缀，取值与 composables/useModelWhitelist.ts
+// 的 cursorModels / kiroModels 白名单（镜像后端 internal/pkg/{cursor,kiro}/models.go）一致。
+const CURSOR_DEFAULT_MODEL = 'cursor/default'
+const KIRO_DEFAULT_MODEL = 'kiro/claude-sonnet-4.6'
+
 // Reset tabs when platform changes
 const defaultClientTab = computed(() => {
   switch (props.platform) {
@@ -250,6 +255,11 @@ const defaultClientTab = computed(() => {
     case 'gemini':
       return 'gemini'
     case 'antigravity':
+      return 'claude'
+    case 'cursor':
+      // cursor 的 /v1/messages 由网关显式 404，没有 Claude Code 页签可选
+      return 'openai-compat'
+    case 'kiro':
       return 'claude'
     default:
       return 'claude'
@@ -368,6 +378,20 @@ const clientTabs = computed((): TabConfig[] => {
         { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
         { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
       ]
+    case 'cursor':
+      // 不提供 Claude Code 页签：cursor 只有 OpenAI chat/completions，
+      // /v1/messages 与 /v1/responses 都由网关显式 404。
+      return [
+        { id: 'openai-compat', label: t('keys.useKeyModal.cliTabs.openaiCompatible'), icon: TerminalIcon },
+        { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
+      ]
+    case 'kiro':
+      // kiro 同时提供 Anthropic /v1/messages 与 OpenAI chat/completions
+      return [
+        { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
+        { id: 'openai-compat', label: t('keys.useKeyModal.cliTabs.openaiCompatible'), icon: TerminalIcon },
+        { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
+      ]
     default:
       return [
         { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
@@ -423,6 +447,13 @@ const platformDescription = computed(() => {
         return t('keys.useKeyModal.grok.codexDescription')
       }
       return t('keys.useKeyModal.grok.description')
+    case 'cursor':
+      return t('keys.useKeyModal.cursor.description')
+    case 'kiro':
+      if (activeClientTab.value === 'claude') {
+        return t('keys.useKeyModal.kiro.claudeDescription')
+      }
+      return t('keys.useKeyModal.kiro.description')
     default:
       return t('keys.useKeyModal.description')
   }
@@ -455,6 +486,12 @@ const platformNote = computed(() => {
       return activeTab.value === 'windows'
         ? t('keys.useKeyModal.grok.noteWindows')
         : t('keys.useKeyModal.grok.note')
+    case 'cursor':
+      return t('keys.useKeyModal.cursor.note')
+    case 'kiro':
+      return activeClientTab.value === 'claude'
+        ? t('keys.useKeyModal.kiro.claudeNote')
+        : t('keys.useKeyModal.kiro.note')
     default:
       return t('keys.useKeyModal.note')
   }
@@ -514,6 +551,10 @@ const currentFiles = computed((): FileConfig[] => {
         ]
       case 'grok':
         return [generateOpenCodeConfig('grok', apiBase, apiKey)]
+      case 'cursor':
+        return [generateOpenCodeConfig('cursor', apiBase, apiKey)]
+      case 'kiro':
+        return [generateOpenCodeConfig('kiro', apiBase, apiKey)]
       default:
         return [generateOpenCodeConfig('openai', apiBase, apiKey)]
     }
@@ -543,6 +584,23 @@ const currentFiles = computed((): FileConfig[] => {
         return generateGrokCodexFiles(apiBase, apiKey)
       }
       return generateGrokFiles(apiBase, apiKey)
+    case 'cursor':
+      return generateOpenAICompatibleFiles(
+        apiBase,
+        apiKey,
+        CURSOR_DEFAULT_MODEL,
+        t('keys.useKeyModal.cursor.modelComment')
+      )
+    case 'kiro':
+      if (activeClientTab.value === 'claude') {
+        return generateClaudeCodeFilesForModel(baseRoot, apiKey, KIRO_DEFAULT_MODEL)
+      }
+      return generateOpenAICompatibleFiles(
+        apiBase,
+        apiKey,
+        KIRO_DEFAULT_MODEL,
+        t('keys.useKeyModal.kiro.modelComment')
+      )
     default:
       return generateAnthropicFiles(baseUrl, apiKey)
   }
@@ -604,15 +662,25 @@ $env:CLAUDE_CODE_ATTRIBUTION_HEADER=0`
 }
 
 function generateGrokClaudeFiles(baseUrl: string, apiKey: string): FileConfig[] {
+  return generateClaudeCodeFilesForModel(baseUrl, apiKey, 'grok-4.5')
+}
+
+/**
+ * Claude Code 配置，且把所有模型档位锁定到单一 model。
+ * 用于上游模型集合与 Claude 官方档位对不上的平台（grok 只有 grok-4.5，
+ * kiro 的模型 id 带 kiro/ 命名空间前缀），否则 Claude Code 默认请求的
+ * claude-opus / claude-haiku 等档位会被上游判为未知模型。
+ */
+function generateClaudeCodeFilesForModel(baseUrl: string, apiKey: string, model: string): FileConfig[] {
   const environment = {
     ANTHROPIC_BASE_URL: baseUrl,
     ANTHROPIC_AUTH_TOKEN: apiKey,
-    ANTHROPIC_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_OPUS_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'grok-4.5',
-    ANTHROPIC_DEFAULT_FABLE_MODEL: 'grok-4.5',
-    CLAUDE_CODE_SUBAGENT_MODEL: 'grok-4.5',
+    ANTHROPIC_MODEL: model,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+    ANTHROPIC_DEFAULT_FABLE_MODEL: model,
+    CLAUDE_CODE_SUBAGENT_MODEL: model,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     CLAUDE_CODE_ATTRIBUTION_HEADER: '0'
   }
@@ -703,6 +771,59 @@ ${keyword('$env:')}${variable('GEMINI_MODEL')}${operator('=')}${string(`"${model
   }
 
   return { path, content, highlighted }
+}
+
+/**
+ * 通用 OpenAI 兼容（chat/completions）环境变量配置。
+ * cursor / kiro 的上游桥只暴露 chat/completions（Responses API 由网关显式 404），
+ * 且模型 id 必须带平台命名空间前缀，所以这里把 model 一并写进环境变量。
+ */
+function generateOpenAICompatibleFiles(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  modelComment: string
+): FileConfig[] {
+  let path: string
+  let content: string
+  let highlighted: string
+
+  switch (activeTab.value) {
+    case 'unix':
+      path = 'Terminal'
+      content = `export OPENAI_BASE_URL="${baseUrl}"
+export OPENAI_API_KEY="${apiKey}"
+export OPENAI_MODEL="${model}"  # ${modelComment}`
+      highlighted = `${keyword('export')} ${variable('OPENAI_BASE_URL')}${operator('=')}${string(`"${baseUrl}"`)}
+${keyword('export')} ${variable('OPENAI_API_KEY')}${operator('=')}${string(`"${apiKey}"`)}
+${keyword('export')} ${variable('OPENAI_MODEL')}${operator('=')}${string(`"${model}"`)}  ${comment(`# ${modelComment}`)}`
+      break
+    case 'cmd':
+      path = 'Command Prompt'
+      content = `set OPENAI_BASE_URL=${baseUrl}
+set OPENAI_API_KEY=${apiKey}
+set OPENAI_MODEL=${model}`
+      highlighted = `${keyword('set')} ${variable('OPENAI_BASE_URL')}${operator('=')}${string(baseUrl)}
+${keyword('set')} ${variable('OPENAI_API_KEY')}${operator('=')}${string(apiKey)}
+${keyword('set')} ${variable('OPENAI_MODEL')}${operator('=')}${string(model)}
+${comment(`REM ${modelComment}`)}`
+      break
+    case 'powershell':
+      path = 'PowerShell'
+      content = `$env:OPENAI_BASE_URL="${baseUrl}"
+$env:OPENAI_API_KEY="${apiKey}"
+$env:OPENAI_MODEL="${model}"  # ${modelComment}`
+      highlighted = `${keyword('$env:')}${variable('OPENAI_BASE_URL')}${operator('=')}${string(`"${baseUrl}"`)}
+${keyword('$env:')}${variable('OPENAI_API_KEY')}${operator('=')}${string(`"${apiKey}"`)}
+${keyword('$env:')}${variable('OPENAI_MODEL')}${operator('=')}${string(`"${model}"`)}  ${comment(`# ${modelComment}`)}`
+      break
+    default:
+      path = 'Terminal'
+      content = ''
+      highlighted = ''
+  }
+
+  return [{ path, content, highlighted }]
 }
 
 function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
@@ -1318,6 +1439,47 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       }
     }
   }
+  // cursor / kiro 的模型 id 带平台命名空间前缀（见 useModelWhitelist.ts）
+  const cursorModels = {
+    'cursor/default': {
+      name: 'Cursor Auto',
+      limit: { context: 200000, output: 64000 }
+    },
+    'cursor/claude-sonnet-5': {
+      name: 'Claude Sonnet 5',
+      limit: { context: 200000, output: 64000 }
+    },
+    'cursor/claude-opus-4-8': {
+      name: 'Claude Opus 4.8',
+      limit: { context: 200000, output: 64000 }
+    },
+    'cursor/gpt-5.6-sol': {
+      name: 'GPT-5.6 Sol',
+      limit: { context: 400000, output: 128000 }
+    },
+    'cursor/composer-2.5': {
+      name: 'Composer 2.5',
+      limit: { context: 200000, output: 64000 }
+    }
+  }
+  const kiroModels = {
+    'kiro/auto': {
+      name: 'Kiro Auto',
+      limit: { context: 200000, output: 64000 }
+    },
+    'kiro/claude-sonnet-4.6': {
+      name: 'Claude Sonnet 4.6',
+      limit: { context: 200000, output: 64000 }
+    },
+    'kiro/claude-opus-4.6': {
+      name: 'Claude Opus 4.6',
+      limit: { context: 200000, output: 64000 }
+    },
+    'kiro/claude-haiku-4.5': {
+      name: 'Claude Haiku 4.5',
+      limit: { context: 200000, output: 64000 }
+    }
+  }
   const grokModels = {
     'grok-4.5': {
       name: 'Grok 4.5',
@@ -1356,6 +1518,14 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     provider[platform].npm = '@ai-sdk/openai'
     provider[platform].name = 'Grok'
     provider[platform].models = grokModels
+  } else if (platform === 'cursor') {
+    provider[platform].npm = '@ai-sdk/openai'
+    provider[platform].name = 'Cursor'
+    provider[platform].models = cursorModels
+  } else if (platform === 'kiro') {
+    provider[platform].npm = '@ai-sdk/openai'
+    provider[platform].name = 'Kiro'
+    provider[platform].models = kiroModels
   }
 
   const agent =

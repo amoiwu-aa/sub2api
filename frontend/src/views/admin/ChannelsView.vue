@@ -760,7 +760,7 @@ const form = reactive({
 let abortController: AbortController | null = null
 
 // ── Platform config ──
-const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok']
+const platformOrder: GroupPlatform[] = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'cursor', 'kiro']
 
 // ── Helpers ──
 function formatDate(value: string): string {
@@ -1089,6 +1089,21 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
   const featuresConfig: Record<string, unknown> = editingChannel.value?.features_config
     ? { ...editingChannel.value.features_config }
     : {}
+
+  // Preserve pricing / mapping rows whose platform this form does not render
+  // (same rationale as features_config above). Both maps are rebuilt from
+  // form.platforms and PUT wholesale, so a platform the backend already supports
+  // but platformOrder does not list yet would otherwise be wiped by open + save.
+  for (const entry of editingChannel.value?.model_pricing || []) {
+    if (!platformOrder.includes((entry.platform || 'anthropic') as GroupPlatform)) {
+      model_pricing.push(entry)
+    }
+  }
+  for (const [platform, mapping] of Object.entries(editingChannel.value?.model_mapping || {})) {
+    if (!platformOrder.includes(platform as GroupPlatform)) {
+      model_mapping[platform] = { ...mapping }
+    }
+  }
 
   for (const section of form.platforms) {
     if (!section.enabled) continue

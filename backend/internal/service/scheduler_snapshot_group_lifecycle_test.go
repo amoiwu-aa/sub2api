@@ -14,6 +14,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// canonicalBucketCount 是单个分组的 canonical bucket 数量，直接由生产代码的平台表推导。
+//
+// 早先这里散落着字面量 12（5 个平台：anthropic/gemini 各 3 个 mode，其余各 2 个）。
+// 每新增一个平台，这批断言就会集体变红，而它们想锁住的其实是「reopen token / 锁 /
+// unlock 的数量与 canonical bucket 一一对应」这条不变式，不是那个具体数字。
+var canonicalBucketCount = len(schedulerCanonicalBuckets(1))
+
+// canonicalAccountQueryCount 是重建一个分组产生的账号查询次数。
+// 每个平台一次（single 与 forced 复用同一份结果），anthropic/gemini 的 mixed 各再来一次。
+var canonicalAccountQueryCount = len(schedulerSnapshotPlatforms()) + 2
+
 type groupLifecycleTestCache struct {
 	*retirementRaceCache
 
@@ -324,19 +335,29 @@ func newGroupLifecycleTestService(cache SchedulerCache, accounts AccountReposito
 	return NewSchedulerSnapshotService(cache, nil, accounts, groups, &config.Config{RunMode: runMode})
 }
 
+// expectedGroupLifecycleBuckets 返回一个分组的 canonical bucket 集合。
+//
+// 这里刻意复用生产实现而不是再抄一份平台表。周围这些用例要锁的是「生命周期事件恰好
+// reopen/retire 全部 canonical bucket」这条行为，不是平台清单本身；早先的手抄副本每
+// 新增一个平台就整片变红，而它变红的方式（数量对不上）对读者毫无信息量。
+// 平台清单本身由 TestSchedulerSnapshotPlatformsCoverage 单独钉住。
 func expectedGroupLifecycleBuckets(groupID int64) []SchedulerBucket {
-	platforms := []string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok}
-	buckets := make([]SchedulerBucket, 0, 12)
-	for _, platform := range platforms {
-		buckets = append(buckets,
-			SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeSingle},
-			SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeForced},
-		)
-		if platform == PlatformAnthropic || platform == PlatformGemini {
-			buckets = append(buckets, SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeMixed})
-		}
-	}
-	return buckets
+	return schedulerCanonicalBuckets(groupID)
+}
+
+// TestSchedulerSnapshotPlatformsCoverage 钉住调度快照覆盖的平台清单。
+//
+// 新增平台时这里会变红——这是刻意的：漏掉一个平台意味着它的账号永远进不了调度快照，
+// 而那种故障在运行时是完全静默的（只表现为"选不到号"）。
+func TestSchedulerSnapshotPlatformsCoverage(t *testing.T) {
+	platforms := schedulerSnapshotPlatforms()
+	require.Equal(t, []string{
+		PlatformAnthropic, PlatformGemini, PlatformOpenAI,
+		PlatformAntigravity, PlatformGrok, PlatformCursor, PlatformKiro,
+	}, platforms[:])
+
+	// anthropic/gemini 支持 mixed 模式，其余平台只有 single/forced。
+	require.Len(t, schedulerCanonicalBuckets(1), 2*7+2)
 }
 
 func bucketStrings(buckets []SchedulerBucket) map[string]struct{} {
@@ -441,7 +462,7 @@ func TestSchedulerGroupLifecycleActiveReopensAndRebuildsAllCurrentBuckets(t *tes
 	accounts.beforeLoad = func() {
 		held, tokenCount := cache.leaseHeldAndTokenCount()
 		require.False(t, held, "the group lifecycle lease must be released before the first account query")
-		require.Equal(t, 12, tokenCount, "all reopen tokens must be prepared before the first account query")
+		require.Equal(t, canonicalBucketCount, tokenCount, "all reopen tokens must be prepared before the first account query")
 	}
 	svc := newGroupLifecycleTestService(cache, accounts, groups, config.RunModeStandard)
 	seen := make(map[batchSeenKey]struct{})
@@ -453,8 +474,8 @@ func TestSchedulerGroupLifecycleActiveReopensAndRebuildsAllCurrentBuckets(t *tes
 	registered, err := cache.retirementRaceCache.ListBuckets(context.Background())
 	require.NoError(t, err)
 	require.Contains(t, bucketStrings(registered), historical.String())
-	require.Len(t, cache.tokens(), 12)
-	require.Equal(t, 7, accounts.callCount())
+	require.Len(t, cache.tokens(), canonicalBucketCount)
+	require.Equal(t, canonicalAccountQueryCount, accounts.callCount())
 	require.Equal(t, 1, accounts.platformCallCount(PlatformOpenAI))
 	for _, bucket := range current {
 		_, published := cache.counts(bucket)
@@ -472,16 +493,16 @@ func TestSchedulerGroupLifecycleActiveReopensAndRebuildsAllCurrentBuckets(t *tes
 	require.True(t, cache.releaseDeadline)
 	require.NoError(t, cache.releaseCtxErr)
 	_, reopenHeld := cache.lifecycleMutationLeaseStates()
-	require.Len(t, reopenHeld, 12)
+	require.Len(t, reopenHeld, canonicalBucketCount)
 	for _, held := range reopenHeld {
 		require.True(t, held)
 	}
 	lockTTLs, unlockCalls := cache.lockStats()
-	require.Len(t, lockTTLs, 12)
+	require.Len(t, lockTTLs, canonicalBucketCount)
 	for _, ttl := range lockTTLs {
 		require.Equal(t, 30*time.Second, ttl)
 	}
-	require.Equal(t, 12, unlockCalls)
+	require.Equal(t, canonicalBucketCount, unlockCalls)
 	requireLifecycleSeen(t, seen, groupID)
 }
 
@@ -497,8 +518,8 @@ func TestSchedulerGroupLifecycleInactiveThenActiveAuthoritativelyReopens(t *test
 	groups.set(&Group{ID: groupID, Status: StatusActive, Hydrated: true}, nil)
 	require.NoError(t, svc.handleGroupEvent(context.Background(), ptrInt64(groupID), make(map[batchSeenKey]struct{})))
 
-	require.Len(t, cache.tokens(), 12)
-	require.Equal(t, 7, accounts.callCount())
+	require.Len(t, cache.tokens(), canonicalBucketCount)
+	require.Equal(t, canonicalAccountQueryCount, accounts.callCount())
 	for _, bucket := range expectedGroupLifecycleBuckets(groupID) {
 		_, published := cache.counts(bucket)
 		require.Equal(t, 1, published, bucket.String())
@@ -546,15 +567,15 @@ func TestSchedulerGroupLifecycleEpochPreventsABA(t *testing.T) {
 	groups.set(&Group{ID: groupID, Status: StatusActive, Hydrated: true}, nil)
 	require.NoError(t, svc.handleGroupEvent(context.Background(), ptrInt64(groupID), make(map[batchSeenKey]struct{})))
 	firstActiveTokens := cache.tokens()
-	require.Len(t, firstActiveTokens, 12)
+	require.Len(t, firstActiveTokens, canonicalBucketCount)
 
 	groups.set(&Group{ID: groupID, Status: StatusDisabled, Hydrated: true}, nil)
 	require.NoError(t, svc.handleGroupEvent(context.Background(), ptrInt64(groupID), make(map[batchSeenKey]struct{})))
 	groups.set(&Group{ID: groupID, Status: StatusActive, Hydrated: true}, nil)
 	require.NoError(t, svc.handleGroupEvent(context.Background(), ptrInt64(groupID), make(map[batchSeenKey]struct{})))
 	allTokens := cache.tokens()
-	require.Len(t, allTokens, 24)
-	require.Greater(t, allTokens[12].Epoch, firstActiveTokens[0].Epoch)
+	require.Len(t, allTokens, 2*canonicalBucketCount)
+	require.Greater(t, allTokens[canonicalBucketCount].Epoch, firstActiveTokens[0].Epoch)
 	require.ErrorIs(t, cache.SetSnapshot(context.Background(), firstActiveTokens[0].Bucket, firstActiveTokens[0], nil), ErrSchedulerBucketWriteFenced)
 }
 
@@ -571,11 +592,11 @@ func TestSchedulerGroupLifecycleSeenIsIndependentAndDeduplicatesGroupEvents(t *t
 
 	require.NoError(t, svc.handleGroupEvent(context.Background(), ptrInt64(groupID), seen))
 	require.Equal(t, 1, groups.callCount())
-	require.Equal(t, 7, accounts.callCount())
+	require.Equal(t, canonicalAccountQueryCount, accounts.callCount())
 	requireLifecycleSeen(t, seen, groupID)
 	require.NoError(t, svc.handleGroupEvent(context.Background(), ptrInt64(groupID), seen))
 	require.Equal(t, 1, groups.callCount())
-	require.Equal(t, 7, accounts.callCount())
+	require.Equal(t, canonicalAccountQueryCount, accounts.callCount())
 }
 
 func TestSchedulerGroupLifecycleFailuresDoNotMarkSeen(t *testing.T) {

@@ -14,7 +14,7 @@
         class="sidebar-logo flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl shadow-glow transition-opacity hover:opacity-80"
         @click="handleMenuItemClick(homePath)"
       >
-        <img v-if="settingsLoaded" :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
+        <img v-if="settingsLoaded" :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
       </router-link>
       <div class="sidebar-brand" :class="{ 'sidebar-brand-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
         <router-link
@@ -33,9 +33,24 @@
     <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
-        <!-- Admin Section -->
-        <div class="sidebar-section">
-          <template v-for="item in adminNavItems" :key="item.path">
+        <!-- Admin Section：按职能分组。
+             16 个同权重条目平铺时，找一项只能从头扫到尾；分节标题给了
+             一层可跳过的结构，也让「这个功能属于哪一块」有了答案。 -->
+        <div v-for="group in adminNavSections" :key="group.key" class="sidebar-section">
+          <div
+            v-if="group.title"
+            class="sidebar-section-title"
+            :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }"
+            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+          >
+            <span
+              class="sidebar-section-title-text"
+              :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }"
+            >
+              {{ group.title }}
+            </span>
+          </div>
+          <template v-for="item in group.items" :key="item.path">
             <!-- Collapsible group (has children) -->
             <template v-if="item.children?.length">
               <button
@@ -202,6 +217,8 @@ interface NavItem {
   path: string
   label: string
   icon: unknown
+  /** 所属分节的 i18n key；同一 key 的相邻条目会被归到一个带标题的分组下。 */
+  section?: string
   iconSvg?: string
   hideInSimpleMode?: boolean
   children?: NavItem[]
@@ -705,6 +722,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
+    { path: '/env-check', label: t('nav.envCheck'), icon: ShieldIcon, hideInSimpleMode: true },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
@@ -730,6 +748,41 @@ function finalizeNav(items: NavItem[]): NavItem[] {
 // User navigation items (for regular users)
 const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(true)))
 
+/** 分节的呈现顺序。与 adminNavItems 的声明顺序解耦。 */
+const ADMIN_NAV_SECTION_ORDER = ['overview', 'customers', 'resources', 'growth', 'system'] as const
+
+/**
+ * adminNavSections 把平铺的管理导航按 section 分桶。
+ *
+ * 刻意不按「相邻同 section 才合并」来做：adminNavItems 的声明顺序是历史形成的
+ * （订阅管理排在渠道管理之后等），按相邻合并会让同一个分节标题重复出现好几次。
+ * 这里按固定分节顺序分桶，桶内保持原有相对顺序，因此简易模式下条目被过滤或
+ * 追加也不会错位。没有 section 的条目（自定义菜单等）归入末尾的无标题分组。
+ */
+const adminNavSections = computed(() => {
+  const buckets = new Map<string, NavItem[]>()
+  const ungrouped: NavItem[] = []
+
+  for (const item of adminNavItems.value) {
+    if (!item.section) {
+      ungrouped.push(item)
+      continue
+    }
+    const bucket = buckets.get(item.section)
+    if (bucket) bucket.push(item)
+    else buckets.set(item.section, [item])
+  }
+
+  const groups: { key: string; title: string; items: NavItem[] }[] = []
+  for (const key of ADMIN_NAV_SECTION_ORDER) {
+    const items = buckets.get(key)
+    if (items?.length) groups.push({ key, title: t(`nav.section.${key}`), items })
+  }
+  if (ungrouped.length) groups.push({ key: '_ungrouped', title: '', items: ungrouped })
+  return groups
+})
+
+
 // Personal navigation items (for admin's "My Account" section, without Dashboard).
 // Admins access 可用渠道 from this section just like regular users — there is no
 // separate admin entry, since the page is purely a user-facing view.
@@ -752,13 +805,13 @@ const customMenuItemsForAdmin = computed(() => {
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
-    { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
-    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
-    { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
-    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
+    { path: '/admin/dashboard', label: t('nav.dashboard'), section: 'overview', icon: DashboardIcon },
+    { path: '/admin/ops', label: t('nav.ops'), section: 'overview', icon: ChartIcon, featureFlag: flagOpsMonitoring },
+    { path: '/admin/users', label: t('nav.users'), section: 'customers', icon: UsersIcon, hideInSimpleMode: true },
+    { path: '/admin/groups', label: t('nav.groups'), section: 'customers', icon: FolderIcon, hideInSimpleMode: true },
     {
       path: '/admin/channels',
-      label: t('nav.channelManagement'),
+      label: t('nav.channelManagement'), section: 'resources',
       icon: ChannelIcon,
       hideInSimpleMode: true,
       expandOnly: true,
@@ -767,13 +820,13 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
-    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
+    { path: '/admin/subscriptions', label: t('nav.subscriptions'), section: 'customers', icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: '/admin/accounts', label: t('nav.accounts'), section: 'resources', icon: GlobeIcon },
+    { path: '/admin/announcements', label: t('nav.announcements'), section: 'system', icon: BellIcon },
+    { path: '/admin/proxies', label: t('nav.proxies'), section: 'resources', icon: ServerIcon },
     {
       path: '/admin/security-audit',
-      label: t('nav.securityAudit'),
+      label: t('nav.securityAudit'), section: 'system',
       icon: ShieldIcon,
       hideInSimpleMode: true,
       expandOnly: true,
@@ -783,11 +836,11 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/prompt-audit', label: t('nav.promptAudit'), icon: ShieldIcon },
       ],
     },
-    { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
-    { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
+    { path: '/admin/redeem', label: t('nav.redeemCodes'), section: 'growth', icon: TicketIcon, hideInSimpleMode: true },
+    { path: '/admin/promo-codes', label: t('nav.promoCodes'), section: 'growth', icon: GiftIcon, hideInSimpleMode: true },
     {
       path: '/admin/affiliates',
-      label: t('nav.affiliateManagement'),
+      label: t('nav.affiliateManagement'), section: 'growth',
       icon: UsersIcon,
       hideInSimpleMode: true,
       expandOnly: true,
@@ -800,7 +853,7 @@ const adminNavItems = computed((): NavItem[] => {
     },
     {
       path: '/admin/orders',
-      label: t('nav.orderManagement'),
+      label: t('nav.orderManagement'), section: 'growth',
       icon: OrderIcon,
       hideInSimpleMode: true,
       expandOnly: true,
@@ -811,8 +864,8 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
       ],
     },
-    { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
-    { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
+    { path: '/admin/usage', label: t('nav.usage'), section: 'system', icon: ChartIcon },
+    { path: '/admin/audit-logs', label: t('nav.auditLogs'), section: 'system', icon: ShieldIcon, hideInSimpleMode: true }
   ]
 
   const visible = applyFeatureFlags(baseItems)
@@ -821,7 +874,7 @@ const adminNavItems = computed((): NavItem[] => {
   if (authStore.isSimpleMode) {
     const filtered = visible.filter(item => !item.hideInSimpleMode)
     filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon })
-    filtered.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
+    filtered.push({ path: '/admin/settings', label: t('nav.settings'), section: 'system', icon: CogIcon })
     for (const cm of customMenuItemsForAdmin.value) {
       filtered.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
     }

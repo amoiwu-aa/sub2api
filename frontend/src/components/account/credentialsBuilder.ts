@@ -25,6 +25,82 @@ export function applyAntigravityProjectID(
   }
 }
 
+// ========== 原生桥接平台（cursor / kiro）的能力矩阵 ==========
+
+/**
+ * 原生桥接平台：它们不复用 Anthropic/OpenAI 的凭据、测试与用量链路，
+ * 只经由 internal/pkg/{cursor,kiro} 的桥接层转发。
+ * 新增同类平台时只改这一处，避免各处再抄一遍平台字面量而悄悄漏掉。
+ */
+export const NATIVE_BRIDGE_PLATFORMS = ['cursor', 'kiro'] as const
+
+export type NativeBridgePlatform = (typeof NATIVE_BRIDGE_PLATFORMS)[number]
+
+const NATIVE_BRIDGE_PLATFORM_SET = new Set<string>(NATIVE_BRIDGE_PLATFORMS)
+
+export function isNativeBridgePlatform(
+  platform: string | undefined | null
+): platform is NativeBridgePlatform {
+  return !!platform && NATIVE_BRIDGE_PLATFORM_SET.has(platform)
+}
+
+/**
+ * 是否必须走平台专属的 token 刷新端点。
+ * 通用 refreshCredentials/batchRefresh 对未登记的平台会兜底到 Anthropic OAuth，
+ * 等于把 cursor/kiro 的 refresh_token 发到 Anthropic 的 token 端点。
+ */
+export function requiresDedicatedTokenRefresh(platform: string | undefined | null): boolean {
+  return isNativeBridgePlatform(platform)
+}
+
+/**
+ * 后端是否实现了该平台的连接测试。
+ *
+ * cursor / kiro 现已实现（account_test_native_bridge.go）：两者都用弹窗里
+ * 选中的模型真发一轮最小对话。只读探活（如 kiro 的 ListAvailableModels）
+ * 不烧额度，但答不了运营方真正要问的"这个模型在这个号上能不能跑"——
+ * "凭证没过期"不等于"能出内容"。所以这里对所有平台都返回 true，
+ * 保留这个函数是为了下次接入新平台时有个显式的登记点。
+ */
+export function supportsConnectionTest(_platform: string | undefined | null): boolean {
+  return true
+}
+
+/**
+ * 是否支持在「重新授权」弹窗里换凭证。
+ * ReAuthAccountModal 走的是 Anthropic 式「生成授权 URL → 交换 code」，而 cursor 是
+ * 浏览器 PKCE 登录后轮询、kiro 是粘贴本机 token JSON，两者都不适配这条流程；
+ * 未登记的平台会落到 Claude 兜底分支，把 Anthropic 的 token 覆盖上去。
+ */
+export function supportsReAuthorize(platform: string | undefined | null): boolean {
+  return !isNativeBridgePlatform(platform)
+}
+
+/**
+ * 上游是否有可查的用量/配额接口。
+ * cursor 没有用量接口（token 由本地估算），kiro 没有单账号配额接口，
+ * 二者都不该渲染成 0 —— 那会被当成"额度没用过"。
+ */
+export function supportsUpstreamUsageQuery(platform: string | undefined | null): boolean {
+  return !isNativeBridgePlatform(platform)
+}
+
+/**
+ * OAuth 账号是否支持按账号配置模型白名单。
+ * 与后端 Account.IsModelSupported 读取 credentials.model_mapping 的平台一致。
+ */
+export function supportsOAuthModelRestriction(platform: string | undefined | null): boolean {
+  return platform === 'openai' || platform === 'grok' || isNativeBridgePlatform(platform)
+}
+
+/**
+ * 是否支持模型改名（mapping）。cursor/kiro 的桥接只读白名单、不做重命名，
+ * 放出映射入口等于承诺一次不会发生的改写。
+ */
+export function supportsOAuthModelMapping(platform: string | undefined | null): boolean {
+  return supportsOAuthModelRestriction(platform) && !isNativeBridgePlatform(platform)
+}
+
 // ========== 请求头覆写（anthropic/openai 的 api_key 账号 + grok 的 api_key/oauth 账号） ==========
 
 export const HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY = 'header_override_enabled'
@@ -43,6 +119,8 @@ export function isHeaderOverrideCapable(platform: string, type: string): boolean
   if (platform === 'grok') {
     return type === 'apikey' || type === 'oauth'
   }
+  // cursor/kiro 的请求头由桥接层自己拼（protobuf / Amazon Q 签名），
+  // 后端 IsHeaderOverrideEligible 也不放行，故落到这里返回 false。
   return false
 }
 

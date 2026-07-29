@@ -491,6 +491,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/env-check',
+    name: 'EnvCheck',
+    component: () => import('@/views/user/EnvCheckView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Claude Environment Check',
+      titleKey: 'envCheck.title',
+      descriptionKey: 'envCheck.description'
+    }
+  },
+  {
     path: '/admin/subscriptions',
     name: 'AdminSubscriptions',
     component: () => import('@/views/admin/SubscriptionsView.vue'),

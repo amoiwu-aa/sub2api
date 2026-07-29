@@ -160,6 +160,32 @@
             <PlatformIcon platform="grok" size="sm" />
             Grok
           </button>
+          <button
+            type="button"
+            @click="form.platform = 'kiro'"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'kiro'
+                ? 'bg-white text-amber-600 shadow-sm dark:bg-dark-600 dark:text-amber-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="kiro" size="sm" />
+            Kiro
+          </button>
+          <button
+            type="button"
+            @click="form.platform = 'cursor'"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'cursor'
+                ? 'bg-white text-indigo-600 shadow-sm dark:bg-dark-600 dark:text-indigo-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="cursor" size="sm" />
+            Cursor
+          </button>
         </div>
       </div>
 
@@ -1095,6 +1121,140 @@
               t('admin.accounts.setupTokenLongLived')
             }}</span>
           </label>
+        </div>
+      </div>
+
+      <!-- Add Method (Kiro / Cursor)
+           用与「账号类型」相同的卡片形态，而不是小单选：对这两个平台来说
+           授权方式就是**唯一**的主要选择（它们没有单独的账号类型），
+           视觉分量应当对齐 Anthropic 的账号类型卡片。 -->
+      <div v-if="form.platform === 'kiro'">
+        <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            @click="kiroAuthMode = 'web'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              kiroAuthMode === 'web'
+                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                : 'border-gray-200 hover:border-amber-300 dark:border-dark-600 dark:hover:border-amber-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                kiroAuthMode === 'web'
+                  ? 'bg-amber-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="globe" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.kiro.webLogin')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.kiro.webLoginSub')
+              }}</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            @click="kiroAuthMode = 'paste'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              kiroAuthMode === 'paste'
+                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                : 'border-gray-200 hover:border-amber-300 dark:border-dark-600 dark:hover:border-amber-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                kiroAuthMode === 'paste'
+                  ? 'bg-amber-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="clipboard" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.kiro.pasteFile')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.kiro.pasteFileSub')
+              }}</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div v-else-if="form.platform === 'cursor'">
+        <label class="input-label">{{ t('admin.accounts.addMethod') }}</label>
+        <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            @click="cursorAuthMode = 'browser'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              cursorAuthMode === 'browser'
+                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                : 'border-gray-200 hover:border-indigo-300 dark:border-dark-600 dark:hover:border-indigo-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                cursorAuthMode === 'browser'
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="globe" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.cursor.browserLogin')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.cursor.browserLoginSub')
+              }}</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            @click="cursorAuthMode = 'cookie'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              cursorAuthMode === 'cookie'
+                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                : 'border-gray-200 hover:border-indigo-300 dark:border-dark-600 dark:hover:border-indigo-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                cursorAuthMode === 'cookie'
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="clipboard" size="sm" />
+            </div>
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.cursor.pasteCookie')
+              }}</span>
+              <span class="block truncate text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.cursor.pasteCookieSub')
+              }}</span>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -3146,6 +3306,183 @@
 
     </form>
 
+    <!-- Step 2: Kiro credential paste.
+         Kiro has no server-initiated OAuth flow (neither does the reverse proxy),
+         so operators paste the token file that Kiro wrote on their own machine. -->
+    <!-- Step 2: Kiro。
+         网页登录是首选：portal 只放行 localhost 回调，服务器收不到，所以
+         回调页在管理员本机打不开——但授权码就在地址栏里，粘回来即可。
+         企业（IAM Identity Center）账号要走两段：portal 那次回调只是交接，
+         真正的授权码在随后 AWS 那次回调里，所以这里会再要一次回调地址。 -->
+    <div v-else-if="form.platform === 'kiro'" class="space-y-5">
+      <!-- 网页登录 -->
+      <div v-if="kiroAuthMode === 'web'" class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.accounts.kiro.webHint') }}
+        </p>
+        <button
+          v-if="!kiroLoginUrl"
+          type="button"
+          class="btn btn-secondary w-full"
+          :disabled="kiroImporting"
+          @click="handleKiroStartWebLogin"
+        >
+          {{ t('admin.accounts.kiro.generateLoginUrl') }}
+        </button>
+        <template v-else>
+          <!-- 第二段：portal 认出这是企业账号之后才出现 -->
+          <div
+            v-if="kiroLoginStage === 'idc'"
+            class="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20"
+          >
+            <p class="text-xs text-blue-800 dark:text-blue-300">
+              {{ t('admin.accounts.kiro.idcRequiredHint', { provider: kiroIdcProvider }) }}
+            </p>
+          </div>
+          <div>
+            <label class="input-label">
+              {{ kiroLoginStage === 'idc'
+                ? t('admin.accounts.kiro.idcLoginUrlLabel')
+                : t('admin.accounts.kiro.loginUrlLabel') }}
+            </label>
+            <div class="mt-1 flex gap-2">
+              <input :value="kiroLoginUrl" readonly class="input flex-1 font-mono text-xs" />
+              <a :href="kiroLoginUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary shrink-0">
+                {{ t('admin.accounts.kiro.openInBrowser') }}
+              </a>
+            </div>
+          </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+            <p class="text-xs text-amber-800 dark:text-amber-300">
+              {{ t('admin.accounts.kiro.callbackHint') }}
+            </p>
+            <code class="mt-1 block break-all text-xs text-amber-700 dark:text-amber-400">
+              {{ kiroCallbackExample }}
+            </code>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.kiro.callbackLabel') }}</label>
+            <textarea
+              v-model="kiroCallback"
+              rows="3"
+              spellcheck="false"
+              class="input mt-1 font-mono text-xs"
+              :placeholder="kiroCallbackExample"
+            ></textarea>
+          </div>
+        </template>
+      </div>
+
+      <!-- 粘贴本机凭证文件 -->
+      <div v-else class="space-y-4">
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+          <p class="text-sm text-amber-800 dark:text-amber-300">
+            {{ t('admin.accounts.kiro.intro') }}
+          </p>
+          <code class="mt-2 block text-xs text-amber-700 dark:text-amber-400">
+            ~/.aws/sso/cache/kiro-auth-token.json
+          </code>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.kiro.tokenJsonLabel') }}</label>
+          <textarea
+            v-model="kiroTokenJson"
+            rows="9"
+            spellcheck="false"
+            class="input mt-1 font-mono text-xs"
+            :placeholder="kiroTokenJsonPlaceholder"
+          ></textarea>
+        </div>
+
+        <div>
+          <label class="input-label">
+            {{ t('admin.accounts.kiro.clientRegistrationLabel') }}
+            <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.kiro.clientRegistrationHint') }}
+            </span>
+          </label>
+          <textarea
+            v-model="kiroClientRegistrationJson"
+            rows="4"
+            spellcheck="false"
+            class="input mt-1 font-mono text-xs"
+            placeholder='{"clientId": "...", "clientSecret": "..."}'
+          ></textarea>
+        </div>
+      </div>
+
+      <p v-if="kiroImportError" class="text-sm text-red-600 dark:text-red-400">
+        {{ kiroImportError }}
+      </p>
+    </div>
+
+    <!-- Step 2: Cursor login.
+         Two paths to the same place — a browser PKCE login we poll for, or an
+         existing cookie. Either way the result must be a type=session JWT;
+         a type=web token is rejected by the Agent. -->
+    <div v-else-if="form.platform === 'cursor'" class="space-y-5">
+      <div v-if="cursorAuthMode === 'browser'" class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.accounts.cursor.browserHint') }}
+        </p>
+        <button
+          v-if="!cursorLoginUrl"
+          type="button"
+          class="btn btn-secondary w-full"
+          :disabled="cursorBusy"
+          @click="handleCursorStartLogin"
+        >
+          {{ t('admin.accounts.cursor.generateLoginUrl') }}
+        </button>
+        <template v-else>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cursor.loginUrlLabel') }}</label>
+            <div class="mt-1 flex gap-2">
+              <input :value="cursorLoginUrl" readonly class="input flex-1 font-mono text-xs" />
+              <a :href="cursorLoginUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary shrink-0">
+                {{ t('admin.accounts.cursor.openInBrowser') }}
+              </a>
+            </div>
+          </div>
+          <p class="text-sm text-indigo-600 dark:text-indigo-400">
+            {{
+              cursorPolling
+                ? t('admin.accounts.cursor.waitingForLogin')
+                : t('admin.accounts.cursor.pollStopped')
+            }}
+          </p>
+        </template>
+      </div>
+
+      <div v-else class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('admin.accounts.cursor.cookieHint') }}
+        </p>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.cursor.cookieLabel') }}</label>
+          <textarea
+            v-model="cursorCookie"
+            rows="4"
+            spellcheck="false"
+            class="input mt-1 font-mono text-xs"
+            placeholder="WorkosCursorSessionToken=user_01...::eyJ..."
+          ></textarea>
+        </div>
+        <div>
+          <label class="input-label">
+            {{ t('admin.accounts.cursor.teamIdLabel') }}
+            <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+              {{ t('common.optional') }}
+            </span>
+          </label>
+          <input v-model="cursorSelectedTeamId" class="input mt-1" />
+        </div>
+      </div>
+
+      <p v-if="cursorError" class="text-sm text-red-600 dark:text-red-400">{{ cursorError }}</p>
+    </div>
+
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
       <OAuthAuthorizationFlow
@@ -3229,7 +3566,41 @@
           {{ t('common.back') }}
         </button>
         <button
-          v-if="isManualInputMethod"
+          v-if="form.platform === 'cursor' && cursorAuthMode === 'cookie'"
+          type="button"
+          :disabled="cursorBusy || !cursorCookie.trim()"
+          class="btn btn-primary"
+          @click="handleCursorImport"
+        >
+          <svg v-if="cursorBusy" class="-ml-1 mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
+          </svg>
+          {{ cursorBusy ? t('admin.accounts.oauth.verifying') : t('admin.accounts.cursor.importAndCreate') }}
+        </button>
+        <button
+          v-else-if="form.platform === 'kiro'"
+          type="button"
+          :disabled="kiroImporting || !kiroSubmitReady"
+          class="btn btn-primary"
+          @click="kiroAuthMode === 'web' ? handleKiroCompleteWebLogin() : handleKiroImport()"
+        >
+          <svg v-if="kiroImporting" class="-ml-1 mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
+          </svg>
+          {{ kiroImporting ? t('admin.accounts.oauth.verifying') : t('admin.accounts.kiro.importAndCreate') }}
+        </button>
+        <button
+          v-else-if="isManualInputMethod"
           type="button"
           :disabled="!canExchangeCode"
           class="btn btn-primary"
@@ -3496,7 +3867,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import {
@@ -3591,6 +3962,9 @@ const oauthStepTitle = computed(() => {
   if (form.platform === 'gemini') return t('admin.accounts.oauth.gemini.title')
   if (form.platform === 'antigravity') return t('admin.accounts.oauth.antigravity.title')
   if (form.platform === 'grok') return t('admin.accounts.oauth.grok.title')
+  // 少了这两个分支就会落到兜底的「Claude 账号授权」——选 Kiro 却显示 Claude。
+  if (form.platform === 'kiro') return t('admin.accounts.oauth.kiroTitle')
+  if (form.platform === 'cursor') return t('admin.accounts.oauth.cursorTitle')
   return t('admin.accounts.oauth.title')
 })
 
@@ -4086,6 +4460,259 @@ const isOAuthFlow = computed(() => {
 
 const isGrokSSOInputMethod = computed(() => form.platform === 'grok' && oauthFlowRef.value?.inputMethod === 'sso_cookie')
 
+// ── Kiro：粘贴式建号 ──────────────────────────────────────────────
+// 'web' = portal 网页登录（默认，不需要本机装 Kiro）；'paste' = 粘贴本机凭证文件。
+//
+// 网页登录对企业（IAM Identity Center）账号要走两段，kiroLoginStage 记着走到哪了：
+// 'portal' 等 Kiro portal 那次回调，'idc' 等随后 AWS OIDC 那次。两段共用同一个
+// session_id，服务端靠它把第一段注册出来的 clientId/clientSecret 带到第二段。
+const kiroAuthMode = ref<'web' | 'paste'>('web')
+const kiroLoginStage = ref<'portal' | 'idc'>('portal')
+const kiroIdcProvider = ref('')
+const kiroLoginUrl = ref('')
+const kiroSessionId = ref('')
+const kiroCallbackPrefix = ref('http://localhost:3128')
+const kiroCallback = ref('')
+const kiroTokenJson = ref('')
+const kiroClientRegistrationJson = ref('')
+const kiroImporting = ref(false)
+const kiroImportError = ref('')
+
+const kiroTokenJsonPlaceholder = `{
+  "accessToken": "...",
+  "refreshToken": "...",
+  "expiresAt": "2026-01-01T00:00:00.000Z",
+  "authMethod": "Social",
+  "profileArn": "arn:aws:codewhisperer:us-east-1:...:profile/...",
+  "provider": "Google"
+}`
+
+const resetKiroImportState = () => {
+  kiroAuthMode.value = 'web'
+  kiroLoginStage.value = 'portal'
+  kiroIdcProvider.value = ''
+  kiroLoginUrl.value = ''
+  kiroSessionId.value = ''
+  kiroCallback.value = ''
+  kiroTokenJson.value = ''
+  kiroClientRegistrationJson.value = ''
+  kiroImportError.value = ''
+  kiroImporting.value = false
+}
+
+// ── Cursor：浏览器 PKCE 登录 / 粘贴 Cookie ─────────────────────────
+const cursorAuthMode = ref<'browser' | 'cookie'>('browser')
+const cursorLoginUrl = ref('')
+const cursorSessionId = ref('')
+const cursorCookie = ref('')
+const cursorSelectedTeamId = ref('')
+const cursorBusy = ref(false)
+const cursorError = ref('')
+const cursorPolling = ref(false)
+let cursorPollTimer: ReturnType<typeof setTimeout> | null = null
+
+const CURSOR_POLL_INTERVAL_MS = 1500
+// 服务端的登录会话 15 分钟过期，客户端比它先停，避免一直问一个已经不存在的会话。
+const CURSOR_POLL_MAX_ATTEMPTS = 400
+
+const stopCursorPolling = () => {
+  if (cursorPollTimer) {
+    clearTimeout(cursorPollTimer)
+    cursorPollTimer = null
+  }
+  cursorPolling.value = false
+}
+
+const resetCursorState = () => {
+  stopCursorPolling()
+  cursorAuthMode.value = 'browser'
+  cursorLoginUrl.value = ''
+  cursorSessionId.value = ''
+  cursorCookie.value = ''
+  cursorSelectedTeamId.value = ''
+  cursorError.value = ''
+  cursorBusy.value = false
+}
+
+const handleCursorStartLogin = async () => {
+  cursorBusy.value = true
+  cursorError.value = ''
+  try {
+    const result = await adminAPI.cursor.startLogin({ proxy_id: form.proxy_id })
+    cursorLoginUrl.value = result.login_url
+    cursorSessionId.value = result.session_id
+    // 浏览器登录没有回调地址可用，只能由前端轮询服务端的会话状态。
+    startCursorPolling()
+  } catch (error: any) {
+    cursorError.value =
+      error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+    appStore.showError(cursorError.value)
+  } finally {
+    cursorBusy.value = false
+  }
+}
+
+const startCursorPolling = () => {
+  stopCursorPolling()
+  cursorPolling.value = true
+  let attempts = 0
+
+  const tick = async () => {
+    if (!cursorPolling.value || !cursorSessionId.value) return
+    attempts++
+    if (attempts > CURSOR_POLL_MAX_ATTEMPTS) {
+      stopCursorPolling()
+      cursorError.value = t('admin.accounts.cursor.loginTimeout')
+      return
+    }
+    try {
+      const result = await adminAPI.cursor.pollLogin(cursorSessionId.value)
+      if (result.pending) {
+        cursorPollTimer = setTimeout(tick, CURSOR_POLL_INTERVAL_MS)
+        return
+      }
+      stopCursorPolling()
+      if (result.credentials) {
+        await createAccountAndFinish('cursor', 'oauth', { ...result.credentials })
+      }
+    } catch (error: any) {
+      stopCursorPolling()
+      cursorError.value =
+        error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.oauth.authFailed')
+      appStore.showError(cursorError.value)
+    }
+  }
+
+  cursorPollTimer = setTimeout(tick, CURSOR_POLL_INTERVAL_MS)
+}
+
+const handleCursorImport = async () => {
+  if (!cursorCookie.value.trim() || cursorBusy.value) return
+
+  cursorBusy.value = true
+  cursorError.value = ''
+  try {
+    // 后端会把 web 态令牌换成 session 态；Agent 只认后者。
+    const result = await adminAPI.cursor.importToken({
+      token: cursorCookie.value,
+      proxy_id: form.proxy_id,
+      selected_team_id: cursorSelectedTeamId.value.trim() || undefined
+    })
+    await createAccountAndFinish('cursor', 'oauth', { ...result.credentials })
+  } catch (error: any) {
+    cursorError.value =
+      error.response?.data?.message || error.response?.data?.detail || t('admin.accounts.cursor.importFailed')
+    appStore.showError(cursorError.value)
+  } finally {
+    cursorBusy.value = false
+  }
+}
+
+// 组件被销毁时定时器还在跑的话，会持续打后端并持有已经无效的表单引用。
+onBeforeUnmount(stopCursorPolling)
+
+// 生成 portal 登录链接。
+const handleKiroStartWebLogin = async () => {
+  if (kiroImporting.value) return
+  kiroImporting.value = true
+  kiroImportError.value = ''
+  try {
+    const result = await adminAPI.kiro.startWebLogin({ proxy_id: form.proxy_id })
+    kiroLoginStage.value = 'portal'
+    kiroIdcProvider.value = ''
+    kiroLoginUrl.value = result.login_url
+    kiroSessionId.value = result.session_id
+    kiroCallbackPrefix.value = result.callback_prefix
+  } catch (error: any) {
+    kiroImportError.value =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      t('admin.accounts.kiro.importFailed')
+    appStore.showError(kiroImportError.value)
+  } finally {
+    kiroImporting.value = false
+  }
+}
+
+// 用粘回来的回调地址把登录推进一步。
+//
+// 社交账号一次就建号；企业账号第一次拿到的是 idc_required——那说明 portal
+// 只做了交接，还得去 AWS 再登录一次，所以这里换上第二段的链接继续等回调。
+const handleKiroCompleteWebLogin = async () => {
+  if (!kiroCallback.value.trim() || kiroImporting.value) return
+  kiroImporting.value = true
+  kiroImportError.value = ''
+  try {
+    const result = await adminAPI.kiro.completeWebLogin({
+      session_id: kiroSessionId.value,
+      callback: kiroCallback.value.trim()
+    })
+    if (result.status === 'idc_required') {
+      kiroLoginStage.value = 'idc'
+      kiroIdcProvider.value = result.provider || ''
+      kiroLoginUrl.value = result.next_login_url || ''
+      kiroCallbackPrefix.value = result.callback_prefix || kiroCallbackPrefix.value
+      // 上一段的回调已经用掉了，留着只会被误当成第二段的答案提交上去。
+      kiroCallback.value = ''
+      return
+    }
+    await createAccountAndFinish('kiro', 'oauth', { ...result.credentials })
+  } catch (error: any) {
+    kiroImportError.value =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      t('admin.accounts.kiro.importFailed')
+    appStore.showError(kiroImportError.value)
+    // 授权码是一次性的：换失败就必须重新走一遍登录，这里清掉链接避免误导。
+    kiroLoginStage.value = 'portal'
+    kiroIdcProvider.value = ''
+    kiroLoginUrl.value = ''
+    kiroSessionId.value = ''
+    kiroCallback.value = ''
+  } finally {
+    kiroImporting.value = false
+  }
+}
+
+const handleKiroImport = async () => {
+  if (!kiroTokenJson.value.trim() || kiroImporting.value) return
+
+  kiroImporting.value = true
+  kiroImportError.value = ''
+  try {
+    // 后端会顺带跑一次真实刷新来验证凭证，所以这里拿到的 credentials 一定可用。
+    const result = await adminAPI.kiro.importToken({
+      token_json: kiroTokenJson.value,
+      client_registration_json: kiroClientRegistrationJson.value.trim() || undefined,
+      proxy_id: form.proxy_id
+    })
+    await createAccountAndFinish('kiro', 'oauth', { ...result.credentials })
+  } catch (error: any) {
+    kiroImportError.value =
+      error.response?.data?.message ||
+      error.response?.data?.detail ||
+      t('admin.accounts.kiro.importFailed')
+    appStore.showError(kiroImportError.value)
+  } finally {
+    kiroImporting.value = false
+  }
+}
+
+// 两种模式各有各的「填够了没有」。
+const kiroSubmitReady = computed(() =>
+  kiroAuthMode.value === 'web'
+    ? !!kiroSessionId.value && !!kiroCallback.value.trim()
+    : !!kiroTokenJson.value.trim()
+)
+
+// 两段回调的地址长得不一样：portal 那次带 login_option，AWS 那次不带，
+// 且主机名是 127.0.0.1 而不是 localhost。照着贴错了会被判 redirect_uri 不匹配。
+const kiroCallbackExample = computed(() =>
+  kiroLoginStage.value === 'idc'
+    ? `${kiroCallbackPrefix.value}?code=...&state=...`
+    : `${kiroCallbackPrefix.value}/oauth/callback?login_option=google&code=...`
+)
+
 const isManualInputMethod = computed(() => {
   return oauthFlowRef.value?.inputMethod === 'manual'
 })
@@ -4207,6 +4834,18 @@ watch(
       form.concurrency = 1
       form.load_factor = null
     }
+    if (newPlatform === 'kiro' || newPlatform === 'cursor') {
+      // 两者都只有 OAuth 一种账号类型。
+      accountCategory.value = 'oauth-based'
+      addMethod.value = 'oauth'
+    }
+    if (newPlatform === 'cursor') {
+      // Agent 的 Run 是长连的 HTTP/2 双向流会话，单账号并跑多路容易被风控。
+      form.concurrency = 1
+      form.load_factor = null
+    }
+    resetKiroImportState()
+    resetCursorState()
     if (newPlatform !== 'gemini' && newPlatform !== 'anthropic' && accountCategory.value === 'service_account') {
       accountCategory.value = 'oauth-based'
     }
@@ -4715,6 +5354,9 @@ const resetForm = () => {
 const handleClose = () => {
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
+  // 粘贴的 token 是明文长期凭证，关掉弹窗就不要留在内存里。
+  resetKiroImportState()
+  resetCursorState()
   emit('close')
 }
 
@@ -5136,6 +5778,8 @@ const goBackToBasicInfo = () => {
   geminiOAuth.resetState()
   antigravityOAuth.resetState()
   grokOAuth.resetState()
+  // 退回第一步必须停掉轮询，否则登录完成时会往一个已经不在的表单里建号。
+  resetCursorState()
   oauthFlowRef.value?.reset()
 }
 

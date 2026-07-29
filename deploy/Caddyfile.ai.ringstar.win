@@ -1,0 +1,57 @@
+# Sub2API via Cloudflare (Flexible SSL -> origin :80)
+# 443 由 Xray 占用，源站仅用 HTTP:80，Cloudflare SSL 模式请用 Flexible
+http://ai.ringstar.win {
+	encode gzip
+
+	handle {
+		reverse_proxy 127.0.0.1:8080 {
+			# 长连接 / SSE / WebSocket
+			flush_interval -1
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
+			header_up X-Forwarded-Host {host}
+		}
+	}
+}
+
+http://54.91.239.213 {
+	@subscription path /53c63b242522e41f6d378f9a5c00ff68616fa175.yaml
+	handle @subscription {
+		root * /var/www/clash-sub
+		header Cache-Control "no-store"
+		header X-Content-Type-Options "nosniff"
+		header Content-Disposition "attachment; filename=aws-reality.yaml"
+		file_server
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}
+
+https://54-91-239-213.sslip.io:8443 {
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+	}
+
+	@subscription path /53c63b242522e41f6d378f9a5c00ff68616fa175.yaml
+	handle @subscription {
+		root * /var/www/clash-sub
+		header Cache-Control "no-store"
+		header X-Content-Type-Options "nosniff"
+		header Content-Disposition "attachment; filename=aws-reality.yaml"
+		file_server
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+}

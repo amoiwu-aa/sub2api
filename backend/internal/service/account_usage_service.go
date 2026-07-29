@@ -104,10 +104,18 @@ type antigravityUsageCache struct {
 	timestamp time.Time
 }
 
+// kiroUsageCache 缓存 Kiro 额度数据
+type kiroUsageCache struct {
+	usageInfo *UsageInfo
+	timestamp time.Time
+}
+
 const (
 	apiCacheTTL             = 3 * time.Minute
 	apiErrorCacheTTL        = 1 * time.Minute        // 负缓存 TTL：429 等错误缓存 1 分钟
 	antigravityErrorTTL     = 1 * time.Minute        // Antigravity 错误缓存 TTL（可恢复错误）
+	kiroCacheTTL            = 3 * time.Minute        // Kiro 额度缓存 TTL
+	kiroErrorTTL            = 1 * time.Minute        // Kiro 错误缓存 TTL（负缓存，避免重试风暴）
 	apiQueryMaxJitter       = 800 * time.Millisecond // 用量查询最大随机延迟
 	windowStatsCacheTTL     = 1 * time.Minute
 	openAIProbeCacheTTL     = 10 * time.Minute
@@ -121,8 +129,10 @@ type UsageCache struct {
 	apiCache          sync.Map           // accountID -> *apiUsageCache
 	windowStatsCache  sync.Map           // accountID -> *windowStatsCache
 	antigravityCache  sync.Map           // accountID -> *antigravityUsageCache
+	kiroCache         sync.Map           // accountID -> *kiroUsageCache
 	apiFlight         singleflight.Group // 防止同一账号的并发请求击穿缓存（Anthropic）
 	antigravityFlight singleflight.Group // 防止同一 Antigravity 账号的并发请求击穿缓存
+	kiroFlight        singleflight.Group // 防止同一 Kiro 账号的并发请求击穿缓存
 	openAIProbeCache  sync.Map           // accountID -> time.Time
 	grokProbeCache    sync.Map           // accountID -> last billing probe attempt
 }
@@ -214,6 +224,16 @@ type UsageInfo struct {
 	GrokLocalUsageMonthly  *WindowStats        `json:"grok_local_usage_monthly,omitempty"`
 	GrokBilling            *xai.BillingSummary `json:"grok_billing,omitempty"`
 
+	// Kiro credit 额度（GET /getUsageLimits）
+	KiroCredits         *UsageProgress `json:"kiro_credits,omitempty"`           // credit 用量进度（含重置时间）
+	KiroCreditsUsed     float64        `json:"kiro_credits_used,omitempty"`      // 已消耗 credit（高精度）
+	KiroCreditsLimit    float64        `json:"kiro_credits_limit,omitempty"`     // credit 上限
+	KiroOverageEnabled  bool           `json:"kiro_overage_enabled,omitempty"`   // 是否开启超额消费
+	KiroExhausted       bool           `json:"kiro_exhausted,omitempty"`         // 额度用尽且无超额兜底 → 该轮换
+	KiroOverageRate     float64        `json:"kiro_overage_rate,omitempty"`      // 超额单价
+	KiroCurrency        string         `json:"kiro_currency,omitempty"`          // 计价货币
+	KiroFreeTrialStatus string         `json:"kiro_free_trial_status,omitempty"` // 试用状态 ACTIVE/EXPIRED
+
 	// Antigravity 账号级信息
 	SubscriptionTier    string `json:"subscription_tier,omitempty"`     // 归一化订阅等级: FREE/PRO/ULTRA/UNKNOWN
 	SubscriptionTierRaw string `json:"subscription_tier_raw,omitempty"` // 上游原始订阅等级名称
@@ -294,6 +314,7 @@ type AccountUsageService struct {
 	usageFetcher            ClaudeUsageFetcher
 	geminiQuotaService      *GeminiQuotaService
 	antigravityQuotaFetcher *AntigravityQuotaFetcher
+	kiroQuotaFetcher        *KiroQuotaFetcher
 	grokQuotaFetcher        *GrokQuotaFetcher
 	grokQuotaService        *GrokQuotaService
 	openAIQuotaService      *OpenAIQuotaService
@@ -311,6 +332,7 @@ func NewAccountUsageService(
 	usageFetcher ClaudeUsageFetcher,
 	geminiQuotaService *GeminiQuotaService,
 	antigravityQuotaFetcher *AntigravityQuotaFetcher,
+	kiroQuotaFetcher *KiroQuotaFetcher,
 	grokQuotaFetcher *GrokQuotaFetcher,
 	grokQuotaService *GrokQuotaService,
 	openAIQuotaService *OpenAIQuotaService,
@@ -324,6 +346,7 @@ func NewAccountUsageService(
 		usageFetcher:            usageFetcher,
 		geminiQuotaService:      geminiQuotaService,
 		antigravityQuotaFetcher: antigravityQuotaFetcher,
+		kiroQuotaFetcher:        kiroQuotaFetcher,
 		grokQuotaFetcher:        grokQuotaFetcher,
 		grokQuotaService:        grokQuotaService,
 		openAIQuotaService:      openAIQuotaService,
@@ -343,6 +366,13 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("get account failed: %w", err)
+	}
+
+	// Dedicated UI load-test accounts must remain fully interactive without ever
+	// contacting Anthropic with synthetic credentials. Reuse the same persisted
+	// passive snapshot that the account table loads on mount.
+	if account.IsSyntheticUITest() && account.IsAnthropicOAuthOrSetupToken() {
+		return s.GetPassiveUsage(ctx, accountID)
 	}
 
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
@@ -376,6 +406,24 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 			s.tryClearRecoverableAccountError(ctx, account)
 		}
 		return usage, err
+	}
+
+	// Kiro 有账号级额度接口：GET /getUsageLimits，与 GenerateAssistantResponse
+	// 同一个 q.<region> 端点、同一份 bearer 凭证。
+	// （每次响应 summary 里的 meteringUsage 仍然照常归集进 usage_logs，
+	// 两者对得上：那边记增量，这边给账号总量与重置时间。）
+	if account.Platform == PlatformKiro {
+		usage, err := s.getKiroUsage(ctx, account)
+		if err == nil && usage != nil && usage.Error == "" {
+			s.tryClearRecoverableAccountError(ctx, account)
+		}
+		return usage, err
+	}
+
+	// Cursor Agent 完全不下发用量，没有账号级配额查询接口。
+	// 必须在这里拦住，否则会掉进下面的 Anthropic usage API 分支去查错的上游。
+	if account.Platform == PlatformCursor {
+		return nil, fmt.Errorf("platform %s does not support account usage query", account.Platform)
 	}
 
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
@@ -508,8 +556,28 @@ func (s *AccountUsageService) GetPassiveUsage(ctx context.Context, accountID int
 
 	// 添加窗口统计
 	s.addWindowStats(ctx, account, info)
+	if account.IsSyntheticUITest() {
+		applySyntheticWindowStats(info, account.Extra)
+	}
 
 	return info, nil
+}
+
+func applySyntheticWindowStats(info *UsageInfo, extra map[string]any) {
+	if info == nil || info.FiveHour == nil || len(extra) == 0 {
+		return
+	}
+	raw, ok := extra["synthetic_window_stats"].(map[string]any)
+	if !ok {
+		return
+	}
+	info.FiveHour.WindowStats = &WindowStats{
+		Requests:     int64(parseExtraInt(raw["requests"])),
+		Tokens:       int64(parseExtraInt(raw["tokens"])),
+		Cost:         parseExtraFloat64(raw["cost"]),
+		StandardCost: parseExtraFloat64(raw["standard_cost"]),
+		UserCost:     parseExtraFloat64(raw["user_cost"]),
+	}
 }
 
 // buildPassiveUsageWindow 从 Extra 中的被动采样数据（utilization 为 0-1 小数、reset 为 Unix 秒）
@@ -887,6 +955,141 @@ func (s *AccountUsageService) getGeminiUsage(ctx context.Context, account *Accou
 }
 
 // getAntigravityUsage 获取 Antigravity 账户额度
+// getKiroUsage 查 Kiro 账号额度。
+//
+// 缓存 + singleflight 的意图与 Antigravity 一致：额度面板会被频繁刷新，
+// 而上游是按账号计费的真实接口，不能每次渲染都打一发。
+func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
+	if s.kiroQuotaFetcher == nil || !s.kiroQuotaFetcher.CanFetch(account) {
+		now := time.Now()
+		return &UsageInfo{UpdatedAt: &now}, nil
+	}
+
+	if usage, ok := s.loadKiroCache(account.ID); ok {
+		return usage, nil
+	}
+
+	flightKey := fmt.Sprintf("kiro-usage:%d", account.ID)
+	result, flightErr, _ := s.cache.kiroFlight.Do(flightKey, func() (any, error) {
+		// 等待 singleflight 期间可能已被别的请求填充。
+		if usage, ok := s.loadKiroCache(account.ID); ok {
+			return usage, nil
+		}
+
+		// 用独立 context：调用方 cancel 不该让共享同一 flight 的其他请求一起失败。
+		fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		proxyURL, err := s.kiroQuotaFetcher.GetProxyURL(fetchCtx, account)
+		if err != nil {
+			// 配置了代理却拿不到，绝不能退化成直连去打上游。
+			return nil, err
+		}
+
+		usage, err := s.kiroQuotaFetcher.FetchQuota(fetchCtx, account, proxyURL)
+		if err != nil {
+			return nil, err
+		}
+		enrichUsageWithAccountError(usage, account)
+		s.parkExhaustedKiroAccount(account, usage)
+		s.cache.kiroCache.Store(account.ID, &kiroUsageCache{usageInfo: usage, timestamp: time.Now()})
+		return usage, nil
+	})
+	if flightErr != nil {
+		return nil, flightErr
+	}
+
+	usage, _ := result.(*UsageInfo)
+	recalcKiroRemainingSeconds(usage)
+	return usage, nil
+}
+
+// loadKiroCache 读缓存并重算剩余秒数；已失效返回 false。
+// 降级结果（带 Error）用更短的 TTL，让账号恢复后能较快反映出来。
+func (s *AccountUsageService) loadKiroCache(accountID int64) (*UsageInfo, bool) {
+	cached, ok := s.cache.kiroCache.Load(accountID)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := cached.(*kiroUsageCache)
+	if !ok {
+		return nil, false
+	}
+	ttl := kiroCacheTTL
+	if entry.usageInfo != nil && entry.usageInfo.Error != "" {
+		ttl = kiroErrorTTL
+	}
+	if time.Since(entry.timestamp) >= ttl {
+		return nil, false
+	}
+	recalcKiroRemainingSeconds(entry.usageInfo)
+	return entry.usageInfo, true
+}
+
+// kiroExhaustedFallbackPark 是拿不到重置时间时的暂停时长。
+// 不能不暂停——否则调度器会一直往一个必然失败的账号上打。
+const kiroExhaustedFallbackPark = 30 * time.Minute
+
+// parkExhaustedKiroAccount 把额度耗尽的账号暂停调度到额度重置为止。
+//
+// 用 SetTempUnschedulable 而不是别的手段，是因为语义正好对上：这不是
+// 永久踢出（额度会恢复），也不该只是降优先级（在恢复前每一次调度过去
+// 都注定失败）。到点自动恢复，不需要人工干预。
+//
+// 只在「额度用尽且没开超额」时才停。开了超额的账号仍然可用，只是要花钱，
+// 停掉它等于平白损失可用容量。
+//
+// 覆盖面的局限要清楚：这条路径挂在用量查询上，而用量查询目前只有后台
+// 面板会触发，没有周期任务。也就是说没人看面板时不会自动暂停。要做到
+// 无人值守，得再加一个周期性巡检任务。
+//
+// 还有一点：企业（IdC）账号的额度是**组织共享池**，profileArn 里那个 AWS
+// 账号属于整个组织。所以这类账号被暂停，往往不是本服务用超了，而是组织里
+// 其他人（IDE、别的客户端）把共享额度耗完了——重置时间一到会自己恢复，
+// 但在那之前换本组织的另一个账号也没用，它们共用同一个池子。
+// 详见 KiroQuotaFetcher 的说明。
+func (s *AccountUsageService) parkExhaustedKiroAccount(account *Account, usage *UsageInfo) {
+	if account == nil || usage == nil || !usage.KiroExhausted {
+		return
+	}
+	if s.accountRepo == nil {
+		return
+	}
+
+	until := time.Now().Add(kiroExhaustedFallbackPark)
+	if usage.KiroCredits != nil && usage.KiroCredits.ResetsAt != nil && usage.KiroCredits.ResetsAt.After(time.Now()) {
+		until = *usage.KiroCredits.ResetsAt
+	}
+
+	reason := fmt.Sprintf("kiro credits exhausted (%.2f/%.2f), parked until quota reset",
+		usage.KiroCreditsUsed, usage.KiroCreditsLimit)
+
+	// 调用方的 context 可能随请求结束就取消了，这里用 background
+	// 保证标记一定写下去。
+	if err := s.accountRepo.SetTempUnschedulable(context.Background(), account.ID, until, reason); err != nil {
+		slog.Warn("kiro.park_exhausted_account_failed", "account_id", account.ID, "error", err)
+		return
+	}
+	slog.Info("kiro.account_parked_until_quota_reset",
+		"account_id", account.ID,
+		"until", until,
+		"credits_used", usage.KiroCreditsUsed,
+		"credits_limit", usage.KiroCreditsLimit,
+	)
+}
+
+// recalcKiroRemainingSeconds 重算距重置的剩余秒数，避免返回缓存里过时的值。
+func recalcKiroRemainingSeconds(usage *UsageInfo) {
+	if usage == nil || usage.KiroCredits == nil || usage.KiroCredits.ResetsAt == nil {
+		return
+	}
+	remaining := int(time.Until(*usage.KiroCredits.ResetsAt).Seconds())
+	if remaining < 0 {
+		remaining = 0
+	}
+	usage.KiroCredits.RemainingSeconds = remaining
+}
+
 func (s *AccountUsageService) getAntigravityUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
 	if s.antigravityQuotaFetcher == nil || !s.antigravityQuotaFetcher.CanFetch(account) {
 		now := time.Now()

@@ -61,6 +61,9 @@ func (h *GatewayHandler) KeyBillingInfo(c *gin.Context) {
 	c.JSON(http.StatusOK, buildKeyBillingInfo(apiKey, resolvedRate, timezone.Now()))
 }
 
+// resolveKeyBillingRate 必须与实际记账的那个 service 保持一致。
+// cursor / kiro 的用量是由 gatewayService.RecordUsage 落库的（它们挂在
+// Anthropic 与 chat/completions 的公共链路上），所以走 default 分支。
 func (h *GatewayHandler) resolveKeyBillingRate(c *gin.Context, apiKey *service.APIKey) (float64, bool) {
 	groupRate := apiKey.Group.RateMultiplier
 	switch apiKey.Group.Platform {

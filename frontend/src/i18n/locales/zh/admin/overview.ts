@@ -43,6 +43,8 @@ export default {
       tokenUsageTrend: 'Token 使用趋势',
       userUsageTrend: '用户使用趋势（Top 12）',
       noDataAvailable: '暂无数据',
+      noDataModelHint: '有请求经过网关后，这里会按模型展示调用分布。',
+      noDataTrendHint: '产生用量后，这里会展示 Token 消耗随时间的变化。',
       model: '模型',
       group: '分组',
       noGroup: '无分组',
@@ -877,6 +879,8 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        cursor: 'Cursor',
+        kiro: 'Kiro',
         composite: 'Composite',
       },
       saving: '保存中...',
@@ -1028,6 +1032,7 @@ export default {
         endpoint: '端点',
         targetPlatform: '目标平台',
         upstreamModel: '上游模型',
+        upstreamModelHint: '留空表示透传原始请求模型：前缀匹配下每个命中模型各自原样转发（如 deepseek-v4-flash、deepseek-v4-pro 分别转发）；填写则所有命中请求都固定转发该模型。',
         notes: '备注',
         enabled: '启用',
         preview: '预览',
@@ -1129,14 +1134,6 @@ export default {
         selectAccounts: '选择账号',
         noAccounts: '此分组暂无账号',
         loadingAccounts: '加载账号中...',
-      claudeMaxSimulation: {
-        title: 'Claude Max 用量模拟',
-        tooltip:
-          '启用后，对于没有上游缓存写入用量的 Claude 模型，系统会确定性地将 token 映射为少量输入加 1h 缓存创建，同时保持总 token 不变。',
-        enabled: '已启用（模拟 1h 缓存）',
-        disabled: '已禁用',
-        hint: '仅调整用量计费日志中的 token 类别。不会持久化每个请求的映射状态。'
-      },
         removeRule: '删除规则',
         noRules: '暂无路由规则',
         noRulesHint: '添加路由规则以将特定模型请求优先路由到指定账号',
@@ -1148,6 +1145,14 @@ export default {
         tooltip: '启用后，当请求包含 MCP 工具时，会在 system prompt 中注入 XML 格式调用协议提示词。关闭此选项可避免对某些客户端造成干扰。',
         enabled: '已启用',
         disabled: '已禁用'
+      },
+      claudeMaxSimulation: {
+        title: 'Claude Max 用量模拟',
+        tooltip:
+          '启用后，对于没有上游缓存写入用量的 Claude 模型，系统会确定性地将 token 映射为少量输入加 1h 缓存创建，同时保持总 token 不变。',
+        enabled: '已启用（模拟 1h 缓存）',
+        disabled: '已禁用',
+        hint: '仅调整用量计费日志中的 token 类别。不会持久化每个请求的映射状态。'
       },
       supportedScopes: {
         title: '支持的模型系列',

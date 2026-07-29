@@ -1869,6 +1869,38 @@ const resetRateLimitUsage = async () => {
   }
 }
 
+/**
+ * 深链是否被系统接走，浏览器里唯一可观测的信号就是本窗口失焦：协议处理程序
+ * 起来了，或者浏览器弹出了「是否打开」确认框。给 2 秒是因为确认框要等用户点，
+ * 桌面应用冷启动也要几百毫秒——早期用 100ms 后仍有焦点判定失败，导致导入
+ * 明明成功也照样弹错误。
+ */
+const CCS_HANDOFF_TIMEOUT_MS = 2000
+
+const waitForProtocolHandoff = (timeoutMs: number): Promise<boolean> => {
+  return new Promise((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout>
+
+    const finish = (handedOff: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      resolve(handedOff)
+    }
+    const onBlur = () => finish(true)
+    const onVisibilityChange = () => {
+      if (document.hidden) finish(true)
+    }
+
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    timer = setTimeout(() => finish(false), timeoutMs)
+  })
+}
+
 const importToCcswitch = (row: ApiKey) => {
   const platform = row.group?.platform || 'anthropic'
 
@@ -1880,10 +1912,10 @@ const importToCcswitch = (row: ApiKey) => {
   }
 
   // For other platforms, execute directly
-  executeCcsImport(row, platform === 'gemini' ? 'gemini' : 'claude')
+  void executeCcsImport(row, platform === 'gemini' ? 'gemini' : 'claude')
 }
 
-const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
+const executeCcsImport = async (row: ApiKey, clientType: CcSwitchClientType) => {
   const baseUrl = publicSettings.value?.api_base_url || window.location.origin
   const platform = row.group?.platform || 'anthropic'
 
@@ -1914,23 +1946,20 @@ const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
   })
 
   try {
+    // 监听必须先挂上：协议处理程序可能在 window.open 返回前就把焦点抢走。
+    const handedOff = waitForProtocolHandoff(CCS_HANDOFF_TIMEOUT_MS)
     window.open(deeplink, '_self')
-
-    // Check if the protocol handler worked by detecting if we're still focused
-    setTimeout(() => {
-      if (document.hasFocus()) {
-        // Still focused means the protocol handler likely failed
-        appStore.showError(t('keys.ccSwitchNotInstalled'))
-      }
-    }, 100)
-  } catch (error) {
-    appStore.showError(t('keys.ccSwitchNotInstalled'))
+    if (!(await handedOff)) {
+      appStore.showWarning(t('keys.ccSwitchNoResponse'))
+    }
+  } catch {
+    appStore.showWarning(t('keys.ccSwitchNoResponse'))
   }
 }
 
 const handleCcsClientSelect = (clientType: CcSwitchClientType) => {
   if (pendingCcsRow.value) {
-    executeCcsImport(pendingCcsRow.value, clientType)
+    void executeCcsImport(pendingCcsRow.value, clientType)
   }
   showCcsClientSelect.value = false
   pendingCcsRow.value = null

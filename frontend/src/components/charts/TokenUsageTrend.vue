@@ -9,11 +9,12 @@
     <div v-else-if="trendData.length > 0 && chartData" class="h-48">
       <Line :data="chartData" :options="lineOptions" />
     </div>
-    <div
-      v-else
-      class="flex h-48 items-center justify-center text-sm text-gray-500 dark:text-gray-400"
-    >
-      {{ t('admin.dashboard.noDataAvailable') }}
+    <div v-else class="h-48">
+      <ChartEmptyState
+        icon="chart"
+        :title="t('admin.dashboard.noDataAvailable')"
+        :hint="t('admin.dashboard.noDataTrendHint')"
+      />
     </div>
   </div>
 </template>
@@ -21,6 +22,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ChartEmptyState from '@/components/common/ChartEmptyState.vue'
 import {
   Chart as ChartJS,
   CategoryScale,

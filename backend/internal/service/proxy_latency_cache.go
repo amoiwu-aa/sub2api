@@ -20,6 +20,9 @@ type ProxyLatencyInfo struct {
 	QualitySummary   string    `json:"quality_summary,omitempty"`
 	QualityCheckedAt *int64    `json:"quality_checked_at,omitempty"`
 	QualityCFRay     string    `json:"quality_cf_ray,omitempty"`
+	IPType           string    `json:"ip_type,omitempty"`
+	IPRiskLevel      string    `json:"ip_risk_level,omitempty"`
+	IPRiskScore      *int      `json:"ip_risk_score,omitempty"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 

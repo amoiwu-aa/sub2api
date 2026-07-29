@@ -17,9 +17,12 @@ func RegisterAdminRoutes(
 	auditLog middleware.AuditLogMiddleware,
 	stepUpAuth middleware.StepUpAuthMiddleware,
 	settingService *service.SettingService,
+	panelRateLimiter *middleware.PanelRateLimiter,
 ) {
 	admin := v1.Group("/admin")
 	admin.Use(gin.HandlerFunc(adminAuth))
+	// 面板全局按用户限流（默认管理员豁免，可在系统设置中关闭豁免）
+	admin.Use(panelRateLimiter.Global())
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
@@ -53,6 +56,12 @@ func RegisterAdminRoutes(
 
 		// Grok OAuth
 		registerGrokOAuthRoutes(admin, h)
+
+		// Kiro（粘贴式导入，无服务端 OAuth 流程）
+		registerKiroRoutes(admin, h)
+
+		// Cursor（浏览器 PKCE 登录 + 粘贴 Cookie）
+		registerCursorRoutes(admin, h)
 
 		// 代理管理
 		registerProxyRoutes(admin, h, stepUpAuth)
@@ -471,6 +480,27 @@ func registerGrokOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
+func registerKiroRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	kiro := admin.Group("/kiro")
+	{
+		// 网页登录：生成 portal 链接 → 管理员浏览器登录 → 粘回回调地址换 token。
+		kiro.POST("/oauth/start", h.Admin.Kiro.StartWebLogin)
+		kiro.POST("/oauth/complete", h.Admin.Kiro.CompleteWebLogin)
+		kiro.POST("/import", h.Admin.Kiro.Import)
+		kiro.POST("/accounts/:id/refresh", h.Admin.Kiro.RefreshAccountToken)
+	}
+}
+
+func registerCursorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	cursor := admin.Group("/cursor")
+	{
+		cursor.POST("/oauth/start", h.Admin.Cursor.StartLogin)
+		cursor.POST("/oauth/poll", h.Admin.Cursor.PollLogin)
+		cursor.POST("/import", h.Admin.Cursor.Import)
+		cursor.POST("/accounts/:id/refresh", h.Admin.Cursor.RefreshAccountToken)
+	}
+}
+
 func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	proxies := admin.Group("/proxies")
 	{
@@ -542,6 +572,9 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// 429默认回避配置
 		adminSettings.GET("/rate-limit-429-cooldown", h.Admin.Setting.GetRateLimit429CooldownSettings)
 		adminSettings.PUT("/rate-limit-429-cooldown", h.Admin.Setting.UpdateRateLimit429CooldownSettings)
+		// 面板 API 限流配置
+		adminSettings.GET("/panel-rate-limit", h.Admin.Setting.GetPanelRateLimitSettings)
+		adminSettings.PUT("/panel-rate-limit", h.Admin.Setting.UpdatePanelRateLimitSettings)
 		// 流超时处理配置
 		adminSettings.GET("/stream-timeout", h.Admin.Setting.GetStreamTimeoutSettings)
 		adminSettings.PUT("/stream-timeout", h.Admin.Setting.UpdateStreamTimeoutSettings)

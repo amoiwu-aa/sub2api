@@ -10,6 +10,9 @@ var SensitiveCredentialKeys = []string{
 	// 云服务凭据
 	"aws_secret_access_key", "aws_session_token",
 	"service_account_json", "service_account", "private_key",
+	// OIDC / AWS IdC 客户端注册密钥（kiro 的 IdC 账号会落库 client_id + client_secret，
+	// 刷新链要用它换新 token）。client_id 不敏感，client_secret 等同于长期凭证。
+	"client_secret",
 }
 
 var sensitiveCredentialKeySet = func() map[string]struct{} {

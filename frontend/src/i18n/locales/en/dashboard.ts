@@ -154,7 +154,20 @@ export default {
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
+        openaiCompatible: 'OpenAI Compatible',
         opencode: 'OpenCode',
+      },
+      cursor: {
+        description: 'Cursor groups only expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',
+        modelComment: 'Model ids must carry the cursor/ prefix; cursor/default is the Auto tier',
+        note: 'Cursor does not support Claude Code: both /v1/messages and /v1/responses return 404. Use an OpenAI-compatible client and keep the cursor/ prefix on model names.',
+      },
+      kiro: {
+        description: 'Kiro groups also expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',
+        claudeDescription: 'Configure Claude Code to send Messages API traffic through your Kiro group. Every model tier is pinned to kiro/claude-sonnet-4.6.',
+        modelComment: 'Model ids must carry the kiro/ prefix; kiro/auto picks a model automatically',
+        note: 'These environment variables will be active in the current terminal session. Keep the kiro/ prefix on model names, otherwise the upstream rejects them as unknown models.',
+        claudeNote: 'Choose one method: run the terminal commands for the current session, or save settings.json for user-level persistent configuration. Kiro model ids carry a kiro/ prefix, so every tier must be pinned.',
       },
       antigravity: {
         description: 'Configure API access for Antigravity group. Select the configuration method based on your client.',
@@ -200,7 +213,7 @@ export default {
     ipBlacklistPlaceholder: '1.2.3.4\n5.6.0.0/16',
     ipBlacklistHint: 'One IP or CIDR per line. These IPs will be blocked from using this key.',
     ipRestrictionEnabled: 'IP restriction enabled',
-    ccSwitchNotInstalled: 'CC-Switch is not installed or the protocol handler is not registered. Please install CC-Switch first or manually copy the API key.',
+    ccSwitchNoResponse: 'CC-Switch did not respond. Make sure it is installed and can launch, or use "Use Key" to copy the configuration manually.',
     ccsClientSelect: {
       title: 'Select Client',
       description: 'Please select the client type to import to CC-Switch:',

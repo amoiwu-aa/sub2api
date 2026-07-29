@@ -492,7 +492,15 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'composite'
+export type GroupPlatform =
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'antigravity'
+  | 'grok'
+  | 'cursor'
+  | 'kiro'
+  | 'composite'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -810,7 +818,14 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok'
+export type AccountPlatform =
+  | 'anthropic'
+  | 'openai'
+  | 'gemini'
+  | 'antigravity'
+  | 'grok'
+  | 'cursor'
+  | 'kiro'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -846,6 +861,9 @@ export interface Proxy {
   quality_grade?: string
   quality_summary?: string
   quality_checked?: number
+  ip_type?: IPReputationType
+  ip_risk_level?: IPReputationRiskLevel
+  ip_risk_score?: number
   expires_at: string | null
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
@@ -871,6 +889,56 @@ export interface ProxyQualityCheckItem {
   cf_ray?: string
 }
 
+export type IPReputationType = 'datacenter' | 'residential' | 'mobile' | 'unknown'
+export type IPReputationRiskLevel = 'clean' | 'low' | 'medium' | 'high' | 'unknown'
+
+/**
+ * One reputation database's answer. Flags are optional rather than boolean
+ * because "the source does not report this" and "the source says no" are
+ * different answers, and the UI shows them differently.
+ */
+export interface IPReputationVerdict {
+  source: string
+  ok: boolean
+  error?: string
+  latency_ms?: number
+  datacenter?: boolean
+  proxy?: boolean
+  vpn?: boolean
+  tor?: boolean
+  mobile?: boolean
+  abuser?: boolean
+  risk_score?: number
+  risk_label?: string
+  usage_type?: string
+  asn?: string
+  as_org?: string
+  isp?: string
+  hoster?: string
+}
+
+export interface IPReputationReport {
+  ip: string
+  checked_at: number
+  cached: boolean
+  sources: IPReputationVerdict[]
+  datacenter?: boolean
+  proxy?: boolean
+  vpn?: boolean
+  tor?: boolean
+  mobile?: boolean
+  abuser?: boolean
+  risk_score?: number
+  risk_level: IPReputationRiskLevel
+  ip_type: IPReputationType
+  asn?: string
+  as_org?: string
+  isp?: string
+  hoster?: string
+  /** Flags the sources disagreed on, e.g. ['datacenter']. */
+  conflicts?: string[]
+}
+
 export interface ProxyQualityCheckResult {
   proxy_id: number
   score: number
@@ -886,6 +954,7 @@ export interface ProxyQualityCheckResult {
   challenge_count: number
   checked_at: number
   items: ProxyQualityCheckItem[]
+  reputation?: IPReputationReport
 }
 
 // Gemini credentials structure for OAuth and API Key authentication
@@ -1023,7 +1092,10 @@ export interface OllamaCloudUsageState {
 
 export interface OllamaCloudUsageSettings {
   enabled: boolean
+  /** Max wait while model requests keep arriving (minutes). */
   interval_minutes: number
+  /** Trailing quiet period after the latest model request (minutes). */
+  debounce_minutes: number
 }
 
 export interface Account {
@@ -1246,6 +1318,18 @@ export interface AccountUsageInfo {
   grok_local_usage_7d?: WindowStats | null
   grok_local_usage_monthly?: WindowStats | null
   grok_billing?: GrokBillingSummary | null
+
+  // Kiro credit 额度（上游 GET /getUsageLimits）
+  kiro_credits?: UsageProgress | null
+  kiro_credits_used?: number
+  kiro_credits_limit?: number
+  kiro_overage_enabled?: boolean
+  // 额度用尽且没开超额 —— 该账号已经不可用，调度侧应当轮换
+  kiro_exhausted?: boolean
+  kiro_overage_rate?: number
+  kiro_currency?: string
+  kiro_free_trial_status?: string
+
   subscription_tier?: string
   subscription_tier_raw?: string
   ai_credits?: Array<{

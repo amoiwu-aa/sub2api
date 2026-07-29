@@ -136,6 +136,18 @@ func (a *Account) IsActive() bool {
 	return a.Status == StatusActive
 }
 
+// IsSyntheticUITest reports whether the account belongs to an isolated UI load-test
+// dataset. Production accounts never receive this marker. It lets the dedicated
+// test instance exercise interactive quota and connection-test controls without
+// sending fake credentials to an upstream provider.
+func (a *Account) IsSyntheticUITest() bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra["synthetic_ui_test"].(bool)
+	return ok && enabled
+}
+
 // BillingRateMultiplier 返回账号计费倍率。
 // - nil 表示未配置/旧缓存缺字段，按 1.0 处理
 // - 允许 0，表示该账号计费为 0
@@ -255,6 +267,22 @@ func (a *Account) IsGrok() bool {
 
 func (a *Account) IsGrokOAuth() bool {
 	return a.IsGrok() && a.Type == AccountTypeOAuth
+}
+
+func (a *Account) IsCursor() bool {
+	return a.Platform == PlatformCursor
+}
+
+func (a *Account) IsCursorOAuth() bool {
+	return a.IsCursor() && a.Type == AccountTypeOAuth
+}
+
+func (a *Account) IsKiro() bool {
+	return a.Platform == PlatformKiro
+}
+
+func (a *Account) IsKiroOAuth() bool {
+	return a.IsKiro() && a.Type == AccountTypeOAuth
 }
 
 func (a *Account) IsOpenAICompatible() bool {
@@ -779,9 +807,16 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 // 请求卡死在该账号上、无法 failover 到真正支持该模型的 API Key 账号（#3662）。
 // 未知/自定义别名仍保持允许（兼容渠道级映射），见 isOpenAIOAuthServableModel。
 func (a *Account) IsModelSupported(requestedModel string) bool {
+	// 透传模式仅替换认证、模型语义完全交由上游决定，因此放行所有模型。
+	// 该短路必须在 model_mapping 判定之前：账号从"白名单模式"切换到透传后，
+	// credentials 里常残留旧的非空 model_mapping，若不在此放行，透传账号会被
+	// model_mapping 白名单错误排除出候选集，导致 no available accounts / 404（issue #4936）。
+	if a.IsOpenAIPassthroughEnabled() {
+		return true
+	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
-		if a.IsOpenAIOAuth() && !a.IsOpenAIPassthroughEnabled() {
+		if a.IsOpenAIOAuth() {
 			return isOpenAIOAuthServableModel(requestedModel)
 		}
 		return true // 无映射 = 允许所有
@@ -1337,6 +1372,66 @@ func (a *Account) GetGrokRefreshToken() string {
 		return ""
 	}
 	return a.GetCredential("refresh_token")
+}
+
+func (a *Account) GetCursorAccessToken() string {
+	if !a.IsCursor() {
+		return ""
+	}
+	return a.GetCredential("access_token")
+}
+
+func (a *Account) GetCursorRefreshToken() string {
+	if !a.IsCursorOAuth() {
+		return ""
+	}
+	return a.GetCredential("refresh_token")
+}
+
+// CursorTokenCacheKey 是 cursor 账号 access token 的缓存键。
+func CursorTokenCacheKey(account *Account) string {
+	if account == nil {
+		return "cursor:account:0"
+	}
+	return "cursor:account:" + strconv.FormatInt(account.ID, 10)
+}
+
+func (a *Account) GetKiroAccessToken() string {
+	if !a.IsKiro() {
+		return ""
+	}
+	return a.GetCredential("access_token")
+}
+
+func (a *Account) GetKiroRefreshToken() string {
+	if !a.IsKiroOAuth() {
+		return ""
+	}
+	return a.GetCredential("refresh_token")
+}
+
+// GetKiroProfileArn 返回 Q API 必需的 profileArn；上游 region 由该 ARN 推导。
+func (a *Account) GetKiroProfileArn() string {
+	if !a.IsKiro() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetCredential("profile_arn"))
+}
+
+// GetKiroAuthMethod 返回 social / idc，决定走哪条刷新链。
+func (a *Account) GetKiroAuthMethod() string {
+	if !a.IsKiro() {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(a.GetCredential("auth_method")))
+}
+
+// KiroTokenCacheKey 是 kiro 账号 access token 的缓存键。
+func KiroTokenCacheKey(account *Account) string {
+	if account == nil {
+		return "kiro:account:0"
+	}
+	return "kiro:account:" + strconv.FormatInt(account.ID, 10)
 }
 
 func (a *Account) GetOpenAIIDToken() string {

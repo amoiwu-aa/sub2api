@@ -114,7 +114,8 @@
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
             ></path>
           </svg>
-          <Icon v-else name="login" size="md" class="mr-2" />
+          <!-- 不放图标：这里原本用的 login 图标是「箭头进门」，在多数图标语汇里
+               同一个形状更常被读成登出；而一个写着「登录」的主按钮本来也不需要图标。 -->
           {{ isLoading ? t('auth.signingIn') : t('auth.signIn') }}
         </button>
 
@@ -132,11 +133,11 @@
 
         <div v-if="showOAuthLogin" class="space-y-3 pt-1">
           <div class="flex items-center gap-3">
-            <div class="h-px flex-1 bg-white/10"></div>
+            <div class="login-divider h-px flex-1"></div>
             <span class="text-xs text-slate-400">
               {{ t('auth.oauthOrContinue') }}
             </span>
-            <div class="h-px flex-1 bg-white/10"></div>
+            <div class="login-divider h-px flex-1"></div>
           </div>
 
           <EmailOAuthButtons
@@ -552,26 +553,20 @@ function handle2FACancel(): void {
 </script>
 
 <style scoped>
+/* 品牌名已降级为 eyebrow，这里才是页面的真标题，所以字号加大、
+ * 去掉那圈青色 text-shadow（它在深底上会让字发虚，反而更难读）。 */
 .login-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #f8fafc;
-  text-shadow: 0 0 24px rgba(34, 211, 238, 0.2);
+  font-size: 1.9rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--auth-title);
 }
 
-:global(html:not(.dark)) .login-title {
-  color: #0f172a;
-  text-shadow: none;
-}
 
 .login-panel :deep(.text-slate-400) {
-  color: #94a3b8;
+  color: var(--auth-muted);
 }
 
-:global(html:not(.dark)) .login-panel :deep(.text-slate-400) {
-  color: #64748b;
-}
 
 .login-label {
   display: block;
@@ -579,37 +574,39 @@ function handle2FACancel(): void {
   font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: #cbd5e1;
+  color: var(--auth-label);
   line-height: 1.2;
 }
 
-:global(html:not(.dark)) .login-label {
-  color: #334155;
-}
 
 .login-field {
   position: relative;
 }
 
-.login-field :deep(svg) {
-  color: #94a3b8;
+/* 原来写死 bg-white/10，浅色卡片上等于不可见。 */
+.login-divider {
+  background: var(--auth-divider);
 }
 
-:global(html:not(.dark)) .login-field :deep(svg) {
-  color: #64748b;
+.login-field :deep(svg) {
+  color: var(--auth-icon);
 }
+
 
 .login-input {
   width: 100%;
   border-radius: 0.9rem;
-  border: 1px solid rgba(165, 243, 252, 0.18);
-  background: rgba(2, 8, 18, 0.28);
+  /* 输入框要明确读作「可输入的凹槽」：边框实一点、底色沉一点。
+   * 之前边框 18% 透明度、底色只有 28%，在亮旋臂背景下整个框糊成一片，
+   * 看起来像禁用态。 */
+  border: 1px solid var(--auth-field-border);
+  background: var(--auth-field-bg);
   /* Keep room for leading icon; do not let shorthand wipe Tailwind pl/pr */
   padding-top: 0.78rem;
   padding-bottom: 0.78rem;
   padding-left: 2.85rem;
   padding-right: 0.95rem;
-  color: #f8fafc;
+  color: var(--auth-field-text);
   font-size: 0.95rem;
   outline: none;
   transition:
@@ -627,34 +624,21 @@ function handle2FACancel(): void {
   padding-right: 2.85rem;
 }
 
-:global(html:not(.dark)) .login-input {
-  border-color: rgba(14, 116, 144, 0.22);
-  background: rgba(255, 255, 255, 0.55);
-  color: #0f172a;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.55) inset,
-    0 8px 20px rgba(15, 23, 42, 0.05);
-}
 
+/* placeholder 提到可读区间：#64748b 压在半透明框上实测几乎看不见。 */
 .login-input::placeholder {
-  color: #64748b;
+  color: var(--auth-field-placeholder);
 }
 
-:global(html:not(.dark)) .login-input::placeholder {
-  color: #94a3b8;
-}
 
 .login-input:hover {
-  border-color: rgba(125, 211, 252, 0.28);
+  border-color: var(--auth-field-border-hover);
 }
 
-:global(html:not(.dark)) .login-input:hover {
-  border-color: rgba(8, 145, 178, 0.4);
-}
 
 .login-input:focus {
-  border-color: rgba(34, 211, 238, 0.7);
-  background: rgba(8, 47, 73, 0.35);
+  border-color: rgba(45, 212, 191, 0.75);
+  background: var(--auth-field-bg-focus);
   box-shadow:
     0 0 0 1px rgba(34, 211, 238, 0.35),
     0 0 0 6px rgba(34, 211, 238, 0.12),
@@ -662,14 +646,6 @@ function handle2FACancel(): void {
     0 8px 24px rgba(2, 8, 18, 0.3);
 }
 
-:global(html:not(.dark)) .login-input:focus {
-  border-color: rgba(8, 145, 178, 0.65);
-  background: #fff;
-  box-shadow:
-    0 0 0 1px rgba(8, 145, 178, 0.28),
-    0 0 0 6px rgba(34, 211, 238, 0.14),
-    0 8px 20px rgba(15, 23, 42, 0.08);
-}
 
 .login-input--error {
   border-color: rgba(248, 113, 113, 0.7);
@@ -682,20 +658,14 @@ function handle2FACancel(): void {
 }
 
 .login-link {
-  color: rgba(103, 232, 249, 0.92);
+  color: var(--auth-link);
 }
 
 .login-link:hover {
-  color: #a5f3fc;
+  color: var(--auth-link-hover);
 }
 
-:global(html:not(.dark)) .login-link {
-  color: #0e7490;
-}
 
-:global(html:not(.dark)) .login-link:hover {
-  color: #155e75;
-}
 
 /* Prevent Chrome autofill from painting light-blue over icons/text */
 .login-input:-webkit-autofill,
@@ -710,16 +680,6 @@ function handle2FACancel(): void {
     0 0 0 1px rgba(165, 243, 252, 0.16);
 }
 
-:global(html:not(.dark)) .login-input:-webkit-autofill,
-:global(html:not(.dark)) .login-input:-webkit-autofill:hover,
-:global(html:not(.dark)) .login-input:-webkit-autofill:focus {
-  -webkit-text-fill-color: #0f172a;
-  caret-color: #0f172a;
-  border-color: rgba(14, 116, 144, 0.28);
-  box-shadow:
-    0 0 0 1000px rgba(255, 255, 255, 0.72) inset,
-    0 0 0 1px rgba(14, 116, 144, 0.18);
-}
 
 .login-submit {
   position: relative;
@@ -730,69 +690,65 @@ function handle2FACancel(): void {
   overflow: hidden;
   border-radius: 0.95rem;
   border: 1px solid rgba(165, 243, 252, 0.28);
-  background: linear-gradient(120deg, #22d3ee 0%, #14b8a6 42%, #0891b2 78%, #2dd4bf 100%);
-  background-size: 180% 180%;
-  padding: 0.85rem 1rem;
+  /* 收窄色域：原来 cyan→teal→sky→turquoise 四段来回扫，和 logo 的青绿
+   * 对不上，读起来像第三种品牌色。这里锚到 logo 的色相，只做一段短渐变。 */
+  background: linear-gradient(135deg, #2ee6c8 0%, #16b8a4 52%, #0e9aa7 100%);
+  padding: 0.9rem 1rem;
   font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: #04111a;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #01201f;
   box-shadow:
-    0 12px 30px rgba(34, 211, 238, 0.28),
-    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
-  transition: transform 0.2s ease, filter 0.2s ease;
-  animation: gem-pulse 3.4s ease-in-out infinite;
+    0 10px 28px -8px rgba(20, 184, 166, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.25s ease,
+    filter 0.18s ease;
 }
 
+/* 高光只在悬停时扫一次。
+ * 原来 gem-pulse + gem-sheen 两个动画常驻循环，加上卡片边框的呼吸，
+ * 整页有三处东西永远在动——一个「一直在闪」的主按钮并不显得高级，
+ * 只是让人无法安静地读表单。光留给交互的那一刻。 */
 .login-submit::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(120deg, transparent 20%, rgba(255, 255, 255, 0.35) 45%, transparent 70%);
-  transform: translateX(-120%);
-  animation: gem-sheen 3.4s ease-in-out infinite;
+  background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.28) 50%, transparent 70%);
+  transform: translateX(-130%);
+  transition: transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.login-submit:hover:not(:disabled)::before {
+  transform: translateX(130%);
 }
 
 .login-submit:hover:not(:disabled) {
   transform: translateY(-1px);
-  filter: brightness(1.05);
+  filter: brightness(1.04);
+  box-shadow:
+    0 16px 36px -10px rgba(20, 184, 166, 0.62),
+    0 0 0 1px rgba(255, 255, 255, 0.24) inset;
+}
+
+.login-submit:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.login-submit:focus-visible {
+  outline: 2px solid rgba(125, 232, 250, 0.9);
+  outline-offset: 3px;
 }
 
 .login-submit:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
-  animation: none;
+  opacity: 0.5;
 }
 
 .login-submit:disabled::before {
-  animation: none;
-}
-
-@keyframes gem-pulse {
-  0%,
-  100% {
-    background-position: 0% 50%;
-    box-shadow:
-      0 12px 30px rgba(34, 211, 238, 0.24),
-      0 0 0 1px rgba(255, 255, 255, 0.16) inset;
-  }
-  50% {
-    background-position: 100% 50%;
-    box-shadow:
-      0 16px 40px rgba(45, 212, 191, 0.4),
-      0 0 0 1px rgba(255, 255, 255, 0.28) inset;
-  }
-}
-
-@keyframes gem-sheen {
-  0%,
-  55% {
-    transform: translateX(-120%);
-  }
-  80%,
-  100% {
-    transform: translateX(120%);
-  }
+  transform: translateX(-130%);
 }
 
 .fade-enter-active,
@@ -810,6 +766,14 @@ function handle2FACancel(): void {
   .login-submit,
   .login-submit::before {
     animation: none;
+    transition: none;
+  }
+  /* 悬停高光也一并关掉：位移动画对前庭敏感用户同样不友好。 */
+  .login-submit:hover:not(:disabled)::before {
+    transform: translateX(-130%);
+  }
+  .login-submit:hover:not(:disabled) {
+    transform: none;
   }
 }
 </style>

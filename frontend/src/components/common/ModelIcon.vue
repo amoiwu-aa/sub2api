@@ -154,6 +154,16 @@ const iconData: Record<string, IconData> = {
   coze: {
     color: '#5436F5',
     paths: ['M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z']
+  },
+  // Cursor logo mark (isometric cube) — 与 PlatformIcon.vue / platformColors.ts(indigo) 保持一致
+  cursor: {
+    color: '#6366F1',
+    paths: ['M12 1.5 2.75 6.75 12 12l9.25-5.25L12 1.5ZM2 8.47v9.06L11.25 22.8v-9.06L2 8.47Zm20 0-9.25 5.27v9.06L22 17.53V8.47Z']
+  },
+  // Kiro logo mark (ghost) — 与 PlatformIcon.vue / platformColors.ts(amber) 保持一致
+  kiro: {
+    color: '#F59E0B',
+    paths: ['M12 1.75A7.75 7.75 0 0 0 4.25 9.5v12.06l2.9-2.32 2.35 1.88L12 19.24l2.5 2 2.35-1.88 2.9 2.32V9.5A7.75 7.75 0 0 0 12 1.75Zm-2.75 8.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm5.5 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z']
   }
 }
 
@@ -161,6 +171,12 @@ const fallbackText = computed(() => props.model.charAt(0).toUpperCase())
 
 const iconKey = computed(() => {
   const modelLower = props.model.toLowerCase()
+
+  // 原生桥接平台的模型 id 带命名空间前缀（cursor/claude-sonnet-5、kiro/auto …）。
+  // 必须先于下面的关键字匹配，否则 cursor/claude-* 会被认成 Claude、
+  // cursor/grok-4.5 会被认成 xAI，丢掉平台归属这个更重要的信息。
+  if (modelLower.startsWith('cursor/')) return 'cursor'
+  if (modelLower.startsWith('kiro/')) return 'kiro'
 
   // OpenAI models
   if (modelLower.startsWith('gpt') || modelLower.startsWith('o1') ||

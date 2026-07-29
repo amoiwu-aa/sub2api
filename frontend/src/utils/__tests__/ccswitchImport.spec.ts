@@ -63,6 +63,44 @@ describe('ccswitchImport utils', () => {
     expect(params.get('model')).toBe(GROK_CC_SWITCH_MODEL)
   })
 
+  // {{baseUrl}} 回落到 provider endpoint，而 usageScript 自己会拼 /v1/usage。
+  // endpoint 带 /v1 的平台必须显式给出不带 /v1 的用量基址，否则拼成 /v1/v1/usage。
+  it.each([
+    { platform: 'cursor' as GroupPlatform, app: 'opencode' },
+    { platform: 'grok' as GroupPlatform, app: 'grokbuild' }
+  ])('pins the usage base URL below /v1 for $platform imports', ({ platform, app }) => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform,
+        clientType: 'claude'
+      })
+    )
+
+    expect(params.get('app')).toBe(app)
+    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('usageBaseUrl')).toBe('https://api.example.com')
+  })
+
+  it.each([
+    { platform: 'anthropic' as GroupPlatform, clientType: 'claude' as const },
+    { platform: 'openai' as GroupPlatform, clientType: 'claude' as const },
+    { platform: 'antigravity' as GroupPlatform, clientType: 'gemini' as const }
+  ])(
+    'leaves the usage base URL to the provider endpoint for $platform imports',
+    ({ platform, clientType }) => {
+      const params = paramsFromDeeplink(
+        buildCcSwitchImportDeeplink({
+          ...baseInput,
+          platform,
+          clientType
+        })
+      )
+
+      expect(params.has('usageBaseUrl')).toBe(false)
+    }
+  )
+
   it.each([
     { platform: 'anthropic' as GroupPlatform, clientType: 'claude' as const, app: 'claude' },
     { platform: 'gemini' as GroupPlatform, clientType: 'gemini' as const, app: 'gemini' }

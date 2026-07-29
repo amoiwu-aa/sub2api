@@ -699,6 +699,7 @@ type SecurityConfig struct {
 	CSP             CSPConfig            `mapstructure:"csp"`
 	ProxyFallback   ProxyFallbackConfig  `mapstructure:"proxy_fallback"`
 	ProxyProbe      ProxyProbeConfig     `mapstructure:"proxy_probe"`
+	IPReputation    IPReputationConfig   `mapstructure:"ip_reputation"`
 	// TrustForwardedIPForAPIKeyACL enables legacy raw forwarded-header takeover.
 	// When disabled, server.trusted_proxies is authoritative for all client-IP consumers.
 	TrustForwardedIPForAPIKeyACL  bool                                       `mapstructure:"trust_forwarded_ip_for_api_key_acl"`
@@ -819,6 +820,55 @@ type ProxyFallbackConfig struct {
 
 type ProxyProbeConfig struct {
 	InsecureSkipVerify bool `mapstructure:"insecure_skip_verify"` // 已禁用：禁止跳过 TLS 证书验证
+}
+
+// IPReputationConfig 控制代理出口 IP 的信誉查询（机房/住宅、VPN/Tor、滥用历史、风险分）。
+// 查询走服务器直连而非被检测的代理：出口地址在连通性探测阶段已经拿到，
+// 以查询参数传给第三方即可，穿代理只会白白消耗代理带宽并把限流配额打散。
+type IPReputationConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// CacheTTLHours 信誉结果缓存时长。信誉库以天为单位更新，缓存按出口 IP 而非
+	// 代理 ID 命中，批量检测时共用出口的代理只会消耗一次配额。
+	CacheTTLHours int `mapstructure:"cache_ttl_hours"`
+	// TimeoutSeconds 一次并发扇出的整体超时，不是单个数据源的超时。
+	TimeoutSeconds int `mapstructure:"timeout_seconds"`
+	// IPAPIIs：免费 1000 次/天，无需 key；填 key 可提额。
+	IPAPIIs IPReputationProviderConfig `mapstructure:"ipapi_is"`
+	// ProxyCheck：无 key 100 次/天，免费 key 1000 次/天。
+	ProxyCheck IPReputationProviderConfig `mapstructure:"proxycheck"`
+	// IPQualityScore：必须提供 key，免费额度 5000 次/月。
+	IPQualityScore IPQualityScoreConfig `mapstructure:"ipqualityscore"`
+}
+
+type IPReputationProviderConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	APIKey  string `mapstructure:"api_key"`
+}
+
+type IPQualityScoreConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	APIKey  string `mapstructure:"api_key"`
+	// Strictness 对应 IPQS 自身的 0-3 档：越高抓到的代理越多，误报也越多。
+	Strictness int `mapstructure:"strictness"`
+}
+
+func (c IPReputationConfig) validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if c.CacheTTLHours < 0 {
+		return fmt.Errorf("security.ip_reputation.cache_ttl_hours must be non-negative")
+	}
+	if c.TimeoutSeconds < 0 {
+		return fmt.Errorf("security.ip_reputation.timeout_seconds must be non-negative")
+	}
+	if c.IPQualityScore.Enabled && strings.TrimSpace(c.IPQualityScore.APIKey) == "" {
+		return fmt.Errorf("security.ip_reputation.ipqualityscore.api_key is required when the provider is enabled")
+	}
+	if c.IPQualityScore.Strictness < 0 || c.IPQualityScore.Strictness > 3 {
+		return fmt.Errorf("security.ip_reputation.ipqualityscore.strictness must be between 0 and 3")
+	}
+	return nil
 }
 
 type BillingConfig struct {
@@ -1640,20 +1690,7 @@ func LoadForBootstrap() (*Config, error) {
 func load(allowMissingJWTSecret bool) (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-
-	// Add config paths in priority order
-	// 1. DATA_DIR environment variable (highest priority)
-	if dataDir := os.Getenv("DATA_DIR"); dataDir != "" {
-		viper.AddConfigPath(dataDir)
-	}
-	// 2. Docker data directory
-	viper.AddConfigPath("/app/data")
-	// 3. Current directory
-	viper.AddConfigPath(".")
-	// 4. Config subdirectory
-	viper.AddConfigPath("./config")
-	// 5. System config directory
-	viper.AddConfigPath("/etc/sub2api")
+	configureConfigSource(viper.SetConfigFile, viper.AddConfigPath)
 
 	// 环境变量支持
 	viper.AutomaticEnv()
@@ -1828,6 +1865,22 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	return &cfg, nil
 }
 
+func configureConfigSource(setConfigFile, addConfigPath func(string)) {
+	if configFile := strings.TrimSpace(os.Getenv("CONFIG_FILE")); configFile != "" {
+		setConfigFile(configFile)
+		return
+	}
+
+	// Add config paths in priority order.
+	if dataDir := strings.TrimSpace(os.Getenv("DATA_DIR")); dataDir != "" {
+		addConfigPath(dataDir)
+	}
+	addConfigPath("/app/data")
+	addConfigPath(".")
+	addConfigPath("./config")
+	addConfigPath("/etc/sub2api")
+}
+
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
 
@@ -1878,6 +1931,8 @@ func setDefaults() {
 		"api.openai.com",
 		"api.anthropic.com",
 		"api.kimi.com",
+		"api.moonshot.ai",
+		"api.moonshot.cn",
 		"open.bigmodel.cn",
 		"api.minimaxi.com",
 		"generativelanguage.googleapis.com",
@@ -1897,6 +1952,19 @@ func setDefaults() {
 	viper.SetDefault("security.csp.policy", DefaultCSPPolicy)
 	viper.SetDefault("security.proxy_probe.insecure_skip_verify", false)
 	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", true)
+
+	// IP 信誉查询：只默认开启无需 API key 的数据源。
+	// proxycheck.io 不带 key 时只有 100 次/天，一次批量检测就能打光，因此需要显式开启。
+	viper.SetDefault("security.ip_reputation.enabled", true)
+	viper.SetDefault("security.ip_reputation.cache_ttl_hours", 24)
+	viper.SetDefault("security.ip_reputation.timeout_seconds", 8)
+	viper.SetDefault("security.ip_reputation.ipapi_is.enabled", true)
+	viper.SetDefault("security.ip_reputation.ipapi_is.api_key", "")
+	viper.SetDefault("security.ip_reputation.proxycheck.enabled", false)
+	viper.SetDefault("security.ip_reputation.proxycheck.api_key", "")
+	viper.SetDefault("security.ip_reputation.ipqualityscore.enabled", false)
+	viper.SetDefault("security.ip_reputation.ipqualityscore.api_key", "")
+	viper.SetDefault("security.ip_reputation.ipqualityscore.strictness", 1)
 
 	// Security - disable direct fallback on proxy error
 	viper.SetDefault("security.proxy_fallback.allow_direct_on_error", false)
@@ -3033,6 +3101,9 @@ func (c *Config) Validate() error {
 	if c.Gateway.ProxyProbeResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.proxy_probe_response_read_max_bytes must be positive")
 	}
+	if err := c.Security.IPReputation.validate(); err != nil {
+		return err
+	}
 	if c.Gateway.ResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.response_header_timeout must be non-negative")
 	}
@@ -3488,14 +3559,12 @@ func generateJWTSecret(byteLength int) (string, error) {
 // GetServerAddress returns the server address (host:port) from config file or environment variable.
 // This is a lightweight function that can be used before full config validation,
 // such as during setup wizard startup.
-// Priority: config.yaml > environment variables > defaults
+// Priority: environment variables > config file > defaults.
 func GetServerAddress() string {
 	v := viper.New()
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
-	v.AddConfigPath(".")
-	v.AddConfigPath("./config")
-	v.AddConfigPath("/etc/sub2api")
+	configureConfigSource(v.SetConfigFile, v.AddConfigPath)
 
 	// Support SERVER_HOST and SERVER_PORT environment variables
 	v.AutomaticEnv()

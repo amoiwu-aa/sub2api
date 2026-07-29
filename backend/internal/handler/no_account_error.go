@@ -130,11 +130,25 @@ func classifyOpenAICompatibleNoAccountErrorFromGin(
 	)
 }
 
+// openAICompatibleSelectionErrorForLog 把选号失败的日志改成平台自己的措辞。
+// 共用的选号器只会说 "OpenAI accounts"，运维看到它去查 OpenAI 账号池是白费功夫。
 func openAICompatibleSelectionErrorForLog(err error, platform string) error {
-	if err == nil || platform != service.PlatformGrok {
+	if err == nil {
 		return err
 	}
-	message := strings.ReplaceAll(err.Error(), "OpenAI accounts", "Grok accounts")
+	var label string
+	switch platform {
+	case service.PlatformGrok:
+		label = "Grok accounts"
+	case service.PlatformKiro:
+		label = "Kiro accounts"
+	case service.PlatformCursor:
+		label = "Cursor accounts"
+	default:
+		return err
+	}
+
+	message := strings.ReplaceAll(err.Error(), "OpenAI accounts", label)
 	if message == err.Error() {
 		return err
 	}
