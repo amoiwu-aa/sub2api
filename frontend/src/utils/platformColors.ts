@@ -60,6 +60,8 @@ const BORDER_STRONG: Record<Platform, string> = {
   antigravity: 'border-purple-500/35 dark:border-purple-500/30',
   gemini: 'border-blue-500/35 dark:border-blue-500/30',
   grok: 'border-zinc-800/35 dark:border-zinc-500/35',
+  cursor: 'border-indigo-500/35 dark:border-indigo-500/30',
+  kiro: 'border-amber-500/35 dark:border-amber-500/30',
   composite: 'border-cyan-500/35 dark:border-cyan-500/30',
 }
 const BORDER_STRONG_DEFAULT = 'border-gray-300 dark:border-dark-600'
@@ -72,6 +74,8 @@ const ACCENT: Record<Platform, string> = {
   antigravity: '#a855f7', // purple-500
   gemini: '#3b82f6', // blue-500
   grok: '#71717a', // zinc-500
+  cursor: '#6366f1', // indigo-500
+  kiro: '#f59e0b', // amber-500
   composite: '#06b6d4', // cyan-500
 }
 const ACCENT_DEFAULT = '#14b8a6' // primary-500 (teal)
