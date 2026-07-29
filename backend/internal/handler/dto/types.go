@@ -342,6 +342,9 @@ type ProxyWithAccountCount struct {
 	QualityGrade   string `json:"quality_grade,omitempty"`
 	QualitySummary string `json:"quality_summary,omitempty"`
 	QualityChecked *int64 `json:"quality_checked,omitempty"`
+	IPType         string `json:"ip_type,omitempty"`
+	IPRiskLevel    string `json:"ip_risk_level,omitempty"`
+	IPRiskScore    *int   `json:"ip_risk_score,omitempty"`
 }
 
 // AdminProxy 是管理员接口使用的 proxy DTO（包含密码等敏感字段）。
@@ -368,6 +371,9 @@ type AdminProxyWithAccountCount struct {
 	QualityGrade   string `json:"quality_grade,omitempty"`
 	QualitySummary string `json:"quality_summary,omitempty"`
 	QualityChecked *int64 `json:"quality_checked,omitempty"`
+	IPType         string `json:"ip_type,omitempty"`
+	IPRiskLevel    string `json:"ip_risk_level,omitempty"`
+	IPRiskScore    *int   `json:"ip_risk_score,omitempty"`
 }
 
 type ProxyAccountSummary struct {

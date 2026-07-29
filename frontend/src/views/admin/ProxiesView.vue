@@ -184,17 +184,32 @@
           </template>
 
           <template #cell-location="{ row }">
-            <div class="flex items-center gap-2">
-              <img
-                v-if="row.country_code"
-                :src="flagUrl(row.country_code)"
-                :alt="row.country || row.country_code"
-                class="h-4 w-6 rounded-sm"
-              />
-              <span v-if="formatLocation(row)" class="text-sm text-gray-700 dark:text-gray-200">
-                {{ formatLocation(row) }}
-              </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center gap-2">
+                <img
+                  v-if="row.country_code"
+                  :src="flagUrl(row.country_code)"
+                  :alt="row.country || row.country_code"
+                  class="h-4 w-6 rounded-sm"
+                />
+                <span v-if="formatLocation(row)" class="text-sm text-gray-700 dark:text-gray-200">
+                  {{ formatLocation(row) }}
+                </span>
+                <span v-else class="text-sm text-gray-400">-</span>
+              </div>
+              <div v-if="row.ip_type || row.ip_risk_level" class="flex flex-wrap items-center gap-1">
+                <span v-if="row.ip_type" class="badge" :class="ipTypeClass(row.ip_type)">
+                  {{ ipTypeLabel(row.ip_type) }}
+                </span>
+                <span
+                  v-if="row.ip_risk_level && row.ip_risk_level !== 'unknown'"
+                  class="badge"
+                  :class="ipRiskClass(row.ip_risk_level)"
+                >
+                  {{ ipRiskLabel(row.ip_risk_level) }}
+                  <template v-if="typeof row.ip_risk_score === 'number'"> · {{ row.ip_risk_score }}</template>
+                </span>
+              </div>
             </div>
           </template>
 
@@ -903,6 +918,97 @@
           </div>
         </div>
 
+        <div
+          v-if="qualityReport.reputation"
+          class="rounded-lg border border-gray-200 p-4 dark:border-dark-600"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.proxies.reputationTitle') }}
+            </span>
+            <span class="badge" :class="ipTypeClass(qualityReport.reputation.ip_type)">
+              {{ ipTypeLabel(qualityReport.reputation.ip_type) }}
+            </span>
+            <span class="badge" :class="ipRiskClass(qualityReport.reputation.risk_level)">
+              {{ ipRiskLabel(qualityReport.reputation.risk_level) }}
+              <template v-if="typeof qualityReport.reputation.risk_score === 'number'">
+                · {{ qualityReport.reputation.risk_score }}
+              </template>
+            </span>
+            <span v-if="qualityReport.reputation.cached" class="text-xs text-gray-400">
+              {{ t('admin.proxies.reputationCached') }}
+            </span>
+          </div>
+
+          <div class="mt-2 grid grid-cols-1 gap-1 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-2">
+            <div v-if="qualityReport.reputation.isp">
+              {{ t('admin.proxies.reputationISP') }}: {{ qualityReport.reputation.isp }}
+            </div>
+            <div v-if="qualityReport.reputation.asn">
+              {{ t('admin.proxies.reputationASN') }}:
+              {{ qualityReport.reputation.asn }}
+              <template v-if="qualityReport.reputation.as_org"> · {{ qualityReport.reputation.as_org }}</template>
+            </div>
+            <div v-if="qualityReport.reputation.hoster" class="sm:col-span-2">
+              {{ t('admin.proxies.reputationHoster') }}: {{ qualityReport.reputation.hoster }}
+            </div>
+          </div>
+
+          <p
+            v-if="qualityReport.reputation.conflicts?.length"
+            class="mt-2 rounded bg-amber-50 px-2 py-1.5 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+          >
+            {{
+              t('admin.proxies.reputationConflict', {
+                flags: qualityReport.reputation.conflicts.map(reputationFlagLabel).join(', '),
+              })
+            }}
+          </p>
+
+          <div class="mt-3 overflow-auto rounded border border-gray-200 dark:border-dark-600">
+            <table class="min-w-full divide-y divide-gray-200 text-xs dark:divide-dark-700">
+              <thead class="bg-gray-50 uppercase text-gray-500 dark:bg-dark-800 dark:text-dark-400">
+                <tr>
+                  <th class="whitespace-nowrap px-3 py-2 text-left">{{ t('admin.proxies.reputationTableSource') }}</th>
+                  <th class="whitespace-nowrap px-3 py-2 text-left">{{ t('admin.proxies.reputationTableType') }}</th>
+                  <th class="whitespace-nowrap px-3 py-2 text-left">{{ t('admin.proxies.reputationTableFlags') }}</th>
+                  <th class="whitespace-nowrap px-3 py-2 text-left">{{ t('admin.proxies.reputationTableRisk') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+                <tr v-for="source in qualityReport.reputation.sources" :key="source.source">
+                  <td class="whitespace-nowrap px-3 py-2 text-gray-900 dark:text-white">{{ source.source }}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-300">
+                    {{ verdictTypeLabel(source) }}
+                  </td>
+                  <td class="px-3 py-2">
+                    <span v-if="!source.ok" class="text-gray-400" :title="source.error || undefined">
+                      {{ t('admin.proxies.reputationSourceFailed') }}
+                    </span>
+                    <span v-else-if="!verdictFlags(source).length" class="text-emerald-600 dark:text-emerald-400">
+                      {{ t('admin.proxies.reputationNoFlags') }}
+                    </span>
+                    <span v-else class="flex flex-wrap gap-1">
+                      <span
+                        v-for="flag in verdictFlags(source)"
+                        :key="flag"
+                        class="badge badge-warning"
+                      >
+                        {{ reputationFlagLabel(flag) }}
+                      </span>
+                    </span>
+                  </td>
+                  <td class="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-300">
+                    <template v-if="source.risk_label">{{ source.risk_label }}</template>
+                    <template v-else-if="typeof source.risk_score === 'number'">{{ source.risk_score }}</template>
+                    <template v-else>-</template>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="max-h-80 overflow-auto rounded-lg border border-gray-200 dark:border-dark-600">
           <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-dark-700">
             <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-800 dark:text-dark-400">
@@ -994,7 +1100,15 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type {
+  IPReputationRiskLevel,
+  IPReputationType,
+  IPReputationVerdict,
+  Proxy,
+  ProxyAccountSummary,
+  ProxyProtocol,
+  ProxyQualityCheckResult,
+} from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1505,6 +1619,9 @@ const applyQualityResult = (proxyId: number, result: ProxyQualityCheckResult) =>
   target.quality_grade = result.grade
   target.quality_summary = result.summary
   target.quality_checked = result.checked_at
+  target.ip_type = result.reputation?.ip_type
+  target.ip_risk_level = result.reputation?.risk_level
+  target.ip_risk_score = result.reputation?.risk_score
 }
 
 const formatLocation = (proxy: Proxy) => {
@@ -1679,6 +1796,76 @@ const qualityStatusLabel = (status: string) => {
   if (status === 'warn') return t('admin.proxies.qualityStatusWarn')
   if (status === 'challenge') return t('admin.proxies.qualityStatusChallenge')
   return t('admin.proxies.qualityStatusFail')
+}
+
+const ipTypeClass = (type?: IPReputationType) => {
+  if (type === 'residential') return 'badge-success'
+  if (type === 'mobile') return 'badge-purple'
+  if (type === 'datacenter') return 'badge-gray'
+  return 'badge-gray'
+}
+
+const ipTypeLabel = (type?: IPReputationType) => {
+  if (type === 'datacenter') return t('admin.proxies.ipTypeDatacenter')
+  if (type === 'residential') return t('admin.proxies.ipTypeResidential')
+  if (type === 'mobile') return t('admin.proxies.ipTypeMobile')
+  return t('admin.proxies.ipTypeUnknown')
+}
+
+const ipRiskClass = (level?: IPReputationRiskLevel) => {
+  if (level === 'clean') return 'badge-success'
+  if (level === 'low') return 'badge-info'
+  if (level === 'medium') return 'badge-warning'
+  if (level === 'high') return 'badge-danger'
+  return 'badge-secondary'
+}
+
+const ipRiskLabel = (level?: IPReputationRiskLevel) => {
+  if (level === 'clean') return t('admin.proxies.ipRiskClean')
+  if (level === 'low') return t('admin.proxies.ipRiskLow')
+  if (level === 'medium') return t('admin.proxies.ipRiskMedium')
+  if (level === 'high') return t('admin.proxies.ipRiskHigh')
+  return t('admin.proxies.ipRiskUnknown')
+}
+
+const reputationFlagLabel = (flag: string) => {
+  switch (flag) {
+    case 'datacenter':
+      return t('admin.proxies.ipTypeDatacenter')
+    case 'proxy':
+      return t('admin.proxies.reputationFlagProxy')
+    case 'vpn':
+      return t('admin.proxies.reputationFlagVPN')
+    case 'tor':
+      return t('admin.proxies.reputationFlagTor')
+    case 'mobile':
+      return t('admin.proxies.ipTypeMobile')
+    case 'abuser':
+      return t('admin.proxies.reputationFlagAbuser')
+    default:
+      return flag
+  }
+}
+
+// Only flags the source actually asserted are listed; an unreported flag and a
+// negative answer both stay out of the badge row.
+const verdictFlags = (verdict: IPReputationVerdict): string[] => {
+  const flags: string[] = []
+  if (verdict.datacenter) flags.push('datacenter')
+  if (verdict.proxy) flags.push('proxy')
+  if (verdict.vpn) flags.push('vpn')
+  if (verdict.tor) flags.push('tor')
+  if (verdict.mobile) flags.push('mobile')
+  if (verdict.abuser) flags.push('abuser')
+  return flags
+}
+
+const verdictTypeLabel = (verdict: IPReputationVerdict) => {
+  if (!verdict.ok) return '-'
+  if (verdict.usage_type) return verdict.usage_type
+  if (verdict.datacenter === true) return t('admin.proxies.ipTypeDatacenter')
+  if (verdict.datacenter === false) return t('admin.proxies.ipTypeResidential')
+  return '-'
 }
 
 // 有效期「选天数」⇄ 日历联动:天数自 base 起算(创建=今天;编辑=代理创建日),本地日历日 round-trip 稳定;canonical 仍是 expires_at 日期串

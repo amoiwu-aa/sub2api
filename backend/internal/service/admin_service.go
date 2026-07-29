@@ -7,6 +7,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ipreputation"
 )
 
 // AdminService interface defines admin management operations
@@ -527,6 +528,13 @@ type ProxyQualityCheckResult struct {
 	ChallengeCount int                     `json:"challenge_count"`
 	CheckedAt      int64                   `json:"checked_at"`
 	Items          []ProxyQualityCheckItem `json:"items"`
+
+	// Reputation is deliberately separate from Score: that score measures
+	// whether the proxy can reach the AI upstreams, while reputation measures
+	// how those upstreams are likely to judge the exit address. A datacenter
+	// exit can be perfectly reachable and still get challenged, and a pristine
+	// residential address can be too slow to use.
+	Reputation *ipreputation.Report `json:"reputation,omitempty"`
 }
 
 type ProxyQualityCheckItem struct {
@@ -545,11 +553,30 @@ type ProxyExitInfo struct {
 	Region      string
 	Country     string
 	CountryCode string
+
+	// Network attribution and ip-api's own hosting/proxy/mobile classification.
+	// These ride along on the probe that already runs, so they cost nothing
+	// extra; the fallback probe (ipify) leaves them empty.
+	ISP     string
+	Org     string
+	ASN     string
+	ASName  string
+	Mobile  *bool
+	Proxy   *bool
+	Hosting *bool
 }
 
 // ProxyExitInfoProber tests proxy connectivity and retrieves exit information
 type ProxyExitInfoProber interface {
 	ProbeProxy(ctx context.Context, proxyURL string) (*ProxyExitInfo, int64, error)
+}
+
+// IPReputationChecker looks up an exit address in third-party reputation
+// databases. Implementations are expected to cache by address and to degrade to
+// a disabled no-op rather than failing the surrounding quality check.
+type IPReputationChecker interface {
+	Enabled() bool
+	Check(ctx context.Context, ip string) (*ipreputation.Report, error)
 }
 
 type groupExistenceBatchReader interface {
@@ -625,6 +652,7 @@ type adminServiceImpl struct {
 	billingCacheService  *BillingCacheService
 	proxyProber          ProxyExitInfoProber
 	proxyLatencyCache    ProxyLatencyCache
+	ipReputationChecker  IPReputationChecker
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	entClient            *dbent.Client // 用于开启数据库事务
 	settingService       *SettingService
@@ -658,6 +686,7 @@ func NewAdminService(
 	billingCacheService *BillingCacheService,
 	proxyProber ProxyExitInfoProber,
 	proxyLatencyCache ProxyLatencyCache,
+	ipReputationChecker IPReputationChecker,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	entClient *dbent.Client,
 	settingService *SettingService,
@@ -683,6 +712,7 @@ func NewAdminService(
 		billingCacheService:  billingCacheService,
 		proxyProber:          proxyProber,
 		proxyLatencyCache:    proxyLatencyCache,
+		ipReputationChecker:  ipReputationChecker,
 		authCacheInvalidator: authCacheInvalidator,
 		entClient:            entClient,
 		settingService:       settingService,

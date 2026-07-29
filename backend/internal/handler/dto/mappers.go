@@ -495,6 +495,9 @@ func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWi
 		QualityGrade:   p.QualityGrade,
 		QualitySummary: p.QualitySummary,
 		QualityChecked: p.QualityChecked,
+		IPType:         p.IPType,
+		IPRiskLevel:    p.IPRiskLevel,
+		IPRiskScore:    p.IPRiskScore,
 	}
 }
 
@@ -540,6 +543,9 @@ func ProxyWithAccountCountFromServiceAdmin(p *service.ProxyWithAccountCount) *Ad
 		QualityGrade:   p.QualityGrade,
 		QualitySummary: p.QualitySummary,
 		QualityChecked: p.QualityChecked,
+		IPType:         p.IPType,
+		IPRiskLevel:    p.IPRiskLevel,
+		IPRiskScore:    p.IPRiskScore,
 	}
 }
 

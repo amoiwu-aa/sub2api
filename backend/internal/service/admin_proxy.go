@@ -9,6 +9,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ipreputation"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/util/httputil"
@@ -329,9 +330,54 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 		}
 	}
 
+	result.Reputation = s.lookupIPReputation(ctx, exitInfo)
+
 	finalizeProxyQualityResult(result)
 	s.saveProxyQualitySnapshot(ctx, id, result, exitInfo)
 	return result, nil
+}
+
+// lookupIPReputation builds the reputation report for an exit address.
+//
+// The ip-api verdict comes for free from the connectivity probe, so it is
+// always included; remote providers are folded in on top when configured. A
+// failed lookup degrades to whatever is available rather than failing the
+// surrounding quality check — reachability is the answer the operator came for.
+func (s *adminServiceImpl) lookupIPReputation(ctx context.Context, exitInfo *ProxyExitInfo) *ipreputation.Report {
+	if exitInfo == nil || exitInfo.IP == "" {
+		return nil
+	}
+
+	facts := ipreputation.IPAPIFacts{
+		Mobile:  exitInfo.Mobile,
+		Proxy:   exitInfo.Proxy,
+		Hosting: exitInfo.Hosting,
+		ISP:     exitInfo.ISP,
+		Org:     exitInfo.Org,
+		ASN:     exitInfo.ASN,
+		ASName:  exitInfo.ASName,
+	}
+	local := make([]ipreputation.Verdict, 0, 1)
+	if !facts.Empty() {
+		local = append(local, ipreputation.VerdictFromIPAPI(facts))
+	}
+
+	if s.ipReputationChecker == nil || !s.ipReputationChecker.Enabled() {
+		if len(local) == 0 {
+			return nil
+		}
+		return ipreputation.Merge(exitInfo.IP, local)
+	}
+
+	report, err := s.ipReputationChecker.Check(ctx, exitInfo.IP)
+	if err != nil {
+		logger.LegacyPrintf("service.admin", "Warning: ip reputation lookup failed for %s: %v", exitInfo.IP, err)
+		if len(local) == 0 {
+			return nil
+		}
+		return ipreputation.Merge(exitInfo.IP, local)
+	}
+	return ipreputation.Combine(report, local...)
 }
 
 func runProxyQualityTarget(ctx context.Context, client *http.Client, target proxyQualityTarget) ProxyQualityCheckItem {
@@ -506,6 +552,11 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 		info.Region = exitInfo.Region
 		info.City = exitInfo.City
 	}
+	if result.Reputation != nil {
+		info.IPType = result.Reputation.IPType
+		info.IPRiskLevel = result.Reputation.RiskLevel
+		info.IPRiskScore = result.Reputation.RiskScore
+	}
 	s.saveProxyLatency(ctx, proxyID, info)
 }
 
@@ -575,6 +626,9 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 		proxies[i].QualityGrade = info.QualityGrade
 		proxies[i].QualitySummary = info.QualitySummary
 		proxies[i].QualityChecked = info.QualityCheckedAt
+		proxies[i].IPType = info.IPType
+		proxies[i].IPRiskLevel = info.IPRiskLevel
+		proxies[i].IPRiskScore = info.IPRiskScore
 	}
 }
 
@@ -598,6 +652,15 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 				merged.QualitySummary = existing.QualitySummary
 				merged.QualityCheckedAt = existing.QualityCheckedAt
 				merged.QualityCFRay = existing.QualityCFRay
+			}
+			// Reputation belongs to the exit address, so it only survives while
+			// the proxy still exits from the same IP. A rotating proxy would
+			// otherwise keep displaying the previous address's verdict.
+			if merged.IPType == "" && merged.IPRiskLevel == "" && merged.IPRiskScore == nil &&
+				merged.IPAddress != "" && merged.IPAddress == existing.IPAddress {
+				merged.IPType = existing.IPType
+				merged.IPRiskLevel = existing.IPRiskLevel
+				merged.IPRiskScore = existing.IPRiskScore
 			}
 		}
 	}

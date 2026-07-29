@@ -44,13 +44,17 @@ const (
 	defaultProxyProbeResponseMaxBytes = int64(1024 * 1024)
 )
 
+// ipAPIFields 显式列出需要的字段。mobile/proxy/hosting 属于 ip-api 免费额度内
+// 的字段，但只有显式请求才会返回，默认响应里没有——机房/住宅判定就来自这里。
+const ipAPIFields = "status,message,query,country,countryCode,region,regionName,city,isp,org,as,asname,mobile,proxy,hosting"
+
 // probeURLs 按优先级排列的探测 URL 列表
 // 某些 AI API 专用代理只允许访问特定域名，因此需要多个备选
 var probeURLs = []struct {
 	url    string
 	parser string // "ip-api" or "ipify"
 }{
-	{"http://ip-api.com/json/?lang=zh-CN", "ip-api"},
+	{"http://ip-api.com/json/?lang=zh-CN&fields=" + ipAPIFields, "ip-api"},
 	{"http://api64.ipify.org?format=json", "ipify"},
 }
 
@@ -136,6 +140,13 @@ func (s *proxyProbeService) parseIPAPI(body []byte, latencyMs int64) (*service.P
 		RegionName  string `json:"regionName"`
 		Country     string `json:"country"`
 		CountryCode string `json:"countryCode"`
+		ISP         string `json:"isp"`
+		Org         string `json:"org"`
+		AS          string `json:"as"`
+		ASName      string `json:"asname"`
+		Mobile      *bool  `json:"mobile"`
+		Proxy       *bool  `json:"proxy"`
+		Hosting     *bool  `json:"hosting"`
 	}
 
 	if err := json.Unmarshal(body, &ipInfo); err != nil {
@@ -162,6 +173,13 @@ func (s *proxyProbeService) parseIPAPI(body []byte, latencyMs int64) (*service.P
 		Region:      region,
 		Country:     ipInfo.Country,
 		CountryCode: ipInfo.CountryCode,
+		ISP:         ipInfo.ISP,
+		Org:         ipInfo.Org,
+		ASN:         ipInfo.AS,
+		ASName:      ipInfo.ASName,
+		Mobile:      ipInfo.Mobile,
+		Proxy:       ipInfo.Proxy,
+		Hosting:     ipInfo.Hosting,
 	}, latencyMs, nil
 }
 
