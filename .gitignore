@@ -145,3 +145,8 @@ docs/*
 frontend/coverage/
 aicodex
 output/
+
+# 本地发布暂存区：内含数十 MB 的镜像 tar 包
+.deploy-tmp/
+# Cursor MCP 配置写死了本机绝对路径，换机器就失效
+.cursor/

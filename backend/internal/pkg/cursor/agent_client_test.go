@@ -56,6 +56,11 @@ func execServerMessageWithoutArgs(id uint64, execID string) []byte {
 	))
 }
 
+// queryServerMessage 构造一条 interaction_query（AgentServerMessage field 7）。
+func queryServerMessage() []byte {
+	return EncodeBytesField(7, EncodeStringField(1, "pick-one"))
+}
+
 // shrinkStallTimeouts 把看门狗压到毫秒级，让超时用例能在测试里跑完。
 func shrinkStallTimeouts(t *testing.T, stream, exec time.Duration) {
 	t.Helper()
@@ -334,6 +339,47 @@ func TestRunAgentTurnWatchdogEndsTurnWhenExecCannotBeAnswered(t *testing.T) {
 	require.Equal(t, 1, result.ExecUnanswered)
 	// 已经产出的文本要留住：调用方靠它给客户端补一个正常的收尾。
 	require.Equal(t, "查一下北京的天气", result.Text)
+}
+
+func TestRunAgentTurnCountsIgnoredInteractionQuery(t *testing.T) {
+	// 收到 query 却不回执时，应计入 QueryIgnored，并走短看门狗而不是干等两分钟。
+	shrinkStallTimeouts(t, 5*time.Second, 150*time.Millisecond)
+
+	server := &agentTestServer{t: t, hangAfterScript: true, script: [][]byte{
+		textDeltaMessage("需要你确认一下"),
+		queryServerMessage(),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	done := make(chan struct{})
+	var (
+		result *AgentTurnResult
+		err    error
+	)
+	go func() {
+		defer close(done)
+		result, err = RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+			AgentTurnInput{Text: "hi", ConversationID: "conv-1"}, nil)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(4 * time.Second):
+		t.Fatal("readTurn hung: query watchdog did not fire")
+	}
+
+	require.NoError(t, err)
+	require.True(t, result.Incomplete())
+	require.True(t, result.Stalled)
+	require.Equal(t, 1, result.QueryIgnored)
+	require.Contains(t, result.IncompleteSummary(), "query_ignored=1")
+	require.Equal(t, "需要你确认一下", result.Text)
+}
+
+func TestAgentTurnResultIncompleteSummary(t *testing.T) {
+	require.Empty(t, (&AgentTurnResult{TurnEnded: true}).IncompleteSummary())
+	require.Equal(t, "stalled;no_turn_ended;exec_unanswered=2;query_ignored=1",
+		(&AgentTurnResult{Stalled: true, ExecUnanswered: 2, QueryIgnored: 1}).IncompleteSummary())
 }
 
 func TestRunAgentTurnWatchdogDoesNotCutHealthyStream(t *testing.T) {

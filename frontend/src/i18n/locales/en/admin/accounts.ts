@@ -184,7 +184,7 @@ export default {
         ungrouped: 'Ungrouped',
         hint: 'Displayed as "group / base score / sticky bonus". The base score is computed within the current filtered candidate set and includes priority, load, queue depth, error rate, first-token latency, reset window, quota headroom, billing rate, and related factors. The sticky bonus applies only when sticky weighting is enabled for previous_response_id or session_hash. Higher scores are preferred.'
       },
-      usageWindowsHint: '"5h / 7d" for OpenAI/Claude are upstream official rolling windows. Cursor shows local gateway 5h/7d usage (no upstream account quota API). Kiro prefers upstream Credits and also shows local windows.',
+      usageWindowsHint: '"5h / 7d" for OpenAI/Claude are upstream official rolling windows set by the provider; they reset automatically when the window rolls over. Cursor has no rolling windows — it settles per billing cycle, so it shows Auto usage and included API usage as separate dimensions plus on-demand spend. Kiro shows upstream Credits.',
       ollamaCloud: {
         title: 'Ollama Cloud usage',
         sessionSecurityHint: 'The browser session is encrypted at rest and sent only to the fixed official settings URL.',
@@ -638,7 +638,23 @@ export default {
         teamIdLabel: 'Team ID',
         importAndCreate: 'Import and create',
         importFailed: 'Failed to import Cursor credentials',
-        localUsageNote: 'Local usage windows (Cursor has no upstream account quota API)',
+        autoLabel: 'Auto',
+        apiLabel: 'API',
+        periodTotal: 'Spent ${amount} this billing cycle',
+        onDemandSpend: 'On-demand spend ${amount}',
+        paymentFailed: 'Subscription payment failed',
+        paymentActionHint: 'Subscription needs attention. Upstream suggests: {action}',
+        planHint: 'Cursor plan: {plan}',
+        billingCycle: 'Billing cycle {start} – {end}',
+        plan: {
+          free: 'Free',
+          pro: 'Pro',
+          proPlus: 'Pro+',
+          business: 'Business',
+          team: 'Team',
+          enterprise: 'Enterprise',
+          ultra: 'Ultra',
+        },
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',

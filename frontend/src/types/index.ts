@@ -1333,6 +1333,28 @@ export interface AccountUsageInfo {
   kiro_currency?: string
   kiro_free_trial_status?: string
 
+  // Cursor 订阅额度（上游 GET /api/usage-summary + /api/auth/stripe）
+  // Cursor 按计费周期结算，没有 5h / 7d 滚动窗口：周期内 Auto 用量与
+  // 包含的 API 用量是两个独立维度，溢出部分走 on-demand 按量计费。
+  cursor_plan?: string
+  cursor_subscription_status?: string   // active | past_due | canceled
+  cursor_payment_failed?: boolean
+  cursor_payment_action?: string
+  cursor_auto_usage?: UsageProgress | null
+  cursor_api_usage?: UsageProgress | null
+  cursor_included_used?: number         // 美元
+  cursor_included_limit?: number        // 美元
+  cursor_on_demand_enabled?: boolean
+  cursor_on_demand_used?: number        // 美元
+  cursor_on_demand_limit?: number       // 美元，0 表示未设上限
+  cursor_period_total?: number          // 本周期总消耗（美元）
+  cursor_period_bonus?: number          // 其中来自赠送额度（美元）
+  cursor_billing_cycle_start?: string
+  cursor_billing_cycle_end?: string
+  cursor_is_unlimited?: boolean
+  cursor_auto_message?: string          // 上游渲染好的说明，直接当 tooltip
+  cursor_api_message?: string
+
   subscription_tier?: string
   subscription_tier_raw?: string
   ai_credits?: Array<{

@@ -135,7 +135,7 @@ export default {
         ungrouped: '未分组',
         hint: '显示格式为“分组名 / 基础分 / 粘性加分”。基础分按当前筛选条件限定的候选账号计算，包含优先级、负载、排队、错误率、首包延迟、重置窗口、额度余量、计费倍率等因子；粘性加分只在开启粘性加权时用于 previous_response_id 或 session_hash。分数越大越优先。'
       },
-      usageWindowsHint: '“5h / 7d”对 OpenAI / Claude 等是上游官方滚动窗口；Cursor 显示本网关本地 5h/7d 消耗（无上游账号额度接口）；Kiro 优先显示上游 Credits，并附带本地窗口。',
+      usageWindowsHint: '“5h / 7d”对 OpenAI / Claude 等是上游官方滚动窗口，由上游对账号设定，窗口滚动到期后自动重置。Cursor 没有滚动窗口，按计费周期结算，显示的是 Auto 用量与包含的 API 额度两个维度，以及超出后的按量消费。Kiro 显示上游 Credits。',
       ollamaCloud: {
         title: 'Ollama Cloud 用量',
         sessionSecurityHint: '浏览器会话会加密落库，且只发送到固定的 Ollama 官方设置页。',
@@ -698,7 +698,23 @@ export default {
         teamIdLabel: '团队 ID',
         importAndCreate: '导入并创建',
         importFailed: '导入 Cursor 凭证失败',
-        localUsageNote: '本地用量窗口（Cursor 无上游账号额度接口）',
+        autoLabel: 'Auto',
+        apiLabel: 'API',
+        periodTotal: '本计费周期总消耗 ${amount}',
+        onDemandSpend: '按量额外消费 ${amount}',
+        paymentFailed: '订阅扣款失败',
+        paymentActionHint: '订阅异常，上游建议的处理方式：{action}',
+        planHint: 'Cursor 套餐：{plan}',
+        billingCycle: '计费周期 {start} – {end}',
+        plan: {
+          free: 'Free',
+          pro: 'Pro',
+          proPlus: 'Pro+',
+          business: 'Business',
+          team: 'Team',
+          enterprise: 'Enterprise',
+          ultra: 'Ultra',
+        },
       },
       anthropic: {
         apiKeyPassthrough: '自动透传（仅替换认证）',

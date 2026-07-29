@@ -628,30 +628,55 @@
         </div>
       </div>
 
-      <div v-else-if="error" class="text-[10px] text-red-500">{{ error }}</div>
+      <div
+        v-else-if="error || usageInfo?.error"
+        class="max-w-[200px] truncate text-[10px] text-red-500"
+        :title="error || usageInfo?.error"
+      >
+        {{ error || usageInfo?.error }}
+      </div>
 
       <div v-else-if="usageInfo" class="space-y-1">
+        <!-- 套餐徽章 + 订阅异常标记；plan 来自 usage-summary / stripe -->
+        <div v-if="cursorPlanLabel || cursorSubscriptionWarning" class="flex flex-wrap items-center gap-1">
+          <span
+            v-if="cursorPlanLabel"
+            :class="[
+              'inline-block rounded px-1.5 py-0.5 text-[10px] font-medium',
+              cursorPlanClass
+            ]"
+            :title="cursorPlanTitle"
+          >
+            {{ cursorPlanLabel }}
+          </span>
+          <span
+            v-if="cursorSubscriptionWarning"
+            class="inline-flex items-center gap-1 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-900/30 dark:text-red-400"
+            :title="cursorSubscriptionWarning.title"
+          >
+            ⚠ {{ cursorSubscriptionWarning.label }}
+          </span>
+        </div>
+
+        <!-- Auto 与 API 是 Cursor 计费周期内的两个独立维度，不是滚动窗口 -->
         <UsageProgressBar
-          v-if="usageInfo.five_hour"
-          label="5h"
-          :utilization="usageInfo.five_hour.utilization || 0"
-          :resets-at="usageInfo.five_hour.resets_at"
-          :window-stats="usageInfo.five_hour.window_stats"
-          :show-now-when-idle="true"
+          v-if="usageInfo.cursor_auto_usage"
+          :label="t('admin.accounts.cursor.autoLabel')"
+          :utilization="usageInfo.cursor_auto_usage.utilization || 0"
+          :resets-at="usageInfo.cursor_auto_usage.resets_at"
           color="indigo"
         />
         <UsageProgressBar
-          v-if="usageInfo.seven_day"
-          label="7d"
-          :utilization="usageInfo.seven_day.utilization || 0"
-          :resets-at="usageInfo.seven_day.resets_at"
-          :window-stats="usageInfo.seven_day.window_stats"
-          :show-now-when-idle="true"
+          v-if="usageInfo.cursor_api_usage"
+          :label="t('admin.accounts.cursor.apiLabel')"
+          :utilization="usageInfo.cursor_api_usage.utilization || 0"
+          :resets-at="usageInfo.cursor_api_usage.resets_at"
           color="emerald"
         />
-        <p class="text-[9px] leading-tight text-gray-400 dark:text-gray-500 italic">
-          {{ t('admin.accounts.cursor.localUsageNote') }}
-        </p>
+
+        <div v-if="cursorSpendDisplay" class="text-[10px] text-gray-500 dark:text-gray-400" :title="cursorSpendTitle">
+          💳 {{ cursorSpendDisplay }}
+        </div>
       </div>
 
       <div v-else class="text-xs text-gray-400">-</div>
@@ -948,6 +973,100 @@ const kiroCreditsDisplay = computed(() => {
   if (!info || info.kiro_credits_limit === undefined) return null
   const used = info.kiro_credits_used ?? 0
   return `${used.toFixed(2)} / ${info.kiro_credits_limit.toFixed(0)}`
+})
+
+// Cursor 套餐徽标：上游 membershipType 是 free / pro / business 等小写串，
+// 这里只做展示层归一，不改后端字段。
+const cursorPlanLabel = computed(() => {
+  const raw = (usageInfo.value?.cursor_plan || '').trim()
+  if (!raw) return null
+  const key = raw.toLowerCase().replace(/[\s-]+/g, '_')
+  const known: Record<string, string> = {
+    free: t('admin.accounts.cursor.plan.free'),
+    pro: t('admin.accounts.cursor.plan.pro'),
+    pro_plus: t('admin.accounts.cursor.plan.proPlus'),
+    business: t('admin.accounts.cursor.plan.business'),
+    team: t('admin.accounts.cursor.plan.team'),
+    enterprise: t('admin.accounts.cursor.plan.enterprise'),
+    ultra: t('admin.accounts.cursor.plan.ultra'),
+  }
+  return known[key] || raw
+})
+
+const cursorPlanClass = computed(() => {
+  const key = (usageInfo.value?.cursor_plan || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  switch (key) {
+    case 'pro':
+    case 'pro_plus':
+    case 'ultra':
+      return 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300'
+    case 'business':
+    case 'team':
+    case 'enterprise':
+      return 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300'
+    case 'free':
+      return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+    default:
+      return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+  }
+})
+
+const cursorPlanTitle = computed(() => {
+  const info = usageInfo.value
+  if (!info) return ''
+  const lines: string[] = []
+  if (info.cursor_plan) {
+    lines.push(t('admin.accounts.cursor.planHint', { plan: info.cursor_plan }))
+  }
+  if (info.cursor_billing_cycle_start && info.cursor_billing_cycle_end) {
+    const start = new Date(info.cursor_billing_cycle_start).toLocaleDateString()
+    const end = new Date(info.cursor_billing_cycle_end).toLocaleDateString()
+    lines.push(t('admin.accounts.cursor.billingCycle', { start, end }))
+  }
+  return lines.join('\n')
+})
+
+// Cursor 按计费周期结算：订阅内额度用美元展示，超出部分单列 on-demand。
+const cursorSpendDisplay = computed(() => {
+  const info = usageInfo.value
+  if (!info || info.cursor_included_limit === undefined) return null
+  const used = info.cursor_included_used ?? 0
+  const parts = [`$${used.toFixed(2)} / $${info.cursor_included_limit.toFixed(2)}`]
+  if (info.cursor_on_demand_used) {
+    parts.push(`+$${info.cursor_on_demand_used.toFixed(2)}`)
+  }
+  return parts.join('  ')
+})
+
+// tooltip 直接透传上游渲染好的说明，避免我们二次解释百分比的口径。
+const cursorSpendTitle = computed(() => {
+  const info = usageInfo.value
+  if (!info) return ''
+  const lines: string[] = []
+  if (info.cursor_auto_message) lines.push(info.cursor_auto_message)
+  if (info.cursor_api_message) lines.push(info.cursor_api_message)
+  if (info.cursor_period_total) {
+    lines.push(t('admin.accounts.cursor.periodTotal', { amount: info.cursor_period_total.toFixed(2) }))
+  }
+  if (info.cursor_on_demand_used) {
+    lines.push(t('admin.accounts.cursor.onDemandSpend', { amount: info.cursor_on_demand_used.toFixed(2) }))
+  }
+  return lines.join('\n')
+})
+
+// 扣款失败或订阅逾期比用量本身更要紧：账号随时会被上游停服。
+const cursorSubscriptionWarning = computed(() => {
+  const info = usageInfo.value
+  if (!info) return null
+  const status = (info.cursor_subscription_status || '').toLowerCase()
+  const unhealthy = info.cursor_payment_failed || (status !== '' && status !== 'active' && status !== 'trialing')
+  if (!unhealthy) return null
+  return {
+    label: status ? status.replace(/_/g, ' ') : t('admin.accounts.cursor.paymentFailed'),
+    title: info.cursor_payment_action
+      ? t('admin.accounts.cursor.paymentActionHint', { action: info.cursor_payment_action })
+      : t('admin.accounts.cursor.paymentFailed'),
+  }
 })
 
 const kiroOverageTitle = computed(() => {

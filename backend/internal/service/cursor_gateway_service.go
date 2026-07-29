@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -196,6 +197,7 @@ func (s *CursorGatewayService) forwardStreaming(
 
 	var (
 		headersWritten bool
+		roleWritten    bool
 		firstTokenMs   *int
 		clientGone     bool
 	)
@@ -207,6 +209,17 @@ func (s *CursorGatewayService) forwardStreaming(
 			c.Header("X-Accel-Buffering", "no")
 			c.Status(http.StatusOK)
 			headersWritten = true
+		}
+		if !roleWritten {
+			rolePayload, err := json.Marshal(cursor.NewOpenAIRoleChunk(responseID, publicModel, created))
+			if err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", rolePayload); err != nil {
+				return err
+			}
+			c.Writer.Flush()
+			roleWritten = true
 		}
 		payload, err := json.Marshal(chunk)
 		if err != nil {
@@ -220,13 +233,20 @@ func (s *CursorGatewayService) forwardStreaming(
 	}
 
 	result, err := cursor.RunAgentTurn(ctx, options, input, func(delta cursor.AgentDelta) error {
-		// thinking 按设计不外露：OpenAI 的 chunk 结构里没有它的位置。
-		if delta.Text == "" {
-			return nil
-		}
-		if firstTokenMs == nil {
+		if firstTokenMs == nil && (delta.Text != "" || delta.Thinking != "") {
 			elapsed := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &elapsed
+		}
+		// Cursor Agent 的 thinking_delta 走 reasoning_content；丢掉的话 OpenCode
+		// 会一直停在「思考中」，直到（可能永远等不到的）首个正文 token。
+		if delta.Thinking != "" {
+			if err := writeChunk(cursor.NewOpenAIReasoningChunk(responseID, publicModel, created, delta.Thinking)); err != nil {
+				clientGone = true
+				return err
+			}
+		}
+		if delta.Text == "" {
+			return nil
 		}
 		if err := writeChunk(cursor.NewOpenAIChunk(responseID, publicModel, created, delta.Text)); err != nil {
 			clientGone = true
@@ -240,6 +260,7 @@ func (s *CursorGatewayService) forwardStreaming(
 		}
 		return nil, s.upstreamError(ctx, c, account, publicModel, err, headersWritten)
 	}
+	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
 
 	if err := writeChunk(cursor.NewOpenAIFinalChunk(responseID, publicModel, created, "stop")); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
@@ -263,6 +284,7 @@ func (s *CursorGatewayService) forwardBuffered(
 	if err != nil {
 		return nil, s.upstreamError(ctx, c, account, publicModel, err, false)
 	}
+	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
 
 	promptTokens := cursor.EstimateTokens(prompt)
 	completionTokens := cursor.EstimateTokens(result.Text)
@@ -272,8 +294,12 @@ func (s *CursorGatewayService) forwardBuffered(
 		Created: time.Now().Unix(),
 		Model:   publicModel,
 		Choices: []cursor.OpenAIChoice{{
-			Index:        0,
-			Message:      cursor.OpenAIChoiceMessage{Role: "assistant", Content: result.Text},
+			Index: 0,
+			Message: cursor.OpenAIChoiceMessage{
+				Role:             "assistant",
+				Content:          result.Text,
+				ReasoningContent: result.Thinking,
+			},
 			FinishReason: "stop",
 		}},
 		Usage: cursor.OpenAIUsage{
@@ -283,6 +309,63 @@ func (s *CursorGatewayService) forwardBuffered(
 		},
 	})
 	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false), nil
+}
+
+// recordAgentIncomplete 把「HTTP 200 但流实际挂死」的情况打进日志和 ops 上游错误，
+// 避免用量里只剩 200 + 极少 output、看板上看不见原因。
+func (s *CursorGatewayService) recordAgentIncomplete(
+	c *gin.Context,
+	account *Account,
+	publicModel, upstreamModel string,
+	result *cursor.AgentTurnResult,
+) {
+	if result == nil || !result.Incomplete() {
+		return
+	}
+	summary := result.IncompleteSummary()
+	accountID := accountIDOrZero(account)
+	accountName := ""
+	if account != nil {
+		accountName = account.Name
+	}
+	slog.Warn("cursor.agent_turn_incomplete",
+		"account_id", accountID,
+		"account_name", accountName,
+		"model", publicModel,
+		"upstream_model", upstreamModel,
+		"summary", summary,
+		"text_chars", len(result.Text),
+		"thinking_chars", len(result.Thinking),
+		"stalled", result.Stalled,
+		"turn_ended", result.TurnEnded,
+		"exec_handled", result.ExecHandled,
+		"exec_unanswered", result.ExecUnanswered,
+		"query_ignored", result.QueryIgnored,
+		"kv_seen", result.KVSeen,
+	)
+	if c == nil {
+		return
+	}
+	c.Header("X-RingStar-Cursor-Agent", summary)
+	msg := "Cursor agent turn incomplete: " + summary
+	SetOpsUpstreamError(c, http.StatusOK, msg, summary)
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           PlatformCursor,
+		AccountID:          accountID,
+		AccountName:        accountName,
+		UpstreamStatusCode: http.StatusOK,
+		Kind:               "cursor_agent_stall",
+		Stage:              string(GatewayFailureStageInference),
+		Scope:              string(GatewayFailureScopeAccount),
+		Reason:             summary,
+		Message:            msg,
+		Detail:             summary,
+		UpstreamURL:        "https://" + cursor.AgentHost + cursorAgentPathHint(),
+	})
+}
+
+func cursorAgentPathHint() string {
+	return "/agent.v1.AgentService/Run"
 }
 
 // buildResult 组装计费用的结果。

@@ -82,8 +82,50 @@ type AgentTurnResult struct {
 	// ExecUnanswered 是没能回执的 exec 数。非 0 说明 execArgFields 漏了上游的新
 	// 工具，这一轮多半是被看门狗收尾的。
 	ExecUnanswered int
+	// QueryIgnored 是收到但未回执的 interaction_query 数。
+	// 当前网关不实现 query 协议；上游若在等回答，流会静默到看门狗超时。
+	QueryIgnored int
+	// KVSeen 是收到的 kv 帧数（仅观测，不参与回执）。
+	KVSeen int
 	// Stalled 为 true 说明这一轮是看门狗超时中止的，不是上游正常结束。
 	Stalled bool
+}
+
+// Incomplete 报告这一轮是否因挂死或关键未处理事件而不完整。
+// 仅看门狗/未回执类问题；干净的 turn_ended 收尾不算。
+func (r *AgentTurnResult) Incomplete() bool {
+	if r == nil {
+		return false
+	}
+	return r.Stalled || r.ExecUnanswered > 0 || r.QueryIgnored > 0
+}
+
+// IncompleteSummary 把挂死原因收成一句可落日志/运维错误的短文。
+// 正常收尾返回空串。
+func (r *AgentTurnResult) IncompleteSummary() string {
+	if r == nil || !r.Incomplete() {
+		return ""
+	}
+	parts := make([]string, 0, 5)
+	if r.Stalled {
+		parts = append(parts, "stalled")
+	}
+	if !r.TurnEnded {
+		parts = append(parts, "no_turn_ended")
+	}
+	if r.ExecUnanswered > 0 {
+		parts = append(parts, fmt.Sprintf("exec_unanswered=%d", r.ExecUnanswered))
+	}
+	if r.ExecHandled > 0 {
+		parts = append(parts, fmt.Sprintf("exec_handled=%d", r.ExecHandled))
+	}
+	if r.QueryIgnored > 0 {
+		parts = append(parts, fmt.Sprintf("query_ignored=%d", r.QueryIgnored))
+	}
+	if r.KVSeen > 0 {
+		parts = append(parts, fmt.Sprintf("kv=%d", r.KVSeen))
+	}
+	return strings.Join(parts, ";")
 }
 
 // RunAgentTurn 发起一轮对话，把增量交给 onDelta。
@@ -364,6 +406,14 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 			// 让看门狗早点收尾，别让客户端干等两分钟。
 			result.ExecUnanswered++
 			stallTimer.Reset(execStallTimeout)
+		case KindQuery:
+			// 网关目前不实现 interaction_query 回执。上游若在等用户选择/确认，
+			// 会像未回执的 exec 一样静默挂起——记数并缩短看门狗。
+			result.QueryIgnored++
+			stallTimer.Reset(execStallTimeout)
+		case KindKV:
+			result.KVSeen++
+			stallTimer.Reset(streamStallTimeout)
 		case KindCheckpoint:
 			stallTimer.Reset(streamStallTimeout)
 			result.ConversationState = message.ConversationState

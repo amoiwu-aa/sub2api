@@ -116,8 +116,9 @@ type OpenAIChunkChoice struct {
 }
 
 type OpenAIDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role             string `json:"role,omitempty"`
+	Content          string `json:"content,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // OpenAIResponse 是非流式 chat.completion 响应。
@@ -137,8 +138,9 @@ type OpenAIChoice struct {
 }
 
 type OpenAIChoiceMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // OpenAIUsage 的数值是本地估算的：Cursor 上游不返回 token 用量。
@@ -156,6 +158,29 @@ func NewOpenAIChunk(id, model string, created int64, content string) OpenAIChunk
 		Created: created,
 		Model:   model,
 		Choices: []OpenAIChunkChoice{{Index: 0, Delta: OpenAIDelta{Content: content}}},
+	}
+}
+
+// NewOpenAIReasoningChunk 构造一条思考增量（DeepSeek 风格 reasoning_content）。
+// Cursor Agent 的 thinking_delta 必须外露，否则客户端会一直停在「思考中」。
+func NewOpenAIReasoningChunk(id, model string, created int64, reasoning string) OpenAIChunk {
+	return OpenAIChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []OpenAIChunkChoice{{Index: 0, Delta: OpenAIDelta{ReasoningContent: reasoning}}},
+	}
+}
+
+// NewOpenAIRoleChunk 构造首帧 role=assistant，方便流式客户端尽早进入接收态。
+func NewOpenAIRoleChunk(id, model string, created int64) OpenAIChunk {
+	return OpenAIChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []OpenAIChunkChoice{{Index: 0, Delta: OpenAIDelta{Role: "assistant"}}},
 	}
 }
 

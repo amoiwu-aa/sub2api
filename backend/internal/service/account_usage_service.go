@@ -110,12 +110,20 @@ type kiroUsageCache struct {
 	timestamp time.Time
 }
 
+// cursorUsageCache 缓存 Cursor 额度数据
+type cursorUsageCache struct {
+	usageInfo *UsageInfo
+	timestamp time.Time
+}
+
 const (
 	apiCacheTTL             = 3 * time.Minute
 	apiErrorCacheTTL        = 1 * time.Minute        // 负缓存 TTL：429 等错误缓存 1 分钟
 	antigravityErrorTTL     = 1 * time.Minute        // Antigravity 错误缓存 TTL（可恢复错误）
 	kiroCacheTTL            = 3 * time.Minute        // Kiro 额度缓存 TTL
 	kiroErrorTTL            = 1 * time.Minute        // Kiro 错误缓存 TTL（负缓存，避免重试风暴）
+	cursorCacheTTL          = 3 * time.Minute        // Cursor 额度缓存 TTL
+	cursorErrorTTL          = 1 * time.Minute        // Cursor 错误缓存 TTL（负缓存）
 	apiQueryMaxJitter       = 800 * time.Millisecond // 用量查询最大随机延迟
 	windowStatsCacheTTL     = 1 * time.Minute
 	openAIProbeCacheTTL     = 10 * time.Minute
@@ -130,9 +138,11 @@ type UsageCache struct {
 	windowStatsCache  sync.Map           // accountID -> *windowStatsCache
 	antigravityCache  sync.Map           // accountID -> *antigravityUsageCache
 	kiroCache         sync.Map           // accountID -> *kiroUsageCache
+	cursorCache       sync.Map           // accountID -> *cursorUsageCache
 	apiFlight         singleflight.Group // 防止同一账号的并发请求击穿缓存（Anthropic）
 	antigravityFlight singleflight.Group // 防止同一 Antigravity 账号的并发请求击穿缓存
 	kiroFlight        singleflight.Group // 防止同一 Kiro 账号的并发请求击穿缓存
+	cursorFlight      singleflight.Group // 防止同一 Cursor 账号的并发请求击穿缓存
 	openAIProbeCache  sync.Map           // accountID -> time.Time
 	grokProbeCache    sync.Map           // accountID -> last billing probe attempt
 }
@@ -234,6 +244,29 @@ type UsageInfo struct {
 	KiroCurrency        string         `json:"kiro_currency,omitempty"`          // 计价货币
 	KiroFreeTrialStatus string         `json:"kiro_free_trial_status,omitempty"` // 试用状态 ACTIVE/EXPIRED
 
+	// Cursor 订阅额度（GET cursor.com/api/usage-summary + /api/auth/stripe）
+	//
+	// Cursor 按自然计费周期结算，没有 5h / 7d 滚动窗口：周期内分 Auto 用量和
+	// 包含的 API 用量两个独立维度，打满后的溢出走 on-demand 按量计费。
+	CursorPlan               string         `json:"cursor_plan,omitempty"`                // pro / free / business
+	CursorSubscriptionStatus string         `json:"cursor_subscription_status,omitempty"` // active / past_due / canceled
+	CursorPaymentFailed      bool           `json:"cursor_payment_failed,omitempty"`      // 最近一次扣款失败
+	CursorPaymentAction      string         `json:"cursor_payment_action,omitempty"`      // 上游建议的补救动作
+	CursorAutoUsage          *UsageProgress `json:"cursor_auto_usage,omitempty"`          // Auto 模型用量百分比
+	CursorAPIUsage           *UsageProgress `json:"cursor_api_usage,omitempty"`           // 包含的 API 额度用量百分比
+	CursorIncludedUsed       float64        `json:"cursor_included_used,omitempty"`       // 已用的订阅内额度（美元）
+	CursorIncludedLimit      float64        `json:"cursor_included_limit,omitempty"`      // 订阅内额度上限（美元）
+	CursorOnDemandEnabled    bool           `json:"cursor_on_demand_enabled,omitempty"`   // 是否允许超额按量
+	CursorOnDemandUsed       float64        `json:"cursor_on_demand_used,omitempty"`      // 按量额外消费（美元）
+	CursorOnDemandLimit      float64        `json:"cursor_on_demand_limit,omitempty"`     // 按量上限（美元），0 表示未设
+	CursorPeriodTotal        float64        `json:"cursor_period_total,omitempty"`        // 本周期总消耗（美元）
+	CursorPeriodBonus        float64        `json:"cursor_period_bonus,omitempty"`        // 其中来自赠送额度（美元）
+	CursorBillingCycleStart  *time.Time     `json:"cursor_billing_cycle_start,omitempty"`
+	CursorBillingCycleEnd    *time.Time     `json:"cursor_billing_cycle_end,omitempty"`
+	CursorIsUnlimited        bool           `json:"cursor_is_unlimited,omitempty"`
+	CursorAutoMessage        string         `json:"cursor_auto_message,omitempty"` // 上游渲染好的 Auto 用量说明
+	CursorAPIMessage         string         `json:"cursor_api_message,omitempty"`  // 上游渲染好的 API 额度说明
+
 	// Antigravity 账号级信息
 	SubscriptionTier    string `json:"subscription_tier,omitempty"`     // 归一化订阅等级: FREE/PRO/ULTRA/UNKNOWN
 	SubscriptionTierRaw string `json:"subscription_tier_raw,omitempty"` // 上游原始订阅等级名称
@@ -315,6 +348,7 @@ type AccountUsageService struct {
 	geminiQuotaService      *GeminiQuotaService
 	antigravityQuotaFetcher *AntigravityQuotaFetcher
 	kiroQuotaFetcher        *KiroQuotaFetcher
+	cursorQuotaFetcher      *CursorQuotaFetcher
 	grokQuotaFetcher        *GrokQuotaFetcher
 	grokQuotaService        *GrokQuotaService
 	openAIQuotaService      *OpenAIQuotaService
@@ -333,6 +367,7 @@ func NewAccountUsageService(
 	geminiQuotaService *GeminiQuotaService,
 	antigravityQuotaFetcher *AntigravityQuotaFetcher,
 	kiroQuotaFetcher *KiroQuotaFetcher,
+	cursorQuotaFetcher *CursorQuotaFetcher,
 	grokQuotaFetcher *GrokQuotaFetcher,
 	grokQuotaService *GrokQuotaService,
 	openAIQuotaService *OpenAIQuotaService,
@@ -347,6 +382,7 @@ func NewAccountUsageService(
 		geminiQuotaService:      geminiQuotaService,
 		antigravityQuotaFetcher: antigravityQuotaFetcher,
 		kiroQuotaFetcher:        kiroQuotaFetcher,
+		cursorQuotaFetcher:      cursorQuotaFetcher,
 		grokQuotaFetcher:        grokQuotaFetcher,
 		grokQuotaService:        grokQuotaService,
 		openAIQuotaService:      openAIQuotaService,
@@ -1023,56 +1059,106 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 	return usage, nil
 }
 
-// getCursorUsage 用本地 usage_logs 拼出 Cursor 账号的 5h / 7d 用量窗口。
-// Cursor Agent 没有账号级上游额度 API；这里至少让后台「用量窗口」列可见本网关侧消耗。
+// getCursorUsage 拉取 Cursor 账号在当前计费周期内的订阅额度。
+//
+// 早先这里拼的是 5h / 7d 本地窗口，那是照搬 Claude 的窗口模型套上来的，
+// Cursor 根本没有这两个窗口；真实维度是 Auto 用量、包含的 API 用量和
+// on-demand 按量消费，全部由 dashboard 的 usage-summary 接口下发。
 func (s *AccountUsageService) getCursorUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
 	now := time.Now()
-	usage := &UsageInfo{UpdatedAt: &now, Source: "local"}
 	if account == nil {
+		return &UsageInfo{UpdatedAt: &now}, nil
+	}
+	if s.cursorQuotaFetcher == nil {
+		return &UsageInfo{
+			UpdatedAt: &now,
+			Error:     "cursor quota fetcher is not configured",
+			ErrorCode: "unavailable",
+		}, nil
+	}
+	if !s.cursorQuotaFetcher.CanFetch(account) {
+		return &UsageInfo{
+			UpdatedAt: &now,
+			Error:     cursorMissingCredentialReason(account),
+			ErrorCode: "incomplete_credentials",
+		}, nil
+	}
+
+	if usage, ok := s.loadCursorCache(account.ID); ok {
 		return usage, nil
 	}
-	s.attachLocalWindows(ctx, account, usage, 5*time.Hour, 7*24*time.Hour)
 
-	// 若账号配置了本地日/周限额（美元），用已用额度填 utilization，进度条才有意义。
-	if limit := account.GetQuotaDailyLimit(); limit > 0 && !account.IsDailyQuotaPeriodExpired() {
-		used := account.GetQuotaDailyUsed()
-		if usage.FiveHour == nil {
-			usage.FiveHour = &UsageProgress{}
+	key := fmt.Sprintf("cursor-usage:%d", account.ID)
+	result, flightErr, _ := s.cache.cursorFlight.Do(key, func() (any, error) {
+		if usage, ok := s.loadCursorCache(account.ID); ok {
+			return usage, nil
 		}
-		usage.FiveHour.Utilization = used / limit * 100
-		if start := account.getExtraTime("quota_daily_start"); !start.IsZero() {
-			resetAt := start.Add(24 * time.Hour)
-			if account.GetQuotaDailyResetMode() == "fixed" {
-				if raw := account.getExtraTime("quota_daily_reset_at"); !raw.IsZero() {
-					resetAt = raw
-				}
-			}
-			usage.FiveHour.ResetsAt = &resetAt
-			if remaining := int(resetAt.Sub(now).Seconds()); remaining > 0 {
-				usage.FiveHour.RemainingSeconds = remaining
-			}
+
+		fetchCtx, cancel := context.WithTimeout(ctx, cursorQuotaFetchDeadline)
+		defer cancel()
+
+		proxyURL, err := s.cursorQuotaFetcher.GetProxyURL(fetchCtx, account)
+		if err != nil {
+			// 配置了代理却拿不到，绝不能退化成直连去打上游。
+			return nil, err
 		}
+
+		usage, err := s.cursorQuotaFetcher.FetchQuota(fetchCtx, account, proxyURL)
+		if err != nil {
+			return nil, err
+		}
+		enrichUsageWithAccountError(usage, account)
+		s.cache.cursorCache.Store(account.ID, &cursorUsageCache{usageInfo: usage, timestamp: time.Now()})
+		return usage, nil
+	})
+	if flightErr != nil {
+		return nil, flightErr
 	}
-	if limit := account.GetQuotaWeeklyLimit(); limit > 0 && !account.IsWeeklyQuotaPeriodExpired() {
-		used := account.GetQuotaWeeklyUsed()
-		if usage.SevenDay == nil {
-			usage.SevenDay = &UsageProgress{}
-		}
-		usage.SevenDay.Utilization = used / limit * 100
-		if start := account.getExtraTime("quota_weekly_start"); !start.IsZero() {
-			resetAt := start.Add(7 * 24 * time.Hour)
-			if account.GetQuotaWeeklyResetMode() == "fixed" {
-				if raw := account.getExtraTime("quota_weekly_reset_at"); !raw.IsZero() {
-					resetAt = raw
-				}
-			}
-			usage.SevenDay.ResetsAt = &resetAt
-			if remaining := int(resetAt.Sub(now).Seconds()); remaining > 0 {
-				usage.SevenDay.RemainingSeconds = remaining
-			}
-		}
-	}
+
+	usage, _ := result.(*UsageInfo)
+	recalcCursorRemainingSeconds(usage)
 	return usage, nil
+}
+
+// loadCursorCache 读缓存并重算剩余秒数；已失效返回 false。
+// 降级结果（带 Error）用更短的 TTL，让账号恢复后能较快反映出来。
+func (s *AccountUsageService) loadCursorCache(accountID int64) (*UsageInfo, bool) {
+	cached, ok := s.cache.cursorCache.Load(accountID)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := cached.(*cursorUsageCache)
+	if !ok {
+		return nil, false
+	}
+	ttl := cursorCacheTTL
+	if entry.usageInfo != nil && entry.usageInfo.Error != "" {
+		ttl = cursorErrorTTL
+	}
+	if time.Since(entry.timestamp) >= ttl {
+		return nil, false
+	}
+	recalcCursorRemainingSeconds(entry.usageInfo)
+	return entry.usageInfo, true
+}
+
+// recalcCursorRemainingSeconds 按当前时间重算距计费周期结束的剩余秒数。
+// 缓存命中时若不重算，倒计时会停在写缓存那一刻。
+func recalcCursorRemainingSeconds(usage *UsageInfo) {
+	if usage == nil {
+		return
+	}
+	now := time.Now()
+	for _, progress := range []*UsageProgress{usage.CursorAutoUsage, usage.CursorAPIUsage} {
+		if progress == nil || progress.ResetsAt == nil {
+			continue
+		}
+		remaining := int(progress.ResetsAt.Sub(now).Seconds())
+		if remaining < 0 {
+			remaining = 0
+		}
+		progress.RemainingSeconds = remaining
+	}
 }
 
 // attachLocalWindows 给 UsageInfo 填本地滚动窗口统计（5h / 7d）。

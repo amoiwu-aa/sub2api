@@ -246,26 +246,11 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('kiro credentials incomplete: missing profile_arn')
   })
 
-  it('Cursor 展示本地 5h/7d 用量窗口', async () => {
-    getUsage.mockResolvedValue({
-      source: 'local',
-      five_hour: {
-        utilization: 0,
-        resets_at: null,
-        remaining_seconds: 0,
-        window_stats: { requests: 3, tokens: 1200, cost: 0.12 }
-      },
-      seven_day: {
-        utilization: 0,
-        resets_at: null,
-        remaining_seconds: 0,
-        window_stats: { requests: 20, tokens: 9000, cost: 1.5 }
-      }
-    })
-
-    const wrapper = mount(AccountUsageCell, {
+  function mountCursor(usage: Record<string, unknown>, id = 3001) {
+    getUsage.mockResolvedValue(usage)
+    return mount(AccountUsageCell, {
       props: {
-        account: makeAccount({ id: 3001, platform: 'cursor', type: 'oauth' })
+        account: makeAccount({ id, platform: 'cursor', type: 'oauth' })
       },
       global: {
         stubs: {
@@ -277,13 +262,79 @@ describe('AccountUsageCell', () => {
         }
       }
     })
+  }
+
+  // Cursor 按计费周期结算，Auto 与包含的 API 额度是两个独立维度；
+  // 它没有 5h / 7d 滚动窗口，早先照搬 Claude 窗口模型是错的。
+  it('Cursor 展示套餐徽标与 Auto / API 两个额度维度', async () => {
+    const wrapper = mountCursor({
+      source: 'upstream',
+      cursor_plan: 'pro',
+      cursor_subscription_status: 'active',
+      cursor_auto_usage: { utilization: 45.75, resets_at: '2026-08-25T13:35:47Z', remaining_seconds: 2000000 },
+      cursor_api_usage: { utilization: 100, resets_at: '2026-08-25T13:35:47Z', remaining_seconds: 2000000 },
+      cursor_included_used: 20,
+      cursor_included_limit: 20,
+      cursor_on_demand_enabled: true,
+      cursor_on_demand_used: 32.66,
+      cursor_period_total: 235.06,
+      cursor_billing_cycle_start: '2026-07-25T13:35:47Z',
+      cursor_billing_cycle_end: '2026-08-25T13:35:47Z'
+    })
 
     await flushPromises()
 
     expect(getUsage).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('5h|0')
-    expect(wrapper.text()).toContain('7d|0')
-    expect(wrapper.text()).toContain('admin.accounts.cursor.localUsageNote')
+    expect(wrapper.text()).toContain('admin.accounts.cursor.plan.pro')
+    expect(wrapper.text()).toContain('admin.accounts.cursor.autoLabel|45.75')
+    expect(wrapper.text()).toContain('admin.accounts.cursor.apiLabel|100')
+    expect(wrapper.text()).toContain('$20.00 / $20.00')
+    expect(wrapper.text()).toContain('+$32.66')
+    expect(wrapper.text()).not.toContain('5h|')
+    expect(wrapper.text()).not.toContain('7d|')
+  })
+
+  it('Cursor 订阅逾期时套餐与告警徽标并排显示', async () => {
+    const wrapper = mountCursor({
+      cursor_plan: 'pro',
+      cursor_subscription_status: 'past_due',
+      cursor_payment_failed: true,
+      cursor_payment_action: 'update_payment_method',
+      cursor_auto_usage: { utilization: 10, resets_at: null, remaining_seconds: 0 },
+      cursor_included_used: 2,
+      cursor_included_limit: 20
+    }, 3002)
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.cursor.plan.pro')
+    expect(wrapper.text()).toContain('past due')
+  })
+
+  it('Cursor 订阅正常时不打告警徽标', async () => {
+    const wrapper = mountCursor({
+      cursor_plan: 'pro',
+      cursor_subscription_status: 'active',
+      cursor_auto_usage: { utilization: 10, resets_at: null, remaining_seconds: 0 },
+      cursor_included_used: 2,
+      cursor_included_limit: 20
+    }, 3003)
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.cursor.plan.pro')
+    expect(wrapper.text()).not.toContain('admin.accounts.cursor.paymentFailed')
+  })
+
+  it('Cursor 凭证不完整时展示错误而不是空白横杠', async () => {
+    const wrapper = mountCursor({
+      error: 'cursor credentials incomplete: missing user_id (required to build the dashboard session cookie)',
+      error_code: 'incomplete_credentials'
+    }, 3004)
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('missing user_id')
   })
 
   it('Antigravity 会显示 AI Credits 余额信息', async () => {

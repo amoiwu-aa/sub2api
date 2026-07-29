@@ -86,6 +86,18 @@ func TestOpenAIFinalChunkCarriesFinishReason(t *testing.T) {
 	}`, string(raw))
 }
 
+func TestOpenAIReasoningChunkShape(t *testing.T) {
+	raw, err := json.Marshal(NewOpenAIReasoningChunk("chatcmpl-1", "cursor/default", 1700000000, "think"))
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"id": "chatcmpl-1",
+		"object": "chat.completion.chunk",
+		"created": 1700000000,
+		"model": "cursor/default",
+		"choices": [{"index": 0, "delta": {"reasoning_content": "think"}, "finish_reason": null}]
+	}`, string(raw))
+}
+
 func TestEstimateTokensCountsRunesNotBytes(t *testing.T) {
 	// 按字节算会把中文对话的 token 数抬高约三倍。
 	chinese := "你好世界你好世界"
