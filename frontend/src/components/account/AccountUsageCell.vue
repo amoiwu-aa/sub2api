@@ -578,17 +578,82 @@
           :label="t('admin.accounts.kiro.credits')"
           :utilization="kiroCredits.utilization"
           :resets-at="kiroCredits.resets_at"
+          :window-stats="kiroCredits.window_stats"
           color="indigo"
         />
 
         <div class="text-[10px] text-gray-500 dark:text-gray-400">
           💳 {{ kiroCreditsDisplay }}
         </div>
+
+        <!-- 本地滚动窗口：上游 credits 之外，补本网关侧 5h/7d 消耗 -->
+        <UsageProgressBar
+          v-if="usageInfo?.five_hour?.window_stats"
+          label="5h"
+          :utilization="usageInfo.five_hour.utilization || 0"
+          :resets-at="usageInfo.five_hour.resets_at"
+          :window-stats="usageInfo.five_hour.window_stats"
+          :show-now-when-idle="true"
+          color="emerald"
+        />
+        <UsageProgressBar
+          v-if="usageInfo?.seven_day?.window_stats"
+          label="7d"
+          :utilization="usageInfo.seven_day.utilization || 0"
+          :resets-at="usageInfo.seven_day.resets_at"
+          :window-stats="usageInfo.seven_day.window_stats"
+          :show-now-when-idle="true"
+          color="purple"
+        />
       </div>
 
-      <div v-else-if="usageInfo?.error" class="text-[10px] text-red-500">
-        {{ usageInfo.error }}
+      <div v-else-if="error || usageInfo?.error" class="text-[10px] text-red-500 max-w-[200px] truncate" :title="error || usageInfo?.error">
+        {{ error || usageInfo?.error }}
       </div>
+      <div v-else class="text-xs text-gray-400">-</div>
+    </template>
+
+    <!-- Cursor OAuth: 无上游账号额度接口，展示本地 5h / 7d 用量窗口 -->
+    <template v-else-if="account.platform === 'cursor' && account.type === 'oauth'">
+      <div v-if="loading" class="space-y-1.5">
+        <div class="flex items-center gap-1">
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-1.5 w-8 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        </div>
+        <div class="flex items-center gap-1">
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-1.5 w-8 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700"></div>
+          <div class="h-3 w-[32px] animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        </div>
+      </div>
+
+      <div v-else-if="error" class="text-[10px] text-red-500">{{ error }}</div>
+
+      <div v-else-if="usageInfo" class="space-y-1">
+        <UsageProgressBar
+          v-if="usageInfo.five_hour"
+          label="5h"
+          :utilization="usageInfo.five_hour.utilization || 0"
+          :resets-at="usageInfo.five_hour.resets_at"
+          :window-stats="usageInfo.five_hour.window_stats"
+          :show-now-when-idle="true"
+          color="indigo"
+        />
+        <UsageProgressBar
+          v-if="usageInfo.seven_day"
+          label="7d"
+          :utilization="usageInfo.seven_day.utilization || 0"
+          :resets-at="usageInfo.seven_day.resets_at"
+          :window-stats="usageInfo.seven_day.window_stats"
+          :show-now-when-idle="true"
+          color="emerald"
+        />
+        <p class="text-[9px] leading-tight text-gray-400 dark:text-gray-500 italic">
+          {{ t('admin.accounts.cursor.localUsageNote') }}
+        </p>
+      </div>
+
       <div v-else class="text-xs text-gray-400">-</div>
     </template>
 
@@ -753,6 +818,10 @@ const shouldFetchUsage = computed(() => {
   }
   // Kiro 上游有账号级额度接口（GET /getUsageLimits），可以主动查
   if (props.account.platform === 'kiro') {
+    return props.account.type === 'oauth'
+  }
+  // Cursor 无上游账号额度接口，但可查本地 usage_logs 拼 5h/7d 窗口
+  if (props.account.platform === 'cursor') {
     return props.account.type === 'oauth'
   }
   return false

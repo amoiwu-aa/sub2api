@@ -235,6 +235,57 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('HTTP 401')
   })
 
+  it('Kiro 凭证不完整时展示错误而不是空白横杠', async () => {
+    const wrapper = mountKiro({
+      error: 'kiro credentials incomplete: missing profile_arn',
+      error_code: 'incomplete_credentials'
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('kiro credentials incomplete: missing profile_arn')
+  })
+
+  it('Cursor 展示本地 5h/7d 用量窗口', async () => {
+    getUsage.mockResolvedValue({
+      source: 'local',
+      five_hour: {
+        utilization: 0,
+        resets_at: null,
+        remaining_seconds: 0,
+        window_stats: { requests: 3, tokens: 1200, cost: 0.12 }
+      },
+      seven_day: {
+        utilization: 0,
+        resets_at: null,
+        remaining_seconds: 0,
+        window_stats: { requests: 20, tokens: 9000, cost: 1.5 }
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3001, platform: 'cursor', type: 'oauth' })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'resetsAt', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}</div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(getUsage).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('5h|0')
+    expect(wrapper.text()).toContain('7d|0')
+    expect(wrapper.text()).toContain('admin.accounts.cursor.localUsageNote')
+  })
+
   it('Antigravity 会显示 AI Credits 余额信息', async () => {
     getUsage.mockResolvedValue({
       ai_credits: [

@@ -1415,7 +1415,10 @@ func (a *Account) GetKiroProfileArn() string {
 	if !a.IsKiro() {
 		return ""
 	}
-	return strings.TrimSpace(a.GetCredential("profile_arn"))
+	if v := strings.TrimSpace(a.GetCredential("profile_arn")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(a.GetCredential("profileArn"))
 }
 
 // GetKiroAuthMethod 返回 social / idc，决定走哪条刷新链。

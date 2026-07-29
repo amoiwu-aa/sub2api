@@ -420,10 +420,10 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		return usage, err
 	}
 
-	// Cursor Agent 完全不下发用量，没有账号级配额查询接口。
-	// 必须在这里拦住，否则会掉进下面的 Anthropic usage API 分支去查错的上游。
+	// Cursor Agent 没有上游账号级配额接口；用本地 usage_logs 拼 5h / 7d 窗口，
+	// 让用量列至少能看到本网关侧的消耗（与 Grok 本地窗口同思路）。
 	if account.Platform == PlatformCursor {
-		return nil, fmt.Errorf("platform %s does not support account usage query", account.Platform)
+		return s.getCursorUsage(ctx, account)
 	}
 
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
@@ -960,9 +960,27 @@ func (s *AccountUsageService) getGeminiUsage(ctx context.Context, account *Accou
 // 缓存 + singleflight 的意图与 Antigravity 一致：额度面板会被频繁刷新，
 // 而上游是按账号计费的真实接口，不能每次渲染都打一发。
 func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
-	if s.kiroQuotaFetcher == nil || !s.kiroQuotaFetcher.CanFetch(account) {
+	if s.kiroQuotaFetcher == nil {
 		now := time.Now()
-		return &UsageInfo{UpdatedAt: &now}, nil
+		return &UsageInfo{
+			UpdatedAt: &now,
+			Error:     "kiro quota fetcher is not configured",
+			ErrorCode: "unavailable",
+		}, nil
+	}
+	if !s.kiroQuotaFetcher.CanFetch(account) {
+		now := time.Now()
+		msg := "kiro credentials incomplete: need access_token and profile_arn"
+		if account != nil && strings.TrimSpace(account.GetCredential("access_token")) == "" {
+			msg = "kiro credentials incomplete: missing access_token"
+		} else if account != nil && strings.TrimSpace(kiroProfileARN(account)) == "" {
+			msg = "kiro credentials incomplete: missing profile_arn"
+		}
+		return &UsageInfo{
+			UpdatedAt: &now,
+			Error:     msg,
+			ErrorCode: "incomplete_credentials",
+		}, nil
 	}
 
 	if usage, ok := s.loadKiroCache(account.ID); ok {
@@ -991,6 +1009,7 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 			return nil, err
 		}
 		enrichUsageWithAccountError(usage, account)
+		s.attachLocalWindows(fetchCtx, account, usage, 5*time.Hour, 7*24*time.Hour)
 		s.parkExhaustedKiroAccount(account, usage)
 		s.cache.kiroCache.Store(account.ID, &kiroUsageCache{usageInfo: usage, timestamp: time.Now()})
 		return usage, nil
@@ -1002,6 +1021,87 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 	usage, _ := result.(*UsageInfo)
 	recalcKiroRemainingSeconds(usage)
 	return usage, nil
+}
+
+// getCursorUsage 用本地 usage_logs 拼出 Cursor 账号的 5h / 7d 用量窗口。
+// Cursor Agent 没有账号级上游额度 API；这里至少让后台「用量窗口」列可见本网关侧消耗。
+func (s *AccountUsageService) getCursorUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
+	now := time.Now()
+	usage := &UsageInfo{UpdatedAt: &now, Source: "local"}
+	if account == nil {
+		return usage, nil
+	}
+	s.attachLocalWindows(ctx, account, usage, 5*time.Hour, 7*24*time.Hour)
+
+	// 若账号配置了本地日/周限额（美元），用已用额度填 utilization，进度条才有意义。
+	if limit := account.GetQuotaDailyLimit(); limit > 0 && !account.IsDailyQuotaPeriodExpired() {
+		used := account.GetQuotaDailyUsed()
+		if usage.FiveHour == nil {
+			usage.FiveHour = &UsageProgress{}
+		}
+		usage.FiveHour.Utilization = used / limit * 100
+		if start := account.getExtraTime("quota_daily_start"); !start.IsZero() {
+			resetAt := start.Add(24 * time.Hour)
+			if account.GetQuotaDailyResetMode() == "fixed" {
+				if raw := account.getExtraTime("quota_daily_reset_at"); !raw.IsZero() {
+					resetAt = raw
+				}
+			}
+			usage.FiveHour.ResetsAt = &resetAt
+			if remaining := int(resetAt.Sub(now).Seconds()); remaining > 0 {
+				usage.FiveHour.RemainingSeconds = remaining
+			}
+		}
+	}
+	if limit := account.GetQuotaWeeklyLimit(); limit > 0 && !account.IsWeeklyQuotaPeriodExpired() {
+		used := account.GetQuotaWeeklyUsed()
+		if usage.SevenDay == nil {
+			usage.SevenDay = &UsageProgress{}
+		}
+		usage.SevenDay.Utilization = used / limit * 100
+		if start := account.getExtraTime("quota_weekly_start"); !start.IsZero() {
+			resetAt := start.Add(7 * 24 * time.Hour)
+			if account.GetQuotaWeeklyResetMode() == "fixed" {
+				if raw := account.getExtraTime("quota_weekly_reset_at"); !raw.IsZero() {
+					resetAt = raw
+				}
+			}
+			usage.SevenDay.ResetsAt = &resetAt
+			if remaining := int(resetAt.Sub(now).Seconds()); remaining > 0 {
+				usage.SevenDay.RemainingSeconds = remaining
+			}
+		}
+	}
+	return usage, nil
+}
+
+// attachLocalWindows 给 UsageInfo 填本地滚动窗口统计（5h / 7d）。
+// 已有 FiveHour/SevenDay 时只补 WindowStats，不覆盖上游利用率。
+func (s *AccountUsageService) attachLocalWindows(ctx context.Context, account *Account, usage *UsageInfo, fiveHour, sevenDay time.Duration) {
+	if s == nil || s.usageLogRepo == nil || account == nil || usage == nil {
+		return
+	}
+	now := time.Now()
+	if fiveHour > 0 {
+		stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, now.Add(-fiveHour))
+		if err == nil {
+			ws := windowStatsFromAccountStats(stats)
+			if usage.FiveHour == nil {
+				usage.FiveHour = &UsageProgress{Utilization: 0}
+			}
+			usage.FiveHour.WindowStats = ws
+		}
+	}
+	if sevenDay > 0 {
+		stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, now.Add(-sevenDay))
+		if err == nil {
+			ws := windowStatsFromAccountStats(stats)
+			if usage.SevenDay == nil {
+				usage.SevenDay = &UsageProgress{Utilization: 0}
+			}
+			usage.SevenDay.WindowStats = ws
+		}
+	}
 }
 
 // loadKiroCache 读缓存并重算剩余秒数；已失效返回 false。

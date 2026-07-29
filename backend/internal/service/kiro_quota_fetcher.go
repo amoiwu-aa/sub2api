@@ -63,7 +63,18 @@ func (f *KiroQuotaFetcher) CanFetch(account *Account) bool {
 		return false
 	}
 	// profileArn 决定往哪个 region 打，缺了就构造不出客户端。
-	return account.GetCredential("access_token") != "" && account.GetCredential("profile_arn") != ""
+	return strings.TrimSpace(account.GetCredential("access_token")) != "" && kiroProfileARN(account) != ""
+}
+
+// kiroProfileARN 兼容 profile_arn / profileArn 两种落库键名。
+func kiroProfileARN(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	if v := strings.TrimSpace(account.GetCredential("profile_arn")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(account.GetCredential("profileArn"))
 }
 
 // GetProxyURL 解析账号绑定的代理。
@@ -87,6 +98,9 @@ func (f *KiroQuotaFetcher) GetProxyURL(ctx context.Context, account *Account) (s
 // FetchQuota 拉取账号额度并映射成 UsageInfo。
 func (f *KiroQuotaFetcher) FetchQuota(ctx context.Context, account *Account, proxyURL string) (*UsageInfo, error) {
 	creds := kiro.CredentialsFromMap(account.Credentials)
+	if strings.TrimSpace(creds.ProfileARN) == "" {
+		creds.ProfileARN = kiroProfileARN(account)
+	}
 
 	client, err := httpclient.GetClient(httpclient.Options{
 		ProxyURL:              proxyURL,
