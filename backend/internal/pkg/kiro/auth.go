@@ -359,7 +359,7 @@ func CredentialsFromMap(m map[string]any) *Credentials {
 		AccessToken:  mapString(m, "access_token"),
 		RefreshToken: mapString(m, "refresh_token"),
 		AuthMethod:   NormalizeAuthMethod(mapString(m, "auth_method")),
-		ProfileARN:   mapString(m, "profile_arn"),
+		ProfileARN:   firstNonEmpty(mapString(m, "profile_arn"), mapString(m, "profileArn")),
 		Provider:     mapString(m, "provider"),
 		Region:       normalizeRegion(mapString(m, "region")),
 		ClientID:     mapString(m, "client_id"),
