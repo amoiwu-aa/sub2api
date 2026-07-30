@@ -486,6 +486,15 @@ func (s *CursorGatewayService) upstreamError(
 	var connectErr *cursor.ConnectError
 	if errors.As(err, &connectErr) {
 		message = "Cursor agent stream ended with an error"
+		// 上游把真正的原因埋在 details 里，顶层 message 恒为 "Error"。不透出来的话，
+		// 欠费、24 小时内设备过多、额度真的耗尽这三种情况在面板上长得一模一样，
+		// 运维只能看到一个 429 然后按「额度耗尽」去误判。
+		if description := connectErr.Description(); description != "" {
+			message = "Cursor upstream rejected the request: " + description
+			if upstream := connectErr.UpstreamCode(); upstream != "" {
+				message = "Cursor upstream rejected the request (" + upstream + "): " + description
+			}
+		}
 		if connectErr.Code == "resource_exhausted" {
 			status = http.StatusTooManyRequests
 		}

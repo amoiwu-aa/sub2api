@@ -217,6 +217,47 @@ func TestParseEndStreamErrorIgnoresCleanTrailers(t *testing.T) {
 	require.NotNil(t, ParseEndStreamError([]byte(`{"code":"unavailable"}`)))
 }
 
+// 两个载荷都是从真实上游抓下来的（2026-07-30，两个不同账号）。
+//
+// 关键点：顶层 code 与 message 在两种情况下完全相同（resource_exhausted / "Error"），
+// 但一个只要去付账单、另一个等 24 小时就自己好了。只看顶层字段必然误判，
+// 所以 details 必须解出来。
+func TestParseEndStreamErrorSurfacesUpstreamDetails(t *testing.T) {
+	unpaidInvoice := `{"error":{"code":"resource_exhausted","message":"Error","details":[{"type":"aiserver.v1.ErrorDetails","debug":{"error":"ERROR_RATE_LIMITED","details":{"title":"You have an unpaid invoice","detail":"Visit [cursor.com/dashboard](https://cursor.com/dashboard) and pay your invoice in Stripe to resume requests.","isRetryable":false,"showRequestId":false},"isExpected":true},"value":"CDIS"}]}}`
+	tooManyComputers := `{"error":{"code":"resource_exhausted","message":"Error","details":[{"type":"aiserver.v1.ErrorDetails","debug":{"error":"ERROR_CUSTOM_MESSAGE","details":{"title":"Too many computers.","detail":"Too many computers used within the last 24 hours for the same Cursor account."},"isExpected":true},"value":"CB0S"}]}}`
+
+	invoiceErr := ParseEndStreamError([]byte(unpaidInvoice))
+	require.NotNil(t, invoiceErr)
+	require.Equal(t, "resource_exhausted", invoiceErr.Code)
+	require.Equal(t, "ERROR_RATE_LIMITED", invoiceErr.UpstreamCode())
+	require.Contains(t, invoiceErr.Description(), "You have an unpaid invoice")
+	require.Contains(t, invoiceErr.Error(), "ERROR_RATE_LIMITED")
+	// 顶层那个没有信息量的 "Error" 不该盖住真正的原因。
+	require.NotContains(t, invoiceErr.Error(), ": Error")
+	retryable, stated := invoiceErr.Retryable()
+	require.True(t, stated, "上游明说了不可重试，这个表态不能丢")
+	require.False(t, retryable)
+
+	computersErr := ParseEndStreamError([]byte(tooManyComputers))
+	require.NotNil(t, computersErr)
+	require.Equal(t, "ERROR_CUSTOM_MESSAGE", computersErr.UpstreamCode())
+	require.Contains(t, computersErr.Description(), "Too many computers")
+	// 这一条上游没表态，不能把「没说」当成「不可重试」。
+	_, stated = computersErr.Retryable()
+	require.False(t, stated)
+}
+
+// 没有 details 时必须退回原来的行为，否则老的错误会变成一句空话。
+func TestConnectErrorFallsBackToTopLevelMessage(t *testing.T) {
+	err := &ConnectError{Code: "unavailable", Message: "upstream is down"}
+	require.Equal(t, "cursor agent error unavailable: upstream is down", err.Error())
+	require.Empty(t, err.UpstreamCode())
+	require.Empty(t, err.Description())
+
+	bare := &ConnectError{Message: "boom"}
+	require.Equal(t, "cursor agent error: boom", bare.Error())
+}
+
 func TestReadFieldsRejectsMalformedInput(t *testing.T) {
 	cases := map[string][]byte{
 		"truncated varint":      {0x08},
