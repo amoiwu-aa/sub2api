@@ -657,6 +657,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		ActualCost:                l.ActualCost,
 		RateMultiplier:            l.RateMultiplier,
 		LongContextBillingApplied: l.LongContextBillingApplied,
+		UpstreamCredits:           l.UpstreamCredits,
 		BillingType:               l.BillingType,
 		RequestType:               requestType.String(),
 		Stream:                    stream,

@@ -556,6 +556,27 @@ func (_u *UsageLogUpdate) SetNillableLongContextBillingApplied(v *bool) *UsageLo
 	return _u
 }
 
+// SetUpstreamCredits sets the "upstream_credits" field.
+func (_u *UsageLogUpdate) SetUpstreamCredits(v float64) *UsageLogUpdate {
+	_u.mutation.ResetUpstreamCredits()
+	_u.mutation.SetUpstreamCredits(v)
+	return _u
+}
+
+// SetNillableUpstreamCredits sets the "upstream_credits" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUpstreamCredits(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUpstreamCredits(*v)
+	}
+	return _u
+}
+
+// AddUpstreamCredits adds value to the "upstream_credits" field.
+func (_u *UsageLogUpdate) AddUpstreamCredits(v float64) *UsageLogUpdate {
+	_u.mutation.AddUpstreamCredits(v)
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdate) SetAccountRateMultiplier(v float64) *UsageLogUpdate {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -1215,6 +1236,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.UpstreamCredits(); ok {
+		_spec.SetField(usagelog.FieldUpstreamCredits, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedUpstreamCredits(); ok {
+		_spec.AddField(usagelog.FieldUpstreamCredits, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -2013,6 +2040,27 @@ func (_u *UsageLogUpdateOne) SetNillableLongContextBillingApplied(v *bool) *Usag
 	return _u
 }
 
+// SetUpstreamCredits sets the "upstream_credits" field.
+func (_u *UsageLogUpdateOne) SetUpstreamCredits(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetUpstreamCredits()
+	_u.mutation.SetUpstreamCredits(v)
+	return _u
+}
+
+// SetNillableUpstreamCredits sets the "upstream_credits" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUpstreamCredits(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUpstreamCredits(*v)
+	}
+	return _u
+}
+
+// AddUpstreamCredits adds value to the "upstream_credits" field.
+func (_u *UsageLogUpdateOne) AddUpstreamCredits(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddUpstreamCredits(v)
+	return _u
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_u *UsageLogUpdateOne) SetAccountRateMultiplier(v float64) *UsageLogUpdateOne {
 	_u.mutation.ResetAccountRateMultiplier()
@@ -2702,6 +2750,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.UpstreamCredits(); ok {
+		_spec.SetField(usagelog.FieldUpstreamCredits, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedUpstreamCredits(); ok {
+		_spec.AddField(usagelog.FieldUpstreamCredits, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)

@@ -176,6 +176,30 @@ func (s *KiroGatewayService) preflightReject(
 	return ""
 }
 
+// CatalogModels 返回该账号实时目录里的模型，目录未就绪时返回 nil。
+//
+// 可用模型随订阅档位变化（实测免费号 9 个、企业号 19 个），静态目录只是两档的
+// 并集，拿它当 /v1/models 会把用户不能用的模型也摆出去——点名后上游回
+// INVALID_MODEL_ID，而错误信息里看不出是模型名的问题。
+//
+// 不阻塞：首次调用必然返回 nil 并触发一次后台拉取，调用方要能退回静态目录。
+// 这是 kiroCatalogCache 的既定契约——拉一次约 2 秒，不能放在请求路径上。
+func (s *KiroGatewayService) CatalogModels(_ context.Context, account *Account) []kiro.Model {
+	if s == nil || account == nil {
+		return nil
+	}
+	catalog := s.catalog.Get(account, func(fetchCtx context.Context) ([]kiro.AvailableModel, error) {
+		// 在闭包里建 client：只有真要刷新时才去取 token，命中缓存的请求不必付这个代价。
+		client, err := s.buildClient(fetchCtx, account)
+		if err != nil {
+			return nil, err
+		}
+		models, _, err := client.ListAvailableModels(fetchCtx)
+		return models, err
+	})
+	return kiro.ModelsFromCatalog(catalog)
+}
+
 func (s *KiroGatewayService) buildClient(ctx context.Context, account *Account) (*kiro.Client, error) {
 	if s.tokenProvider == nil {
 		return nil, &UpstreamFailoverError{
@@ -342,6 +366,12 @@ func (s *KiroGatewayService) buildResult(
 	inputTokens := int(usage.InputTokens)
 	outputTokens := int(usage.OutputTokens)
 
+	// meteringEvent 里的 credit 是上游对本次请求的权威扣费口径（与 GetUsageLimits
+	// 的 currentUsage 同源）。它和 token 不同量纲，不参与计费，但必须落库：
+	// 免费档一个周期只有 50 credit 且用尽即断供，而我们的成本列走 Anthropic 价目表，
+	// 实测与真实消耗相差 20 倍，光看成本回答不了「还能用多久」。
+	metering := translator.MeteringUsage()
+
 	// 上游的 tokenUsage 挂在 metadataEvent 上，而这个事件不保证出现（工具轮、
 	// 被中断的轮、部分账号类型都可能整轮没有）。缺了它直接记 0 会让本次请求不计费，
 	// 平台配额的 USD 限额也就永远触发不了——所以这里退到本地估算。
@@ -350,11 +380,9 @@ func (s *KiroGatewayService) buildResult(
 		inputTokens = kiro.EstimateConversationTokens(state)
 		outputTokens = translator.EstimatedOutputTokens()
 
-		// 走到估算说明本次没有权威 token 数，计费完全靠猜。
-		// meteringEvent 里的 credit 是上游对本次请求的权威扣费口径
-		// （与 GetUsageLimits 的 currentUsage 同源），量纲不同不能直接拿来
-		// 计费，但记下来就能回头核对估算跑偏了多少。
-		if metering := translator.MeteringUsage(); metering > 0 {
+		// 走到估算说明本次没有权威 token 数，计费完全靠猜。留一条日志，
+		// 好回头拿 credit 核对估算跑偏了多少。
+		if metering > 0 {
 			logger.L().Debug("kiro.usage_estimated_with_upstream_metering",
 				zap.String("model", publicModel),
 				zap.String("upstream_model", upstreamModel),
@@ -377,6 +405,7 @@ func (s *KiroGatewayService) buildResult(
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
+		UpstreamCredits:  metering,
 	}
 	if upstreamModel != publicModel {
 		result.UpstreamModel = upstreamModel

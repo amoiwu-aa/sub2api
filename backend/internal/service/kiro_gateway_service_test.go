@@ -86,6 +86,60 @@ func TestKiroGatewayBuildResultOmitsUpstreamModelWhenIdentical(t *testing.T) {
 	require.Empty(t, same.UpstreamModel)
 }
 
+// TestKiroGatewayBuildResultCarriesUpstreamCredits 锁定 credit 一定要落到
+// ForwardResult 上。免费档一个周期只有 50 credit 且用尽即硬拒，而成本列走的是
+// Anthropic 价目表（实测与真实消耗相差约 20 倍），丢了这个数就没有任何字段能
+// 回答「上游额度还剩多少」。
+func TestKiroGatewayBuildResultCarriesUpstreamCredits(t *testing.T) {
+	svc := NewKiroGatewayService(nil, nil)
+	translator := kiro.NewResponseTranslator("msg", "kiro/auto", nil)
+	require.NoError(t, translator.Handle(kiro.StreamEvent{
+		Metadata: &kiro.MetadataEvent{TokenUsage: &kiro.TokenUsage{
+			UncachedInputTokens: 42366, OutputTokens: 32,
+		}},
+	}))
+	require.NoError(t, translator.Handle(kiro.StreamEvent{
+		Metering: &kiro.MeteringEvent{Usage: 0.148231, Unit: "Credit"},
+	}))
+	require.NoError(t, translator.Finish())
+
+	result := svc.buildResult(translator, nil, "kiro/auto", "auto", true, nil, time.Now(), false)
+	require.InDelta(t, 0.148231, result.UpstreamCredits, 1e-9)
+	// credit 与 token 不同量纲，绝不能混进 token 计费。
+	require.Equal(t, 42366, result.Usage.InputTokens)
+	require.Equal(t, 32, result.Usage.OutputTokens)
+}
+
+// TestKiroGatewayBuildResultCarriesCreditsWhenTokensEstimated 覆盖上游没给
+// tokenUsage 的那一轮：token 退化成本地估算，但 credit 仍是上游权威值，
+// 恰恰是这种时候最需要它来校准估算。
+func TestKiroGatewayBuildResultCarriesCreditsWhenTokensEstimated(t *testing.T) {
+	svc := NewKiroGatewayService(nil, nil)
+	translator := kiro.NewResponseTranslator("msg", "kiro/auto", nil)
+	require.NoError(t, translator.Handle(kiro.StreamEvent{
+		Metering: &kiro.MeteringEvent{Usage: 0.082131, Unit: "Credit"},
+	}))
+	require.NoError(t, translator.Finish())
+
+	result := svc.buildResult(translator, &kiro.ConversationState{}, "kiro/auto", "auto", false, nil, time.Now(), false)
+	require.False(t, translator.HasUpstreamUsage())
+	require.InDelta(t, 0.082131, result.UpstreamCredits, 1e-9)
+}
+
+// TestKiroGatewayBuildResultWithoutMeteringLeavesCreditsZero 确认上游没报时是 0
+// 而不是垃圾值——落库侧不判空直接求和，非 Kiro 平台也全走这个零值。
+func TestKiroGatewayBuildResultWithoutMeteringLeavesCreditsZero(t *testing.T) {
+	svc := NewKiroGatewayService(nil, nil)
+	translator := kiro.NewResponseTranslator("msg", "kiro/auto", nil)
+	require.NoError(t, translator.Handle(kiro.StreamEvent{
+		Metadata: &kiro.MetadataEvent{TokenUsage: &kiro.TokenUsage{UncachedInputTokens: 7, OutputTokens: 1}},
+	}))
+	require.NoError(t, translator.Finish())
+
+	result := svc.buildResult(translator, nil, "kiro/auto", "auto", false, nil, time.Now(), false)
+	require.Zero(t, result.UpstreamCredits)
+}
+
 func TestKiroGatewayForwardRejectsMissingModel(t *testing.T) {
 	svc := NewKiroGatewayService(nil, nil)
 	c, recorder := newKiroGatewayTestContext()

@@ -564,6 +564,10 @@ type ForwardResult struct {
 	ClientDisconnect bool // 客户端是否在流式传输过程中断开
 	ReasoningEffort  *string
 
+	// UpstreamCredits 是上游对本次请求自报的计费量（目前只有 Kiro 的 meteringEvent）。
+	// 与 Usage 里的 token 不同量纲，不参与计费，只落库供对账与额度归因。
+	UpstreamCredits float64
+
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount         int    // 生成的图片数量
 	ImageSize          string // 最终计费尺寸 "1K", "2K", "4K"
@@ -1270,6 +1274,37 @@ func (s *GatewayService) GetSchedulablePlatforms(ctx context.Context, groupID *i
 		}
 	}
 	return platforms
+}
+
+// FirstSchedulableAccount 返回分组下某平台第一个可调度账号，没有则返回 nil。
+//
+// 只用于「借一个账号问上游要点元信息」这类场景（例如拉模型目录），不参与
+// 计费与并发计数，所以不走完整的调度链路。
+func (s *GatewayService) FirstSchedulableAccount(ctx context.Context, groupID *int64, platform string) *Account {
+	if s == nil || s.accountRepo == nil {
+		return nil
+	}
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return nil
+	}
+
+	var accounts []Account
+	var err error
+	if groupID != nil {
+		accounts, err = s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
+	} else {
+		accounts, err = s.accountRepo.ListSchedulable(ctx)
+	}
+	if err != nil {
+		return nil
+	}
+	for i := range accounts {
+		if strings.TrimSpace(accounts[i].Platform) == platform {
+			return &accounts[i]
+		}
+	}
+	return nil
 }
 
 func (s *GatewayService) InvalidateAvailableModelsCache(groupID *int64, platform string) {

@@ -193,6 +193,16 @@
             <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
               A ${{ accountBilled(row).toFixed(6) }}
             </div>
+            <!-- 上游自报的扣费量。上面那个美元数是我们的价目表折算，跟上游真实消耗
+                 不同量纲（Kiro 实测相差约 20 倍），额度够不够只能看这一行。 -->
+            <div
+              v-if="row.upstream_credits"
+              data-testid="upstream-credits"
+              class="mt-0.5 text-[11px] text-indigo-500 dark:text-indigo-400"
+              :title="t('usage.upstreamCreditsHint')"
+            >
+              {{ t('usage.upstreamCredits', { value: row.upstream_credits.toFixed(4) }) }}
+            </div>
           </div>
         </template>
 

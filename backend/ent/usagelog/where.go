@@ -190,6 +190,11 @@ func LongContextBillingApplied(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldLongContextBillingApplied, v))
 }
 
+// UpstreamCredits applies equality check predicate on the "upstream_credits" field. It's identical to UpstreamCreditsEQ.
+func UpstreamCredits(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUpstreamCredits, v))
+}
+
 // AccountRateMultiplier applies equality check predicate on the "account_rate_multiplier" field. It's identical to AccountRateMultiplierEQ.
 func AccountRateMultiplier(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldAccountRateMultiplier, v))
@@ -1478,6 +1483,46 @@ func LongContextBillingAppliedEQ(v bool) predicate.UsageLog {
 // LongContextBillingAppliedNEQ applies the NEQ predicate on the "long_context_billing_applied" field.
 func LongContextBillingAppliedNEQ(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNEQ(FieldLongContextBillingApplied, v))
+}
+
+// UpstreamCreditsEQ applies the EQ predicate on the "upstream_credits" field.
+func UpstreamCreditsEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUpstreamCredits, v))
+}
+
+// UpstreamCreditsNEQ applies the NEQ predicate on the "upstream_credits" field.
+func UpstreamCreditsNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUpstreamCredits, v))
+}
+
+// UpstreamCreditsIn applies the In predicate on the "upstream_credits" field.
+func UpstreamCreditsIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldUpstreamCredits, vs...))
+}
+
+// UpstreamCreditsNotIn applies the NotIn predicate on the "upstream_credits" field.
+func UpstreamCreditsNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldUpstreamCredits, vs...))
+}
+
+// UpstreamCreditsGT applies the GT predicate on the "upstream_credits" field.
+func UpstreamCreditsGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldUpstreamCredits, v))
+}
+
+// UpstreamCreditsGTE applies the GTE predicate on the "upstream_credits" field.
+func UpstreamCreditsGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldUpstreamCredits, v))
+}
+
+// UpstreamCreditsLT applies the LT predicate on the "upstream_credits" field.
+func UpstreamCreditsLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldUpstreamCredits, v))
+}
+
+// UpstreamCreditsLTE applies the LTE predicate on the "upstream_credits" field.
+func UpstreamCreditsLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldUpstreamCredits, v))
 }
 
 // AccountRateMultiplierEQ applies the EQ predicate on the "account_rate_multiplier" field.

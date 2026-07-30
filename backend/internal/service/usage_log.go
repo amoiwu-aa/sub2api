@@ -157,6 +157,11 @@ type UsageLog struct {
 	ActualCost                float64
 	RateMultiplier            float64
 	LongContextBillingApplied bool
+	// UpstreamCredits 是上游自己报的计费量，与上面按 token 折算的成本不是一个量纲。
+	// 目前只有 Kiro 会填（meteringEvent.usage）：它按 credit 结算，免费档一个周期
+	// 50 个、用尽即断供，而成本列走的是 Anthropic 价目表，实测两者相差 20 倍。
+	// 0 表示上游没报，求和时无需判空。
+	UpstreamCredits float64
 	// AccountRateMultiplier 账号计费倍率快照（nil 表示历史数据，按 1.0 处理）
 	AccountRateMultiplier *float64
 	// AccountStatsCost 账号统计定价预计算费用（nil = 使用默认公式 total_cost × account_rate_multiplier）

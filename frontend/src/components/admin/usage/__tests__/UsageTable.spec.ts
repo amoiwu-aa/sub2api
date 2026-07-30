@@ -51,6 +51,7 @@ const messages: Record<string, string> = {
   'admin.usage.billingModeToken': 'Token',
   'admin.usage.billingModePerRequest': 'Per request',
   'admin.usage.billingModeImage': 'Image',
+  'usage.upstreamCredits': '{value} credits upstream',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -58,7 +59,13 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messages[key] ?? key,
+      t: (key: string, params?: Record<string, unknown>) => {
+        const template = messages[key] ?? key
+        if (!params) return template
+        return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+          name in params ? String(params[name]) : match
+        )
+      },
     }),
   }
 })
@@ -150,6 +157,32 @@ describe('admin UsageTable tooltip', () => {
 
     expect(wrapper.findAll('[data-testid="long-context-billing-marker"]')).toHaveLength(1)
     expect(wrapper.get('[data-testid="long-context-billing-marker"]').text()).toBe('x2')
+  })
+
+  // Only Kiro reports an upstream credit figure. Showing "0 credits" on every other
+  // platform's row would imply we measured something and got zero, when in fact
+  // nothing was reported.
+  it('shows upstream credits only for rows the upstream metered', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          { ...baseImageRow, request_id: 'req-kiro-metered', model: 'kiro/auto', upstream_credits: 0.148231 },
+          { ...baseImageRow, request_id: 'req-cursor-unmetered', model: 'cursor/default', upstream_credits: 0 },
+          { ...baseImageRow, request_id: 'req-legacy-row', model: 'claude-sonnet-4' },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true },
+      },
+    })
+
+    const cells = wrapper.findAll('[data-testid="upstream-credits"]')
+    expect(cells).toHaveLength(1)
+    // Four decimals: a single request costs ~0.15 credits, so rounding to two
+    // would collapse the cheap models (qwen is 26x cheaper) into the same number.
+    expect(cells[0].text()).toContain('0.1482')
   })
 
   it('shows service tier and billing breakdown in cost tooltip', async () => {

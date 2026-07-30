@@ -104,6 +104,15 @@ func (UsageLog) Fields() []ent.Field {
 			Default(false).
 			Comment("Whether long-context pricing changed token prices for this request"),
 
+		// upstream_credits: 上游自己的计费量，与我们按 token 折算的成本不同量纲。
+		// Kiro 按 credit 结算（meteringEvent.usage），免费档一个周期 50 个、用尽即断供，
+		// 而 token 折价只是给下游的价目表——实测两者相差 20 倍，所以光看成本列
+		// 回答不了「上游额度还剩多少」。0 表示上游没报（目前除 Kiro 外都是）。
+		field.Float("upstream_credits").
+			Default(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}).
+			Comment("Upstream's own billing quantity (Kiro credits); 0 when not reported"),
+
 		// account_rate_multiplier: 账号计费倍率快照（NULL 表示按 1.0 处理）
 		field.Float("account_rate_multiplier").
 			Optional().

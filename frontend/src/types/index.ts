@@ -1658,6 +1658,8 @@ export interface UsageLog {
   actual_cost: number
   rate_multiplier: number
   long_context_billing_applied: boolean
+  /** 上游自报的计费量（目前只有 Kiro 的 credit），与上面按 token 折算的成本不同量纲；0 表示上游没报 */
+  upstream_credits?: number
   billing_type: number
 
   request_type?: UsageRequestType

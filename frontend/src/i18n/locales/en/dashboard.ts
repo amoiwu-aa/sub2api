@@ -133,6 +133,13 @@ export default {
         'Add the following environment variables to your terminal profile or run directly in terminal to configure API access.',
       copy: 'Copy',
       copied: 'Copied',
+      copyAll: 'Copy all',
+      copiedAll: 'All copied',
+      copyLine: 'Copy this line',
+      modelPicker: {
+        label: 'Model',
+        hint: 'The list reflects the models this key can actually use. Switching it updates the configuration below.',
+      },
       note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       claudeSettingsHint: 'User-level persistent configuration. Do not commit this file containing your API key to a project repository.',
       noGroupTitle: 'Please assign a group first',
@@ -158,9 +165,14 @@ export default {
         opencode: 'OpenCode',
       },
       cursor: {
-        description: 'Cursor groups only expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',
+        description: 'Cursor groups expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',
+        claudeDescription: 'Configure Claude Code to send Messages API traffic through your Cursor group. Every model tier is pinned to the model selected above.',
+        codexDescription: 'Configure Codex CLI to send Responses API traffic through your Cursor group.',
         modelComment: 'Model ids must carry the cursor/ prefix; cursor/default is the Auto tier',
-        note: 'Cursor does not support Claude Code: both /v1/messages and /v1/responses return 404. Use an OpenAI-compatible client and keep the cursor/ prefix on model names.',
+        codexConfigTomlHint: 'Goes into Codex config.toml. Keep the API key in an environment variable rather than this file.',
+        note: 'These environment variables will be active in the current terminal session. Keep the cursor/ prefix on model names, otherwise the request falls back to the Auto tier.',
+        claudeNote: 'Choose one method: run the terminal commands for the current session, or save settings.json for user-level persistent configuration. Cursor model ids carry a cursor/ prefix, so every tier must be pinned.',
+        codexNote: 'Codex uses the Responses API. Keep the cursor/ prefix and pick a model the account can actually serve, otherwise the upstream returns 429.',
       },
       kiro: {
         description: 'Kiro groups also expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',
@@ -221,6 +233,11 @@ export default {
       claudeCodeDesc: 'Import as Claude Code configuration',
       geminiCli: 'Gemini CLI',
       geminiCliDesc: 'Import as Gemini CLI configuration',
+    },
+    ccsModelSelect: {
+      title: 'Select Model',
+      description:
+        'Pick the model to use after importing into CC-Switch. You can still change it there later:',
     },
     // Quota and expiration
     quotaLimit: 'Quota Limit',
@@ -325,6 +342,8 @@ export default {
     latency: 'Latency',
     latencyFirstToken: 'First',
     latencyDuration: 'Total',
+    upstreamCredits: '{value} credits upstream',
+    upstreamCreditsHint: "The upstream's own metered charge. The amount on the left is our price list applied to tokens; the two are different units, and account quota is governed by credits.",
     time: 'Time',
     ws: 'WS',
     stream: 'Stream',

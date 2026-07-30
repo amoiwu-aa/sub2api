@@ -1103,7 +1103,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	if platform == service.PlatformKiro {
 		c.JSON(http.StatusOK, gin.H{
 			"object": "list",
-			"data":   kiro.DefaultModels(),
+			"data":   h.kiroModels(c.Request.Context(), groupID),
 		})
 		return
 	}
@@ -1112,6 +1112,25 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		"object": "list",
 		"data":   claude.DefaultModels,
 	})
+}
+
+// kiroModels 优先给出「这个分组的账号真能用的」模型，拿不到才退回静态并集。
+//
+// Kiro 的可用模型随订阅档位变化，静态目录是免费档与企业档的并集，直接端出去
+// 会让免费号的用户选到企业模型，请求被上游回 INVALID_MODEL_ID。
+// 目录拉取是异步的，首次调用必然落到静态目录，之后几秒内就会切到真实列表。
+func (h *GatewayHandler) kiroModels(ctx context.Context, groupID *int64) []kiro.Model {
+	if h == nil || h.kiroGatewayService == nil || h.gatewayService == nil {
+		return kiro.DefaultModels()
+	}
+	account := h.gatewayService.FirstSchedulableAccount(ctx, groupID, service.PlatformKiro)
+	if account == nil {
+		return kiro.DefaultModels()
+	}
+	if models := h.kiroGatewayService.CatalogModels(ctx, account); len(models) > 0 {
+		return models
+	}
+	return kiro.DefaultModels()
 }
 
 func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *int64) []string {

@@ -132,6 +132,13 @@ export default {
       description: '将以下环境变量添加到您的终端配置文件或直接在终端中运行。',
       copy: '复制',
       copied: '已复制',
+      copyAll: '全部复制',
+      copiedAll: '已全部复制',
+      copyLine: '复制这一行',
+      modelPicker: {
+        label: '模型',
+        hint: '列表来自这把密钥实际可用的模型。切换后下面的配置会同步更新。'
+      },
       note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。',
       claudeSettingsHint: '用户级持久配置。此文件包含 API 密钥，请勿提交到项目仓库。',
       noGroupTitle: '请先分配分组',
@@ -160,9 +167,18 @@ export default {
       },
       cursor: {
         description:
-          'Cursor 分组仅提供 OpenAI 兼容的 /v1/chat/completions 接口。请将以下环境变量配置到支持 OpenAI 兼容端点的客户端中。',
+          'Cursor 分组提供 OpenAI 兼容的 /v1/chat/completions 接口。请将以下环境变量配置到支持 OpenAI 兼容端点的客户端中。',
+        claudeDescription:
+          '配置 Claude Code，让 Messages API 请求通过当前 Cursor 分组发送。所有模型档位都会锁定到上面选中的模型。',
+        codexDescription:
+          '配置 Codex CLI，请求走 Responses API 通过当前 Cursor 分组发送。',
         modelComment: '模型 id 必须带 cursor/ 前缀，cursor/default 即 Auto 档',
-        note: 'Cursor 不支持 Claude Code：/v1/messages 与 /v1/responses 都会返回 404。请使用 OpenAI 兼容客户端，并确保模型名带 cursor/ 前缀。'
+        codexConfigTomlHint: '写入 Codex 的 config.toml；API 密钥单独放环境变量，不要写进这个文件。',
+        note: '这些环境变量将在当前终端会话中生效。请确保模型名带 cursor/ 前缀，否则会被回退成 Auto 档。',
+        claudeNote:
+          '二选一即可：终端命令仅在当前会话生效；保存 settings.json 可作为用户级持久配置。Cursor 的模型 id 带 cursor/ 前缀，因此必须锁定各档位模型。',
+        codexNote:
+          'Codex 走 Responses API。模型名必须带 cursor/ 前缀，且要选一个当前账号真正可用的模型，否则上游会返回 429。'
       },
       kiro: {
         description:
@@ -230,6 +246,10 @@ export default {
       claudeCodeDesc: '导入为 Claude Code 配置',
       geminiCli: 'Gemini CLI',
       geminiCliDesc: '导入为 Gemini CLI 配置'
+    },
+    ccsModelSelect: {
+      title: '选择模型',
+      description: '选择导入 CC-Switch 后默认使用的模型，导入后仍可在 CC-Switch 里修改：'
     },
     // 配额和有效期
     quotaLimit: '额度限制',
@@ -334,6 +354,8 @@ export default {
     latency: '延迟',
     latencyFirstToken: '首字',
     latencyDuration: '总耗时',
+    upstreamCredits: '上游 {value} credit',
+    upstreamCreditsHint: '上游按 credit 结算的真实扣费量。左侧金额是本站价目表折算，两者不同量纲，账号额度够不够以 credit 为准。',
     time: '时间',
     ws: 'WS',
     stream: '流式',

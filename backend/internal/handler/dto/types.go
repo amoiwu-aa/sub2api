@@ -504,6 +504,9 @@ type UsageLog struct {
 	ActualCost                float64 `json:"actual_cost"`
 	RateMultiplier            float64 `json:"rate_multiplier"`
 	LongContextBillingApplied bool    `json:"long_context_billing_applied"`
+	// UpstreamCredits 是上游自报的计费量（目前只有 Kiro 的 credit），与上面按
+	// token 折算的成本不同量纲。0 表示上游没报。
+	UpstreamCredits float64 `json:"upstream_credits"`
 
 	BillingType  int8   `json:"billing_type"`
 	RequestType  string `json:"request_type"`

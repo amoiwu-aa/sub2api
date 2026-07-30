@@ -365,6 +365,20 @@ func (_c *UsageLogCreate) SetNillableLongContextBillingApplied(v *bool) *UsageLo
 	return _c
 }
 
+// SetUpstreamCredits sets the "upstream_credits" field.
+func (_c *UsageLogCreate) SetUpstreamCredits(v float64) *UsageLogCreate {
+	_c.mutation.SetUpstreamCredits(v)
+	return _c
+}
+
+// SetNillableUpstreamCredits sets the "upstream_credits" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUpstreamCredits(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetUpstreamCredits(*v)
+	}
+	return _c
+}
+
 // SetAccountRateMultiplier sets the "account_rate_multiplier" field.
 func (_c *UsageLogCreate) SetAccountRateMultiplier(v float64) *UsageLogCreate {
 	_c.mutation.SetAccountRateMultiplier(v)
@@ -725,6 +739,10 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultLongContextBillingApplied
 		_c.mutation.SetLongContextBillingApplied(v)
 	}
+	if _, ok := _c.mutation.UpstreamCredits(); !ok {
+		v := usagelog.DefaultUpstreamCredits
+		_c.mutation.SetUpstreamCredits(v)
+	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		v := usagelog.DefaultBillingType
 		_c.mutation.SetBillingType(v)
@@ -844,6 +862,9 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.LongContextBillingApplied(); !ok {
 		return &ValidationError{Name: "long_context_billing_applied", err: errors.New(`ent: missing required field "UsageLog.long_context_billing_applied"`)}
+	}
+	if _, ok := _c.mutation.UpstreamCredits(); !ok {
+		return &ValidationError{Name: "upstream_credits", err: errors.New(`ent: missing required field "UsageLog.upstream_credits"`)}
 	}
 	if _, ok := _c.mutation.BillingType(); !ok {
 		return &ValidationError{Name: "billing_type", err: errors.New(`ent: missing required field "UsageLog.billing_type"`)}
@@ -1021,6 +1042,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
 		_node.LongContextBillingApplied = value
+	}
+	if value, ok := _c.mutation.UpstreamCredits(); ok {
+		_spec.SetField(usagelog.FieldUpstreamCredits, field.TypeFloat64, value)
+		_node.UpstreamCredits = value
 	}
 	if value, ok := _c.mutation.AccountRateMultiplier(); ok {
 		_spec.SetField(usagelog.FieldAccountRateMultiplier, field.TypeFloat64, value)
@@ -1684,6 +1709,24 @@ func (u *UsageLogUpsert) SetLongContextBillingApplied(v bool) *UsageLogUpsert {
 // UpdateLongContextBillingApplied sets the "long_context_billing_applied" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateLongContextBillingApplied() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldLongContextBillingApplied)
+	return u
+}
+
+// SetUpstreamCredits sets the "upstream_credits" field.
+func (u *UsageLogUpsert) SetUpstreamCredits(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldUpstreamCredits, v)
+	return u
+}
+
+// UpdateUpstreamCredits sets the "upstream_credits" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUpstreamCredits() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUpstreamCredits)
+	return u
+}
+
+// AddUpstreamCredits adds v to the "upstream_credits" field.
+func (u *UsageLogUpsert) AddUpstreamCredits(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldUpstreamCredits, v)
 	return u
 }
 
@@ -2579,6 +2622,27 @@ func (u *UsageLogUpsertOne) SetLongContextBillingApplied(v bool) *UsageLogUpsert
 func (u *UsageLogUpsertOne) UpdateLongContextBillingApplied() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateLongContextBillingApplied()
+	})
+}
+
+// SetUpstreamCredits sets the "upstream_credits" field.
+func (u *UsageLogUpsertOne) SetUpstreamCredits(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamCredits(v)
+	})
+}
+
+// AddUpstreamCredits adds v to the "upstream_credits" field.
+func (u *UsageLogUpsertOne) AddUpstreamCredits(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddUpstreamCredits(v)
+	})
+}
+
+// UpdateUpstreamCredits sets the "upstream_credits" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUpstreamCredits() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamCredits()
 	})
 }
 
@@ -3693,6 +3757,27 @@ func (u *UsageLogUpsertBulk) SetLongContextBillingApplied(v bool) *UsageLogUpser
 func (u *UsageLogUpsertBulk) UpdateLongContextBillingApplied() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateLongContextBillingApplied()
+	})
+}
+
+// SetUpstreamCredits sets the "upstream_credits" field.
+func (u *UsageLogUpsertBulk) SetUpstreamCredits(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUpstreamCredits(v)
+	})
+}
+
+// AddUpstreamCredits adds v to the "upstream_credits" field.
+func (u *UsageLogUpsertBulk) AddUpstreamCredits(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddUpstreamCredits(v)
+	})
+}
+
+// UpdateUpstreamCredits sets the "upstream_credits" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUpstreamCredits() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUpstreamCredits()
 	})
 }
 

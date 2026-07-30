@@ -68,6 +68,8 @@ const (
 	FieldRateMultiplier = "rate_multiplier"
 	// FieldLongContextBillingApplied holds the string denoting the long_context_billing_applied field in the database.
 	FieldLongContextBillingApplied = "long_context_billing_applied"
+	// FieldUpstreamCredits holds the string denoting the upstream_credits field in the database.
+	FieldUpstreamCredits = "upstream_credits"
 	// FieldAccountRateMultiplier holds the string denoting the account_rate_multiplier field in the database.
 	FieldAccountRateMultiplier = "account_rate_multiplier"
 	// FieldBillingType holds the string denoting the billing_type field in the database.
@@ -183,6 +185,7 @@ var Columns = []string{
 	FieldActualCost,
 	FieldRateMultiplier,
 	FieldLongContextBillingApplied,
+	FieldUpstreamCredits,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
 	FieldStream,
@@ -256,6 +259,8 @@ var (
 	DefaultRateMultiplier float64
 	// DefaultLongContextBillingApplied holds the default value on creation for the "long_context_billing_applied" field.
 	DefaultLongContextBillingApplied bool
+	// DefaultUpstreamCredits holds the default value on creation for the "upstream_credits" field.
+	DefaultUpstreamCredits float64
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
 	DefaultBillingType int8
 	// DefaultStream holds the default value on creation for the "stream" field.
@@ -425,6 +430,11 @@ func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 // ByLongContextBillingApplied orders the results by the long_context_billing_applied field.
 func ByLongContextBillingApplied(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLongContextBillingApplied, opts...).ToFunc()
+}
+
+// ByUpstreamCredits orders the results by the upstream_credits field.
+func ByUpstreamCredits(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamCredits, opts...).ToFunc()
 }
 
 // ByAccountRateMultiplier orders the results by the account_rate_multiplier field.
