@@ -520,8 +520,11 @@ const clientTabs = computed((): TabConfig[] => {
     case 'cursor':
       // 三个入口都已打通（见 routes/gateway.go：cursor 不在 self-bridged 拒绝名单里）：
       // /v1/chat/completions、/v1/messages、/v1/responses 实测均返回 200。
+      // cursor-ide 是第四个：同样是 chat/completions，但换 /cursor-ide/v1 前缀，
+      // 那条路会摘掉工具声明——官方 IDE 用自己的工具链路，不接受网关的中转。
       return [
         { id: 'openai-compat', label: t('keys.useKeyModal.cliTabs.openaiCompatible'), icon: TerminalIcon },
+        { id: 'cursor-ide', label: t('keys.useKeyModal.cliTabs.cursorIde'), icon: SparkleIcon },
         { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
         { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
         { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
@@ -554,7 +557,10 @@ const openaiTabs: TabConfig[] = [
   { id: 'windows', label: 'Windows', icon: WindowsIcon }
 ]
 
-const showShellTabs = computed(() => activeClientTab.value !== 'opencode')
+// Cursor IDE 那一档是在图形界面里填三个输入框，没有 shell 之分。
+const showShellTabs = computed(
+  () => activeClientTab.value !== 'opencode' && activeClientTab.value !== 'cursor-ide'
+)
 
 const showCodexAuthMode = computed(() =>
   props.platform === 'openai' &&
@@ -605,6 +611,9 @@ const platformDescription = computed(() => {
       if (activeClientTab.value === 'codex') {
         return t('keys.useKeyModal.cursor.codexDescription')
       }
+      if (activeClientTab.value === 'cursor-ide') {
+        return t('keys.useKeyModal.cursor.ideDescription')
+      }
       return t('keys.useKeyModal.cursor.description')
     case 'kiro':
       if (activeClientTab.value === 'claude') {
@@ -649,6 +658,9 @@ const platformNote = computed(() => {
       }
       if (activeClientTab.value === 'codex') {
         return t('keys.useKeyModal.cursor.codexNote')
+      }
+      if (activeClientTab.value === 'cursor-ide') {
+        return t('keys.useKeyModal.cursor.ideNote')
       }
       return t('keys.useKeyModal.cursor.note')
     case 'kiro':
@@ -753,6 +765,9 @@ const currentFiles = computed((): FileConfig[] => {
       }
       if (activeClientTab.value === 'codex') {
         return generateCursorCodexFiles(apiBase, apiKey, effectiveModel.value)
+      }
+      if (activeClientTab.value === 'cursor-ide') {
+        return generateCursorIDEFiles(`${baseRoot}/cursor-ide/v1`, apiKey, effectiveModel.value)
       }
       return generateOpenAICompatibleFiles(
         apiBase,
@@ -1103,6 +1118,26 @@ responses_websockets_v2 = true`
     {
       path: isWindows ? 'PowerShell' : 'Terminal',
       content: environmentContent
+    }
+  ]
+}
+
+/**
+ * 官方 Cursor IDE 以「自定义 OpenAI 服务」方式接入：不是改配置文件，而是在设置界面
+ * 里填三个输入框，所以这里生成的是照着抄的清单而非可执行片段。
+ *
+ * base URL 用 /cursor-ide/v1 而不是 /v1：那条路由会摘掉工具声明。IDE 走自己的工具
+ * 链路、不响应网关翻译出来的 tool_calls，带着 tools 会让模型停在一个没人接的调用上，
+ * 那一轮按完整 prompt 计费却拿不到正文。
+ */
+function generateCursorIDEFiles(baseUrl: string, apiKey: string, model: string): FileConfig[] {
+  return [
+    {
+      path: t('keys.useKeyModal.cursor.ideSettingsPath'),
+      content: `Override OpenAI Base URL: ${baseUrl}
+OpenAI API Key: ${apiKey}
+Model: ${model}`,
+      hint: t('keys.useKeyModal.cursor.ideSettingsHint')
     }
   ]
 }

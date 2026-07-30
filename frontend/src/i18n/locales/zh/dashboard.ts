@@ -163,6 +163,7 @@ export default {
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
         openaiCompatible: 'OpenAI 兼容',
+        cursorIde: 'Cursor IDE',
         opencode: 'OpenCode'
       },
       cursor: {
@@ -178,7 +179,14 @@ export default {
         claudeNote:
           '二选一即可：终端命令仅在当前会话生效；保存 settings.json 可作为用户级持久配置。Cursor 的模型 id 带 cursor/ 前缀，因此必须锁定各档位模型。',
         codexNote:
-          'Codex 走 Responses API。模型名必须带 cursor/ 前缀，且要选一个当前账号真正可用的模型，否则上游会返回 429。'
+          'Codex 走 Responses API。模型名必须带 cursor/ 前缀，且要选一个当前账号真正可用的模型，否则上游会返回 429。',
+        ideDescription:
+          '在官方 Cursor IDE 里把本网关当作「自定义 OpenAI 服务」使用。这一档走 /cursor-ide/v1，会摘掉请求里的工具声明——IDE 用自己的工具链路，不接受网关中转的 tool_calls。',
+        ideSettingsPath: 'Cursor 设置 → Models → OpenAI API Key',
+        ideSettingsHint:
+          '勾选 Override OpenAI Base URL 后填入上面的地址，注意结尾是 /cursor-ide/v1 而不是 /v1。模型要在下方 Add model 里手动添加，Cursor 的内置模型名不会走到这里。',
+        ideNote:
+          '填完点 Verify 验证。官方 IDE 对自定义模型有限制，多数版本只开放 Ask/Chat，Agent 模式用不了自定义 provider。'
       },
       kiro: {
         description:

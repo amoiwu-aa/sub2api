@@ -162,6 +162,7 @@ export default {
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
         openaiCompatible: 'OpenAI Compatible',
+        cursorIde: 'Cursor IDE',
         opencode: 'OpenCode',
       },
       cursor: {
@@ -173,6 +174,10 @@ export default {
         note: 'These environment variables will be active in the current terminal session. Keep the cursor/ prefix on model names, otherwise the request falls back to the Auto tier.',
         claudeNote: 'Choose one method: run the terminal commands for the current session, or save settings.json for user-level persistent configuration. Cursor model ids carry a cursor/ prefix, so every tier must be pinned.',
         codexNote: 'Codex uses the Responses API. Keep the cursor/ prefix and pick a model the account can actually serve, otherwise the upstream returns 429.',
+        ideDescription: 'Use this gateway as a custom OpenAI provider inside the official Cursor IDE. This tier goes through /cursor-ide/v1, which strips tool declarations from the request — the IDE runs its own tool loop and will not answer tool_calls relayed by the gateway.',
+        ideSettingsPath: 'Cursor Settings → Models → OpenAI API Key',
+        ideSettingsHint: 'Tick "Override OpenAI Base URL" and paste the address above. Note it ends in /cursor-ide/v1, not /v1. Add the model manually under "Add model"; Cursor\'s built-in model names never reach this endpoint.',
+        ideNote: 'Click Verify once the fields are filled. The official IDE limits custom models: most versions only enable Ask/Chat, and Agent mode does not work with custom providers.',
       },
       kiro: {
         description: 'Kiro groups also expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',

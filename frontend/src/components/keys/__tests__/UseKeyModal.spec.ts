@@ -576,4 +576,43 @@ describe('UseKeyModal', () => {
     expect(fable.options.thinking).toEqual({ type: 'adaptive' })
     expect(fable.options.thinking).not.toHaveProperty('budgetTokens')
   })
+
+  it('renders Cursor IDE setup pointing at the tool-free /cursor-ide/v1 endpoint', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-cursor-ide-test',
+        baseUrl: 'https://example.com/v1',
+        platform: 'cursor'
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    const ideTab = wrapper.findAll('button').find((button) =>
+      button.text().includes('keys.useKeyModal.cliTabs.cursorIde')
+    )
+    expect(ideTab).toBeDefined()
+    await ideTab!.trigger('click')
+    await nextTick()
+
+    const config = codeBlocksOf(wrapper).find((content) => content.includes('Override OpenAI Base URL'))
+    expect(config).toBeDefined()
+    // 前缀写错就等于把工具声明重新带上去，所以这里钉死完整地址。
+    expect(config).toContain('Override OpenAI Base URL: https://example.com/cursor-ide/v1')
+    expect(config).toContain('OpenAI API Key: sk-cursor-ide-test')
+    expect(config).toContain('Model: cursor/default')
+
+    // 这一档是在图形界面里填表，shell 页签不该出现。
+    const shellTab = wrapper.findAll('button').find((button) => button.text().includes('PowerShell'))
+    expect(shellTab).toBeUndefined()
+  })
 })
