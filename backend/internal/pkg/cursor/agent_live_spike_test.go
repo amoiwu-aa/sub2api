@@ -229,7 +229,11 @@ func (s *spikeSession) pump(deadline time.Duration, verbose bool, onFrame func(S
 				detail = "end_stream ERROR: " + connectErr.Error()
 			}
 			s.log("%s", detail)
-			s.frames = append(s.frames, spikeFrame{At: at, Kind: "end_stream", Detail: detail, AfterReply: s.replied})
+			// 原始载荷要留着：ConnectError 只认 code/message，而 Connect 的错误帧
+			// 还可能带 details。上游把 message 写成 "Error" 时，能不能定位问题全看它。
+			s.frames = append(s.frames, spikeFrame{
+				At: at, Kind: "end_stream", Detail: detail, Raw: envelope.Payload, AfterReply: s.replied,
+			})
 			return
 		}
 
