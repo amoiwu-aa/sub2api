@@ -133,6 +133,26 @@
           </nav>
         </div>
 
+        <!-- Model Picker (namespaced platforms only) -->
+        <div
+          v-if="showModelPicker"
+          class="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-700"
+        >
+          <label for="use-key-model" class="text-sm font-medium text-gray-900 dark:text-white">
+            {{ t('keys.useKeyModal.modelPicker.label') }}
+          </label>
+          <select
+            id="use-key-model"
+            v-model="selectedModel"
+            class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 font-mono text-sm text-gray-900 dark:border-dark-600 dark:bg-dark-800 dark:text-white"
+          >
+            <option v-for="model in modelOptions" :key="model" :value="model">{{ model }}</option>
+          </select>
+          <p class="w-full text-xs text-gray-500 dark:text-gray-400">
+            {{ t('keys.useKeyModal.modelPicker.hint') }}
+          </p>
+        </div>
+
         <!-- Code Blocks (Stacked for multi-file platforms) -->
         <div class="space-y-4">
           <div
@@ -163,11 +183,37 @@
                   <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
                   </svg>
-                  {{ copiedIndex === index ? t('keys.useKeyModal.copied') : t('keys.useKeyModal.copy') }}
+                  {{ copiedIndex === index ? t('keys.useKeyModal.copiedAll') : t('keys.useKeyModal.copyAll') }}
                 </button>
               </div>
-              <!-- Code Content -->
-              <pre class="p-4 text-sm font-mono text-gray-100 overflow-x-auto"><code v-if="file.highlighted" v-html="file.highlighted"></code><code v-else v-text="file.content"></code></pre>
+              <!-- Code Content: 逐行渲染，每行单独可复制 -->
+              <div data-testid="code-block" class="overflow-x-auto p-2 text-sm font-mono text-gray-100">
+                <div
+                  v-for="(line, lineIndex) in fileLines(file)"
+                  :key="lineIndex"
+                  class="group flex items-start gap-2 rounded px-2 py-0.5 hover:bg-white/5"
+                >
+                  <pre class="min-w-0 flex-1 whitespace-pre overflow-x-auto"><code v-if="line.html" v-html="line.html"></code><code v-else v-text="line.text"></code></pre>
+                  <button
+                    v-if="line.text.trim()"
+                    type="button"
+                    :title="t('keys.useKeyModal.copyLine')"
+                    :aria-label="t('keys.useKeyModal.copyLine')"
+                    @click="copyLine(line.text, index, lineIndex)"
+                    class="mt-0.5 flex-shrink-0 rounded p-1 transition-colors focus:opacity-100 group-hover:opacity-100"
+                    :class="copiedLineKey === `${index}:${lineIndex}`
+                      ? 'text-green-400 opacity-100'
+                      : 'text-gray-500 opacity-0 hover:text-white'"
+                  >
+                    <svg v-if="copiedLineKey === `${index}:${lineIndex}`" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -201,6 +247,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
+import { cursorModels, kiroModels } from '@/composables/useModelWhitelist'
 import type { GroupPlatform } from '@/types'
 
 interface Props {
@@ -235,6 +282,8 @@ const { t } = useI18n()
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
 const copiedIndex = ref<number | null>(null)
+// 单行复制的高亮标记，键是「文件序号:行号」
+const copiedLineKey = ref<string | null>(null)
 const activeTab = ref<string>('unix')
 const activeClientTab = ref<string>('claude')
 type CodexAuthMode = 'legacy' | 'api-key'
@@ -243,7 +292,92 @@ const codexAuthMode = ref<CodexAuthMode>('legacy')
 // 原生桥接平台的模型 id 带平台命名空间前缀，取值与 composables/useModelWhitelist.ts
 // 的 cursorModels / kiroModels 白名单（镜像后端 internal/pkg/{cursor,kiro}/models.go）一致。
 const CURSOR_DEFAULT_MODEL = 'cursor/default'
-const KIRO_DEFAULT_MODEL = 'kiro/claude-sonnet-4.6'
+// 取 auto：Kiro 的可用模型随订阅档位变化，只有它在免费号和企业号上都存在。
+const KIRO_DEFAULT_MODEL = 'kiro/auto'
+
+// 带命名空间前缀的平台才需要把模型写进配置，也只有它们要给用户选。
+const NAMESPACED_PLATFORMS: GroupPlatform[] = ['cursor', 'kiro']
+
+// 服务端 Kiro 目录异步刷新一次约 2 秒，留点余量再补拉。
+const MODEL_REFETCH_DELAY_MS = 3000
+
+const selectedModel = ref('')
+const modelOptions = ref<string[]>([])
+
+const showModelPicker = computed(
+  () => !!props.platform && NAMESPACED_PLATFORMS.includes(props.platform) && modelOptions.value.length > 0
+)
+
+function fallbackModelsFor(platform: GroupPlatform | null): string[] {
+  switch (platform) {
+    case 'cursor':
+      return cursorModels
+    case 'kiro':
+      return kiroModels
+    default:
+      return []
+  }
+}
+
+function defaultModelFor(platform: GroupPlatform | null): string {
+  return platform === 'kiro' ? KIRO_DEFAULT_MODEL : CURSOR_DEFAULT_MODEL
+}
+
+/**
+ * 拉取这把 Key 真正能用的模型。
+ *
+ * 内置白名单只是后端目录的镜像，分组可能又筛掉一批；/v1/models 返回的是过滤后的
+ * 结果，拿它当选项才不会让人选中一个用不了的模型。拉不到就退回内置白名单，
+ * 不能因为列不出来就把整个配置面板卡住。
+ */
+async function loadModelOptions() {
+  const platform = props.platform
+  if (!platform || !NAMESPACED_PLATFORMS.includes(platform)) {
+    modelOptions.value = []
+    return
+  }
+
+  const fallback = fallbackModelsFor(platform)
+  modelOptions.value = fallback
+  selectedModel.value = fallback.includes(defaultModelFor(platform))
+    ? defaultModelFor(platform)
+    : fallback[0] || ''
+
+  const baseRoot = (props.baseUrl || window.location.origin).replace(/\/v1\/?$/, '').replace(/\/+$/, '')
+
+  const fetchOnce = async (): Promise<string[] | null> => {
+    try {
+      const resp = await fetch(`${baseRoot}/v1/models`, {
+        headers: { Authorization: `Bearer ${props.apiKey}` }
+      })
+      if (!resp.ok) return null
+      const body = (await resp.json()) as { data?: { id?: string }[] }
+      const ids = (body.data || []).map((m) => m.id).filter((id): id is string => !!id)
+      return ids.length > 0 ? ids : null
+    } catch {
+      return null
+    }
+  }
+
+  const apply = (ids: string[] | null) => {
+    // 面板可能已经关掉或切了平台，晚到的结果不该覆盖当前状态。
+    if (!ids || props.platform !== platform) return
+    modelOptions.value = ids
+    if (!ids.includes(selectedModel.value)) {
+      selectedModel.value = ids.includes(defaultModelFor(platform)) ? defaultModelFor(platform) : ids[0]
+    }
+  }
+
+  apply(await fetchOnce())
+  // Kiro 的目录在服务端按账号异步刷新，首次请求必然是静态并集（免费档 + 企业档），
+  // 几秒后才切成这个账号真实可用的那份。不补拉的话免费号会看到点不了的企业模型。
+  if (platform !== 'kiro') return
+  await new Promise((resolve) => setTimeout(resolve, MODEL_REFETCH_DELAY_MS))
+  apply(await fetchOnce())
+}
+
+// 生成配置时用的模型：用户选过就用选的，否则回到平台默认。
+const effectiveModel = computed(() => selectedModel.value || defaultModelFor(props.platform))
 
 // Reset tabs when platform changes
 const defaultClientTab = computed(() => {
@@ -257,7 +391,7 @@ const defaultClientTab = computed(() => {
     case 'antigravity':
       return 'claude'
     case 'cursor':
-      // cursor 的 /v1/messages 由网关显式 404，没有 Claude Code 页签可选
+      // 三个入口都能用，默认给最通用的 OpenAI 兼容那一档
       return 'openai-compat'
     case 'kiro':
       return 'claude'
@@ -275,7 +409,12 @@ watch(() => props.platform, () => {
 watch(() => props.show, (show) => {
   if (show) {
     codexAuthMode.value = 'legacy'
+    void loadModelOptions()
   }
+})
+
+watch(() => props.platform, () => {
+  if (props.show) void loadModelOptions()
 })
 
 // Reset shell tab when client changes
@@ -379,10 +518,12 @@ const clientTabs = computed((): TabConfig[] => {
         { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
       ]
     case 'cursor':
-      // 不提供 Claude Code 页签：cursor 只有 OpenAI chat/completions，
-      // /v1/messages 与 /v1/responses 都由网关显式 404。
+      // 三个入口都已打通（见 routes/gateway.go：cursor 不在 self-bridged 拒绝名单里）：
+      // /v1/chat/completions、/v1/messages、/v1/responses 实测均返回 200。
       return [
         { id: 'openai-compat', label: t('keys.useKeyModal.cliTabs.openaiCompatible'), icon: TerminalIcon },
+        { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
+        { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
         { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
       ]
     case 'kiro':
@@ -428,6 +569,16 @@ const currentTabs = computed(() => {
   return shellTabs
 })
 
+/**
+ * Codex 页签只区分 Unix / Windows（openaiTabs），而 shell 页签有三档。
+ * 从 PowerShell 切到 Codex 时旧值会落在 openaiTabs 之外，导致生成空配置。
+ */
+watch(currentTabs, (tabs) => {
+  if (tabs.length > 0 && !tabs.some((tab) => tab.id === activeTab.value)) {
+    activeTab.value = tabs[0].id
+  }
+})
+
 const platformDescription = computed(() => {
   switch (props.platform) {
     case 'openai':
@@ -448,6 +599,12 @@ const platformDescription = computed(() => {
       }
       return t('keys.useKeyModal.grok.description')
     case 'cursor':
+      if (activeClientTab.value === 'claude') {
+        return t('keys.useKeyModal.cursor.claudeDescription')
+      }
+      if (activeClientTab.value === 'codex') {
+        return t('keys.useKeyModal.cursor.codexDescription')
+      }
       return t('keys.useKeyModal.cursor.description')
     case 'kiro':
       if (activeClientTab.value === 'claude') {
@@ -487,6 +644,12 @@ const platformNote = computed(() => {
         ? t('keys.useKeyModal.grok.noteWindows')
         : t('keys.useKeyModal.grok.note')
     case 'cursor':
+      if (activeClientTab.value === 'claude') {
+        return t('keys.useKeyModal.cursor.claudeNote')
+      }
+      if (activeClientTab.value === 'codex') {
+        return t('keys.useKeyModal.cursor.codexNote')
+      }
       return t('keys.useKeyModal.cursor.note')
     case 'kiro':
       return activeClientTab.value === 'claude'
@@ -585,20 +748,26 @@ const currentFiles = computed((): FileConfig[] => {
       }
       return generateGrokFiles(apiBase, apiKey)
     case 'cursor':
-      return generateOpenAICompatibleFiles(
-        apiBase,
-        apiKey,
-        CURSOR_DEFAULT_MODEL,
-        t('keys.useKeyModal.cursor.modelComment')
-      )
-    case 'kiro':
       if (activeClientTab.value === 'claude') {
-        return generateClaudeCodeFilesForModel(baseRoot, apiKey, KIRO_DEFAULT_MODEL)
+        return generateClaudeCodeFilesForModel(baseRoot, apiKey, effectiveModel.value)
+      }
+      if (activeClientTab.value === 'codex') {
+        return generateCursorCodexFiles(apiBase, apiKey, effectiveModel.value)
       }
       return generateOpenAICompatibleFiles(
         apiBase,
         apiKey,
-        KIRO_DEFAULT_MODEL,
+        effectiveModel.value,
+        t('keys.useKeyModal.cursor.modelComment')
+      )
+    case 'kiro':
+      if (activeClientTab.value === 'claude') {
+        return generateClaudeCodeFilesForModel(baseRoot, apiKey, effectiveModel.value)
+      }
+      return generateOpenAICompatibleFiles(
+        apiBase,
+        apiKey,
+        effectiveModel.value,
         t('keys.useKeyModal.kiro.modelComment')
       )
     default:
@@ -775,8 +944,8 @@ ${keyword('$env:')}${variable('GEMINI_MODEL')}${operator('=')}${string(`"${model
 
 /**
  * 通用 OpenAI 兼容（chat/completions）环境变量配置。
- * cursor / kiro 的上游桥只暴露 chat/completions（Responses API 由网关显式 404），
- * 且模型 id 必须带平台命名空间前缀，所以这里把 model 一并写进环境变量。
+ * cursor / kiro 的模型 id 必须带平台命名空间前缀，客户端下拉框里选不到，
+ * 所以这里把 model 一并写进环境变量。
  */
 function generateOpenAICompatibleFiles(
   baseUrl: string,
@@ -800,9 +969,12 @@ ${keyword('export')} ${variable('OPENAI_MODEL')}${operator('=')}${string(`"${mod
       break
     case 'cmd':
       path = 'Command Prompt'
+      // REM 注释也写进 content：逐行复制要求两边行数对齐，
+      // 而且展示了却复制不到的行只会让人以为漏了东西。
       content = `set OPENAI_BASE_URL=${baseUrl}
 set OPENAI_API_KEY=${apiKey}
-set OPENAI_MODEL=${model}`
+set OPENAI_MODEL=${model}
+REM ${modelComment}`
       highlighted = `${keyword('set')} ${variable('OPENAI_BASE_URL')}${operator('=')}${string(baseUrl)}
 ${keyword('set')} ${variable('OPENAI_API_KEY')}${operator('=')}${string(apiKey)}
 ${keyword('set')} ${variable('OPENAI_MODEL')}${operator('=')}${string(model)}
@@ -927,6 +1099,41 @@ responses_websockets_v2 = true`
       path: configPath,
       content: configContent,
       hint: t('keys.useKeyModal.grok.codexConfigTomlHint')
+    },
+    {
+      path: isWindows ? 'PowerShell' : 'Terminal',
+      content: environmentContent
+    }
+  ]
+}
+
+/**
+ * Codex 走 Cursor 分组：上游桥已实现 ForwardAsResponses，wire_api 用 responses。
+ * 不开 websockets——Cursor 桥只提供 HTTP 的 Responses 入口。
+ */
+function generateCursorCodexFiles(baseUrl: string, apiKey: string, model: string): FileConfig[] {
+  const isWindows = activeTab.value === 'windows'
+  const configPath = isWindows
+    ? '%USERPROFILE%\\.codex\\config.toml'
+    : '~/.codex/config.toml'
+  const configContent = `model_provider = "sub2api_cursor"
+model = "${model}"
+review_model = "${model}"
+
+[model_providers.sub2api_cursor]
+name = "RingStar Cursor"
+base_url = "${baseUrl}"
+env_key = "SUB2API_API_KEY"
+wire_api = "responses"`
+  const environmentContent = isWindows
+    ? `$env:SUB2API_API_KEY="${apiKey}"`
+    : `export SUB2API_API_KEY="${apiKey}"`
+
+  return [
+    {
+      path: configPath,
+      content: configContent,
+      hint: t('keys.useKeyModal.cursor.codexConfigTomlHint')
     },
     {
       path: isWindows ? 'PowerShell' : 'Terminal',
@@ -1567,6 +1774,29 @@ const copyContent = async (content: string, index: number) => {
     copiedIndex.value = index
     setTimeout(() => {
       copiedIndex.value = null
+    }, 2000)
+  }
+}
+
+/**
+ * 把一段配置拆成可逐行复制的行。
+ *
+ * highlighted 是按行拼出来的，行数与 content 对齐，所以两边同样按 \n 切开即可
+ * 一一对应。万一某个生成器写得不齐（高亮多出装饰行），以 content 为准并让多出
+ * 的高亮行落空——复制出去的永远是 content 的原文，不会把高亮标记带进剪贴板。
+ */
+function fileLines(file: FileConfig): { text: string; html: string }[] {
+  const texts = file.content.split('\n')
+  const htmls = file.highlighted ? file.highlighted.split('\n') : []
+  return texts.map((text, i) => ({ text, html: htmls[i] ?? '' }))
+}
+
+const copyLine = async (text: string, fileIndex: number, lineIndex: number) => {
+  const success = await clipboardCopy(text, t('keys.copied'))
+  if (success) {
+    copiedLineKey.value = `${fileIndex}:${lineIndex}`
+    setTimeout(() => {
+      copiedLineKey.value = null
     }, 2000)
   }
 }

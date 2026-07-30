@@ -1,12 +1,29 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
+
+// 代码块逐行渲染，每行一个 <code>；用 textContent 而非 text() 以保留缩进。
+const codeBlocksOf = (wrapper: VueWrapper): string[] =>
+  wrapper
+    .findAll('[data-testid="code-block"]')
+    .map((block) =>
+      block
+        .findAll('pre code')
+        .map((code) => code.element.textContent ?? '')
+        .join('\n')
+    )
 
 const { copyToClipboardMock } = vi.hoisted(() => ({
   copyToClipboardMock: vi.fn().mockResolvedValue(true)
 }))
 
 vi.mock('vue-i18n', () => ({
+  createI18n: () => ({
+    global: {
+      t: (key: string) => key,
+      locale: { value: 'en' }
+    }
+  }),
   useI18n: () => ({
     t: (key: string) => key
   })
@@ -46,8 +63,7 @@ describe('UseKeyModal', () => {
     )
     expect(grokTab).toBeDefined()
 
-    const grokConfig = wrapper.findAll('pre code')
-      .map((code) => code.text())
+    const grokConfig = codeBlocksOf(wrapper)
       .find((content) => content.includes('[model."grok"]'))
     expect(grokConfig).toBeDefined()
     expect(grokConfig).toContain('model = "grok-4.5"')
@@ -70,7 +86,7 @@ describe('UseKeyModal', () => {
     await opencodeTab!.trigger('click')
     await nextTick()
 
-    const parsed = JSON.parse(wrapper.find('pre code').text())
+    const parsed = JSON.parse(codeBlocksOf(wrapper)[0])
     expect(parsed.provider.grok.npm).toBe('@ai-sdk/openai')
     expect(parsed.provider.grok.options).toEqual({
       baseURL: 'https://example.com/v1',
@@ -110,7 +126,7 @@ describe('UseKeyModal', () => {
     await claudeTab!.trigger('click')
     await nextTick()
 
-    let codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    let codeBlocks = codeBlocksOf(wrapper)
     expect(codeBlocks.join('\n')).toContain('ANTHROPIC_BASE_URL="https://example.com"')
     expect(codeBlocks.join('\n')).toContain('ANTHROPIC_AUTH_TOKEN="sk-grok-claude-test"')
     const unixConfig = codeBlocks.find((content) => content.startsWith('export ANTHROPIC_BASE_URL'))
@@ -142,7 +158,7 @@ describe('UseKeyModal', () => {
     await cmdTab!.trigger('click')
     await nextTick()
 
-    codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    codeBlocks = codeBlocksOf(wrapper)
     expect(codeBlocks.join('\n')).toContain('set ANTHROPIC_MODEL=grok-4.5')
     expect(codeBlocks.join('\n')).toContain('set ANTHROPIC_DEFAULT_FABLE_MODEL=grok-4.5')
     expect(codeBlocks.join('\n')).toContain('set CLAUDE_CODE_SUBAGENT_MODEL=grok-4.5')
@@ -154,7 +170,7 @@ describe('UseKeyModal', () => {
     await powershellTab!.trigger('click')
     await nextTick()
 
-    codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    codeBlocks = codeBlocksOf(wrapper)
     expect(codeBlocks.join('\n')).toContain('$env:ANTHROPIC_BASE_URL="https://example.com"')
     expect(codeBlocks.join('\n')).toContain('$env:ANTHROPIC_MODEL="grok-4.5"')
     expect(codeBlocks.join('\n')).toContain('$env:ANTHROPIC_DEFAULT_FABLE_MODEL="grok-4.5"')
@@ -199,7 +215,7 @@ describe('UseKeyModal', () => {
     await codexTab!.trigger('click')
     await nextTick()
 
-    let codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    let codeBlocks = codeBlocksOf(wrapper)
     const configToml = codeBlocks.find((content) => content.includes('[model_providers.sub2api_grok]'))
     expect(configToml).toBeDefined()
     expect(configToml).toContain('model_provider = "sub2api_grok"')
@@ -225,7 +241,7 @@ describe('UseKeyModal', () => {
     await windowsTab!.trigger('click')
     await nextTick()
 
-    codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    codeBlocks = codeBlocksOf(wrapper)
     expect(wrapper.text()).toContain('%USERPROFILE%\\.codex\\config.toml')
     expect(codeBlocks).toContain('$env:SUB2API_API_KEY="sk-grok-codex-test"')
   })
@@ -250,7 +266,7 @@ describe('UseKeyModal', () => {
       }
     })
 
-    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    const codeBlocks = codeBlocksOf(wrapper)
     const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
 
     expect(configToml).toBeDefined()
@@ -295,7 +311,7 @@ describe('UseKeyModal', () => {
     await apiKeyMode.trigger('click')
     await nextTick()
 
-    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    const codeBlocks = codeBlocksOf(wrapper)
     const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
 
     expect(apiKeyMode.attributes('aria-checked')).toBe('true')
@@ -316,7 +332,7 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     expect(wrapper.find('[data-testid="codex-api-key-restart-notice"]').exists()).toBe(false)
-    expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain(
+    expect(codeBlocksOf(wrapper).join('\n')).not.toContain(
       'x-openai-actor-authorization'
     )
   })
@@ -349,7 +365,7 @@ describe('UseKeyModal', () => {
     await wsTab!.trigger('click')
     await nextTick()
 
-    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    const codeBlocks = codeBlocksOf(wrapper)
     const configToml = codeBlocks.find((content) => content.includes('supports_websockets = true'))
 
     expect(configToml).toBeDefined()
@@ -398,7 +414,7 @@ describe('UseKeyModal', () => {
     await wsTab!.trigger('click')
     await nextTick()
 
-    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    const codeBlocks = codeBlocksOf(wrapper)
     const configToml = codeBlocks.find((content) => content.includes('supports_websockets = true'))
 
     expect(wrapper.get('[data-testid="codex-auth-mode-api-key"]').attributes('aria-checked')).toBe('true')
@@ -438,7 +454,7 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     expect(wrapper.get('[data-testid="codex-auth-mode-legacy"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).toContain('requires_openai_auth = true')
+    expect(codeBlocksOf(wrapper).join('\n')).toContain('requires_openai_auth = true')
 
     await wrapper.get('[data-testid="codex-auth-mode-api-key"]').trigger('click')
     await wrapper.setProps({ platform: 'gemini' })
@@ -446,7 +462,7 @@ describe('UseKeyModal', () => {
     await nextTick()
 
     expect(wrapper.get('[data-testid="codex-auth-mode-legacy"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain('x-openai-actor-authorization')
+    expect(codeBlocksOf(wrapper).join('\n')).not.toContain('x-openai-actor-authorization')
   })
 
   it('renders GPT-5.4 mini entry in OpenCode config', async () => {
@@ -477,10 +493,10 @@ describe('UseKeyModal', () => {
     await opencodeTab!.trigger('click')
     await nextTick()
 
-    const codeBlock = wrapper.find('pre code')
-    expect(codeBlock.exists()).toBe(true)
-    expect(codeBlock.text()).toContain('"name": "GPT-5.4 Mini"')
-    expect(codeBlock.text()).not.toContain('"name": "GPT-5.4 Nano"')
+    const codeBlock = codeBlocksOf(wrapper)[0]
+    expect(codeBlock).toBeDefined()
+    expect(codeBlock).toContain('"name": "GPT-5.4 Mini"')
+    expect(codeBlock).not.toContain('"name": "GPT-5.4 Nano"')
   })
 
   it('renders GPT-5.6 alias and max variants in OpenCode config', async () => {
@@ -510,7 +526,7 @@ describe('UseKeyModal', () => {
     await opencodeTab!.trigger('click')
     await nextTick()
 
-    const parsed = JSON.parse(wrapper.find('pre code').text())
+    const parsed = JSON.parse(codeBlocksOf(wrapper)[0])
     const models = parsed.provider.openai.models
     for (const model of ['gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
       expect(models[model]).toBeDefined()
@@ -548,8 +564,7 @@ describe('UseKeyModal', () => {
     await opencodeTab!.trigger('click')
     await nextTick()
 
-    const claudeConfig = wrapper.findAll('pre code')
-      .map((code) => code.text())
+    const claudeConfig = codeBlocksOf(wrapper)
       .find((content) => content.includes('"antigravity-claude"'))
 
     expect(claudeConfig).toBeDefined()

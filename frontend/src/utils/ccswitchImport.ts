@@ -4,8 +4,26 @@ export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
 /** Cursor 的模型 id 带 cursor/ 命名空间，cursor/default 即上游的 Auto 档 */
 export const CURSOR_CC_SWITCH_MODEL = 'cursor/default'
-/** Kiro 的模型 id 带 kiro/ 命名空间；导入 Claude Code 时须锁定到具体模型 */
-export const KIRO_CC_SWITCH_MODEL = 'kiro/claude-sonnet-4.6'
+/**
+ * 分组没配模型白名单时，Cursor 导入弹窗退而求其次给出的候选。
+ *
+ * 只列常年可用的那几个：Claude / GPT 系要吃订阅里「包含的 API 用量」，
+ * 那份额度耗尽后上游直接回 429，摆进选项里只会让人选中一个用不了的模型。
+ */
+export const CURSOR_CC_SWITCH_MODEL_FALLBACKS = [
+  'cursor/default',
+  'cursor/grok-4.5',
+  'cursor/grok-4.5-max',
+  'cursor/composer-2.5'
+]
+/**
+ * Kiro 的模型 id 带 kiro/ 命名空间；导入 Claude Code 时须锁定各档位模型。
+ *
+ * 取 auto 而不是某个具体模型：可用模型随订阅档位变化，只有 auto 在免费号和
+ * 企业号上都存在，也是上游自己返回的 defaultModel。早先默认 claude-sonnet-4.6，
+ * 那是企业号才有的，免费号导入后第一个请求就被上游回 INVALID_MODEL_ID。
+ */
+export const KIRO_CC_SWITCH_MODEL = 'kiro/auto'
 
 export type CcSwitchClientType = 'claude' | 'gemini'
 
@@ -22,6 +40,14 @@ export interface CcSwitchImportDeeplinkInput {
   providerName: string
   apiKey: string
   usageScript: string
+  /**
+   * 覆盖平台默认模型。留空则沿用 resolveCcSwitchImportConfig 给的默认值。
+   *
+   * 平台默认值是保守选的（Cursor 用 Auto），但一个分组开放了哪些模型只有运行时
+   * 才知道，所以让调用方把用户选中的那个带进来——否则导入后还得去 CC Switch 里
+   * 手工改一遍模型字段。
+   */
+  modelOverride?: string | null
 }
 
 function withV1Endpoint(baseUrl: string): string {
@@ -102,8 +128,9 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
     ['usageAutoInterval', '30']
   ]
 
-  if (config.model) {
-    entries.splice(2, 0, ['model', config.model])
+  const model = (input.modelOverride || '').trim() || config.model
+  if (model) {
+    entries.splice(2, 0, ['model', model])
   }
 
   // usageScript 里写的是 `{{baseUrl}}/v1/usage`，而 CC-Switch 的 {{baseUrl}} 在没有

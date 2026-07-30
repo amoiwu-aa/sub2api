@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CURSOR_CC_SWITCH_MODEL,
+  CURSOR_CC_SWITCH_MODEL_FALLBACKS,
   GROK_CC_SWITCH_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
   buildCcSwitchImportDeeplink
@@ -116,6 +118,57 @@ describe('ccswitchImport utils', () => {
     expect(params.get('app')).toBe(app)
     expect(params.get('endpoint')).toBe(baseInput.baseUrl)
     expect(params.has('model')).toBe(false)
+  })
+
+  it('defaults Cursor imports to Auto when no model is picked', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'cursor',
+        clientType: 'claude'
+      })
+    )
+
+    expect(params.get('model')).toBe(CURSOR_CC_SWITCH_MODEL)
+  })
+
+  it('carries the picked model into the deeplink', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'cursor',
+        clientType: 'claude',
+        modelOverride: 'cursor/grok-4.5-max'
+      })
+    )
+
+    expect(params.get('app')).toBe('opencode')
+    expect(params.get('model')).toBe('cursor/grok-4.5-max')
+    // 覆盖模型不该动端点或用量基址
+    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('usageBaseUrl')).toBe('https://api.example.com')
+  })
+
+  it.each(['', '   ', null, undefined])(
+    'falls back to the platform default when the override is %p',
+    (modelOverride) => {
+      const params = paramsFromDeeplink(
+        buildCcSwitchImportDeeplink({
+          ...baseInput,
+          platform: 'cursor',
+          clientType: 'claude',
+          modelOverride
+        })
+      )
+
+      expect(params.get('model')).toBe(CURSOR_CC_SWITCH_MODEL)
+    }
+  )
+
+  it('lists only models that stay usable after the API quota runs out', () => {
+    expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS).toContain(CURSOR_CC_SWITCH_MODEL)
+    expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS).toContain('cursor/grok-4.5-max')
+    expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS.every((m) => m.startsWith('cursor/'))).toBe(true)
   })
 
   it('keeps Antigravity imports on the selected client endpoint without a model parameter', () => {

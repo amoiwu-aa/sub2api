@@ -1045,6 +1045,38 @@
       </template>
     </BaseDialog>
 
+    <!-- CCS Model Selection Dialog for Cursor -->
+    <BaseDialog
+      :show="showCcsModelSelect"
+      :title="t('keys.ccsModelSelect.title')"
+      width="narrow"
+      @close="closeCcsModelSelect"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('keys.ccsModelSelect.description') }}
+        </p>
+        <div class="space-y-2">
+          <button
+            v-for="model in ccsModelOptions"
+            :key="model"
+            @click="handleCcsModelSelect(model)"
+            class="flex w-full items-center justify-between gap-3 rounded-xl border-2 border-gray-200 p-3 text-left transition-all hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
+          >
+            <span class="font-mono text-sm text-gray-900 dark:text-white">{{ model }}</span>
+            <Icon name="chevronRight" size="sm" class="text-gray-400" />
+          </button>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end">
+          <button @click="closeCcsModelSelect" class="btn btn-secondary">
+            {{ t('common.cancel') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
     <!-- Group Selector Dropdown (Teleported to body to avoid overflow clipping) -->
     <Teleport to="body">
       <div
@@ -1147,8 +1179,13 @@ import { formatDateTime } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
   buildCcSwitchImportDeeplink,
+  CURSOR_CC_SWITCH_MODEL_FALLBACKS,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
+import { kiroModels } from '@/composables/useModelWhitelist'
+
+// 模型 id 带平台命名空间前缀的平台，导入前要让用户选一个具体模型。
+const NAMESPACED_MODEL_PLATFORMS: GroupPlatform[] = ['cursor', 'kiro']
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1301,6 +1338,8 @@ const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
+const showCcsModelSelect = ref(false)
+const ccsModelOptions = ref<string[]>([])
 const showColumnDropdown = ref(false)
 const pendingCcsRow = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
@@ -1911,11 +1950,68 @@ const importToCcswitch = (row: ApiKey) => {
     return
   }
 
+  // Cursor / Kiro 一个分组常开放多个模型，而且 Kiro 的可用范围还随订阅档位变，
+  // 默认导成某一个的话用户还得去 CC Switch 里手工改；先让他挑，挑完再拼 deeplink。
+  if (NAMESPACED_MODEL_PLATFORMS.includes(platform)) {
+    pendingCcsRow.value = row
+    ccsModelOptions.value = platform === 'kiro' ? kiroModels : CURSOR_CC_SWITCH_MODEL_FALLBACKS
+    showCcsModelSelect.value = true
+    void loadCcsModelOptions(row)
+    return
+  }
+
   // For other platforms, execute directly
   void executeCcsImport(row, platform === 'gemini' ? 'gemini' : 'claude')
 }
 
-const executeCcsImport = async (row: ApiKey, clientType: CcSwitchClientType) => {
+/**
+ * 用这把 Key 去问 /v1/models，拿到的就是它真正能用的模型。
+ *
+ * 分组的模型白名单只在 AdminGroup 上，普通用户的 Key 列表里没有；而这个端点
+ * 本来就对持 Key 的人开放，返回的又正好是过滤后的结果，比前端猜一份更准。
+ * 请求失败时保留内置候选，不能因为列不出来就让导入走不下去。
+ *
+ * 拉两次是为了 Kiro：服务端的模型目录按账号异步刷新，首次请求必然落到静态并集
+ * （免费档 + 企业档），几秒后才切成这个账号真实可用的那一份。只拉一次的话，
+ * 免费号用户会在下拉框里看到自己点不了的企业模型。
+ */
+const CCS_MODEL_REFETCH_DELAY_MS = 3000
+
+const loadCcsModelOptions = async (row: ApiKey) => {
+  const baseUrl = (publicSettings.value?.api_base_url || window.location.origin).replace(/\/+$/, '')
+
+  const fetchOnce = async (): Promise<string[] | null> => {
+    try {
+      const resp = await fetch(`${baseUrl}/v1/models`, {
+        headers: { Authorization: `Bearer ${row.key}` }
+      })
+      if (!resp.ok) return null
+      const body = (await resp.json()) as { data?: { id?: string }[] }
+      const ids = (body.data || []).map((m) => m.id).filter((id): id is string => !!id)
+      return ids.length > 0 ? ids : null
+    } catch {
+      return null
+    }
+  }
+
+  const apply = (ids: string[] | null) => {
+    // 弹窗可能已经被关掉或换了一行，晚到的结果不该覆盖当前状态。
+    if (ids && pendingCcsRow.value?.id === row.id) {
+      ccsModelOptions.value = ids
+    }
+  }
+
+  apply(await fetchOnce())
+  if ((row.group?.platform || '') !== 'kiro') return
+  await new Promise((resolve) => setTimeout(resolve, CCS_MODEL_REFETCH_DELAY_MS))
+  apply(await fetchOnce())
+}
+
+const executeCcsImport = async (
+  row: ApiKey,
+  clientType: CcSwitchClientType,
+  modelOverride?: string
+) => {
   const baseUrl = publicSettings.value?.api_base_url || window.location.origin
   const platform = row.group?.platform || 'anthropic'
 
@@ -1942,7 +2038,8 @@ const executeCcsImport = async (row: ApiKey, clientType: CcSwitchClientType) => 
     clientType,
     providerName,
     apiKey: row.key,
-    usageScript
+    usageScript,
+    modelOverride
   })
 
   try {
@@ -1967,6 +2064,19 @@ const handleCcsClientSelect = (clientType: CcSwitchClientType) => {
 
 const closeCcsClientSelect = () => {
   showCcsClientSelect.value = false
+  pendingCcsRow.value = null
+}
+
+const handleCcsModelSelect = (model: string) => {
+  if (pendingCcsRow.value) {
+    void executeCcsImport(pendingCcsRow.value, 'claude', model)
+  }
+  showCcsModelSelect.value = false
+  pendingCcsRow.value = null
+}
+
+const closeCcsModelSelect = () => {
+  showCcsModelSelect.value = false
   pendingCcsRow.value = null
 }
 

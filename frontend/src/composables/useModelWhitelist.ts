@@ -163,16 +163,29 @@ const xaiModels = [
 // Kiro (Amazon Q Developer)
 // 对外一律带 kiro/ 前缀：上游模型就是 Claude 原名，不加前缀会被 composite
 // 分组的模型名推断判成 anthropic 而调度到 Claude 账号池。
-const kiroModels = [
+// 免费档与企业档的并集：实测免费号 9 个、企业号 19 个，单个账号只占其中一部分。
+// 权威列表由该账号的 ListAvailableModels 给出，这里只是候选池。
+export const kiroModels = [
   'kiro/auto',
-  'kiro/claude-sonnet-4.6',
   'kiro/claude-sonnet-4.5',
+  'kiro/claude-sonnet-4',
+  'kiro/claude-haiku-4.5',
+  'kiro/deepseek-3.2',
+  'kiro/minimax-m2.5',
+  'kiro/minimax-m2.1',
+  'kiro/glm-5',
+  'kiro/qwen3-coder-next',
+  // 仅企业档
+  'kiro/claude-sonnet-4.6',
   'kiro/claude-opus-4.6',
-  'kiro/claude-haiku-4.5'
+  'kiro/claude-opus-5',
+  'kiro/gpt-5.6-sol'
 ]
 
 // Cursor
-const cursorModels = [
+// -max 后缀不是上游模型名，是「选该模型并打开 MAX」的对外写法，
+// 见 backend/internal/pkg/cursor/models.go 的 MaxModeSuffix。
+export const cursorModels = [
   'cursor/default',
   'cursor/claude-fable-5',
   'cursor/claude-opus-4-8',
@@ -180,6 +193,7 @@ const cursorModels = [
   'cursor/gpt-5.6-sol',
   'cursor/gpt-5.6-terra',
   'cursor/grok-4.5',
+  'cursor/grok-4.5-max',
   'cursor/composer-2.5'
 ]
 
