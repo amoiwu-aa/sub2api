@@ -330,6 +330,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	dailyLimit := normalizeLimit(input.DailyLimitUSD)
 	weeklyLimit := normalizeLimit(input.WeeklyLimitUSD)
 	monthlyLimit := normalizeLimit(input.MonthlyLimitUSD)
+	if err := ensureGroupLimitsApplicable(subscriptionType, dailyLimit, weeklyLimit, monthlyLimit); err != nil {
+		return nil, err
+	}
 
 	// 图片价格：负数表示清除（使用默认价格），0 保留（表示免费）
 	imagePrice1K := normalizePrice(input.ImagePrice1K)
@@ -537,6 +540,26 @@ func normalizeLimit(limit *float64) *float64 {
 	return limit
 }
 
+// ensureGroupLimitsApplicable 拦住「给标准分组设限额」这种静默失效的配置。
+//
+// 日/周/月限额只有订阅模式会读：checkSubscriptionEligibility 拿订阅缓存里的
+// 用量与之比对，而标准模式走的是余额检查那一支，压根不碰这三个字段。此前这里
+// 照单全收，于是面板上设了、数据库里也存着，实际一次都不会拦——运维看到有值就
+// 以为封顶了，等发现时钱已经花出去。标准分组要控量应当配「用户 × 平台配额」。
+//
+// 只拒正数：nil 和 0 是存量里的无意义值，一并拒绝会让既有分组连改名都做不了。
+func ensureGroupLimitsApplicable(subscriptionType string, daily, weekly, monthly *float64) error {
+	if subscriptionType == SubscriptionTypeSubscription {
+		return nil
+	}
+	positive := func(v *float64) bool { return v != nil && *v > 0 }
+	if !positive(daily) && !positive(weekly) && !positive(monthly) {
+		return nil
+	}
+	return infraerrors.Newf(http.StatusBadRequest, "GROUP_LIMIT_REQUIRES_SUBSCRIPTION",
+		"日/周/月限额仅对订阅模式分组生效；标准分组请改用「用户 × 平台配额」")
+}
+
 // normalizePrice 将负数转换为 nil（表示使用默认价格），0 保留（表示免费）
 func normalizePrice(price *float64) *float64 {
 	if price == nil || *price < 0 {
@@ -651,6 +674,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	group.DailyLimitUSD = normalizeLimit(input.DailyLimitUSD)
 	group.WeeklyLimitUSD = normalizeLimit(input.WeeklyLimitUSD)
 	group.MonthlyLimitUSD = normalizeLimit(input.MonthlyLimitUSD)
+	if err := ensureGroupLimitsApplicable(group.SubscriptionType, group.DailyLimitUSD, group.WeeklyLimitUSD, group.MonthlyLimitUSD); err != nil {
+		return nil, err
+	}
 	// 图片生成计费配置：负数表示清除（使用默认价格）
 	if input.AllowImageGeneration != nil {
 		group.AllowImageGeneration = *input.AllowImageGeneration
