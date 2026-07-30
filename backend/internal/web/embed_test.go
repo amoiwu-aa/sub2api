@@ -678,6 +678,18 @@ func TestFrontendServer_Middleware(t *testing.T) {
 	})
 }
 
+// 新增网关路由前缀时必须同步加进这份放行名单，否则 SPA 中间件会先把请求接走，
+// 客户端拿到一坨 index.html 而不是 JSON——而路由注册测试是通不过这一层的，
+// 它挂的是裸 gin.Engine，没有前端中间件。
+func TestEmbeddedFrontendBypassesCursorIDERoutes(t *testing.T) {
+	for _, path := range []string{
+		"/cursor-ide/v1/chat/completions",
+		"/cursor-ide/v1/models",
+	} {
+		require.True(t, shouldBypassEmbeddedFrontend(path), "path=%s", path)
+	}
+}
+
 func TestEmbeddedFrontendBypassesBareVideoAPIRoutes(t *testing.T) {
 	for _, path := range []string{
 		"/videos/generations",
