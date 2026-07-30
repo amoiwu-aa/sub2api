@@ -15,6 +15,13 @@ type OpenAIRequest struct {
 	Model    string          `json:"model"`
 	Messages []OpenAIMessage `json:"messages"`
 	Stream   bool            `json:"stream,omitempty"`
+	// Tools 是客户端声明的可调用工具。它们会作为 MCP 工具注册给 Cursor，
+	// 模型调用后翻译成 tool_calls 交回客户端执行——opencode / Codex 这类
+	// agent 客户端全靠这条通路。
+	Tools []OpenAITool `json:"tools,omitempty"`
+	// ToolChoice 目前只区分「禁用工具」与其它：Cursor 侧没有强制调用某个
+	// 工具的开关，硬翻译过去只会给出一个做不到的承诺。
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
 	// ConversationID 让客户端可以显式延续同一段 Agent 会话。
 	ConversationID string `json:"conversation_id,omitempty"`
 	Metadata       *struct {
@@ -22,9 +29,104 @@ type OpenAIRequest struct {
 	} `json:"metadata,omitempty"`
 }
 
+// OpenAITool 是 tools[] 里的一项。只支持 type=function，其余类型忽略。
+type OpenAITool struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+	} `json:"function"`
+}
+
 type OpenAIMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content,omitempty"`
+	Name    string          `json:"name,omitempty"`
+	// ToolCalls 是助手上一轮发起的工具调用，重放时要原样带回给模型。
+	ToolCalls []OpenAIToolCall `json:"tool_calls,omitempty"`
+	// ToolCallID 出现在 role=tool 的消息上，标识这是哪次调用的结果。
+	ToolCallID string `json:"tool_call_id,omitempty"`
+}
+
+// OpenAIToolCall 是助手消息里的一次工具调用。
+type OpenAIToolCall struct {
+	Index    *int   `json:"index,omitempty"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// McpTools 把客户端声明的工具转成 MCP 工具定义。
+//
+// 丢掉没有名字的项：上游对空名工具的反应是整份声明失效，
+// 一个坏条目会连累其余所有工具。
+func (r *OpenAIRequest) McpTools() []McpTool {
+	if r == nil || len(r.Tools) == 0 || r.toolsDisabled() {
+		return nil
+	}
+	tools := make([]McpTool, 0, len(r.Tools))
+	for _, tool := range r.Tools {
+		if tool.Type != "" && tool.Type != "function" {
+			continue
+		}
+		name := strings.TrimSpace(tool.Function.Name)
+		if name == "" {
+			continue
+		}
+		tools = append(tools, McpTool{
+			Name:        name,
+			Description: tool.Function.Description,
+			InputSchema: tool.Function.Parameters,
+		})
+	}
+	return tools
+}
+
+// toolsDisabled 识别 tool_choice:"none"。客户端用它表示「这一轮别调工具」，
+// 照常声明的话模型多半还是会调，最后卡在一个客户端不打算执行的调用上。
+func (r *OpenAIRequest) toolsDisabled() bool {
+	trimmed := strings.TrimSpace(string(r.ToolChoice))
+	return trimmed == `"none"`
+}
+
+// Conversation 把请求归一化成与协议无关的对话表示。
+func (r *OpenAIRequest) Conversation() *Conversation {
+	if r == nil {
+		return &Conversation{}
+	}
+	turns := make([]Turn, 0, len(r.Messages))
+	for i := range r.Messages {
+		turns = append(turns, openAIMessageToTurn(r.Messages[i]))
+	}
+	return &Conversation{Turns: turns, Tools: r.McpTools()}
+}
+
+func openAIMessageToTurn(message OpenAIMessage) Turn {
+	turn := Turn{Text: messageText(message.Content)}
+	switch strings.ToLower(strings.TrimSpace(message.Role)) {
+	case "system", "developer":
+		turn.Role = RoleSystem
+	case "assistant":
+		turn.Role = RoleAssistant
+		for _, call := range message.ToolCalls {
+			turn.ToolCalls = append(turn.ToolCalls, ToolCall{
+				ID:        call.ID,
+				Name:      call.Function.Name,
+				Arguments: call.Function.Arguments,
+			})
+		}
+	case "tool", "function":
+		turn.Role = RoleTool
+		turn.ToolCallID = message.ToolCallID
+		turn.ToolName = message.Name
+	default:
+		turn.Role = RoleUser
+	}
+	return turn
 }
 
 // ResolveConversationID 取客户端指定的会话 id（顶层优先于 metadata）。
@@ -116,9 +218,10 @@ type OpenAIChunkChoice struct {
 }
 
 type OpenAIDelta struct {
-	Role             string `json:"role,omitempty"`
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string           `json:"role,omitempty"`
+	Content          string           `json:"content,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
 }
 
 // OpenAIResponse 是非流式 chat.completion 响应。
@@ -138,9 +241,10 @@ type OpenAIChoice struct {
 }
 
 type OpenAIChoiceMessage struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string           `json:"role"`
+	Content          string           `json:"content"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
 }
 
 // OpenAIUsage 的数值是本地估算的：Cursor 上游不返回 token 用量。
@@ -182,6 +286,58 @@ func NewOpenAIRoleChunk(id, model string, created int64) OpenAIChunk {
 		Model:   model,
 		Choices: []OpenAIChunkChoice{{Index: 0, Delta: OpenAIDelta{Role: "assistant"}}},
 	}
+}
+
+// FinishReasonToolCalls 是「这一轮以工具调用收尾」的标记。
+// 客户端见到它才知道该去执行工具、再带着结果发起下一次请求。
+const FinishReasonToolCalls = "tool_calls"
+
+// NewOpenAIToolCallID 把上游的调用标识规整成 OpenAI 风格的 tool_call_id。
+//
+// 上游给的是裸 uuid，而不少客户端（以及一些严格的 SDK）假定 id 形如 call_xxx。
+// 加个前缀既不影响我们自己的对账，也避开了那类校验。
+func NewOpenAIToolCallID(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "call_unknown"
+	}
+	if strings.HasPrefix(trimmed, "call_") {
+		return trimmed
+	}
+	return "call_" + strings.ReplaceAll(trimmed, "-", "")
+}
+
+// NewOpenAIToolCallChunk 构造一条工具调用增量。
+//
+// 上游是一次性给出完整调用的，没有逐字符的 arguments 流，所以这里一帧发完。
+// index 必须写：客户端按它把同一轮里的多个调用拼装起来。
+func NewOpenAIToolCallChunk(id, model string, created int64, index int, call ToolCall) OpenAIChunk {
+	toolCall := OpenAIToolCall{Index: &index, ID: call.ID, Type: "function"}
+	toolCall.Function.Name = call.Name
+	toolCall.Function.Arguments = defaultToolArguments(call.Arguments)
+	return OpenAIChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []OpenAIChunkChoice{{Index: 0, Delta: OpenAIDelta{ToolCalls: []OpenAIToolCall{toolCall}}}},
+	}
+}
+
+// NewOpenAIToolCalls 把一轮里的全部调用转成非流式响应用的 tool_calls。
+func NewOpenAIToolCalls(calls []ToolCall) []OpenAIToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]OpenAIToolCall, 0, len(calls))
+	for i, call := range calls {
+		index := i
+		toolCall := OpenAIToolCall{Index: &index, ID: call.ID, Type: "function"}
+		toolCall.Function.Name = call.Name
+		toolCall.Function.Arguments = defaultToolArguments(call.Arguments)
+		out = append(out, toolCall)
+	}
+	return out
 }
 
 // NewOpenAIFinalChunk 构造收尾的空增量（带 finish_reason）。

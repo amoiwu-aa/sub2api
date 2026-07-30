@@ -79,7 +79,8 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", "messages is required")
 	}
 
-	prompt := cursor.MessagesToAgentText(req.Messages)
+	conversation := req.Conversation()
+	prompt := conversation.Render()
 	if strings.TrimSpace(prompt) == "" {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", "messages contain no text content")
 	}
@@ -107,6 +108,7 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 		ModelID:        selection.ModelID,
 		ModelParams:    selection.Params,
 		MaxMode:        selection.MaxMode,
+		Tools:          conversation.Tools,
 	}
 
 	if req.Stream {
@@ -232,8 +234,9 @@ func (s *CursorGatewayService) forwardStreaming(
 		return nil
 	}
 
+	toolCallIndex := 0
 	result, err := cursor.RunAgentTurn(ctx, options, input, func(delta cursor.AgentDelta) error {
-		if firstTokenMs == nil && (delta.Text != "" || delta.Thinking != "") {
+		if firstTokenMs == nil && (delta.Text != "" || delta.Thinking != "" || delta.ToolCall != nil) {
 			elapsed := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &elapsed
 		}
@@ -241,6 +244,14 @@ func (s *CursorGatewayService) forwardStreaming(
 		// 会一直停在「思考中」，直到（可能永远等不到的）首个正文 token。
 		if delta.Thinking != "" {
 			if err := writeChunk(cursor.NewOpenAIReasoningChunk(responseID, publicModel, created, delta.Thinking)); err != nil {
+				clientGone = true
+				return err
+			}
+		}
+		if delta.ToolCall != nil {
+			chunk := cursor.NewOpenAIToolCallChunk(responseID, publicModel, created, toolCallIndex, *delta.ToolCall)
+			toolCallIndex++
+			if err := writeChunk(chunk); err != nil {
 				clientGone = true
 				return err
 			}
@@ -262,7 +273,13 @@ func (s *CursorGatewayService) forwardStreaming(
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
 
-	if err := writeChunk(cursor.NewOpenAIFinalChunk(responseID, publicModel, created, "stop")); err != nil {
+	// finish_reason 必须如实反映这一轮是不是停在工具调用上：报成 stop
+	// 会让客户端以为任务已经做完，工具永远不会被执行。
+	finishReason := "stop"
+	if result.EndedWithToolCalls() {
+		finishReason = cursor.FinishReasonToolCalls
+	}
+	if err := writeChunk(cursor.NewOpenAIFinalChunk(responseID, publicModel, created, finishReason)); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}
 	if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err == nil {
@@ -288,6 +305,10 @@ func (s *CursorGatewayService) forwardBuffered(
 
 	promptTokens := cursor.EstimateTokens(prompt)
 	completionTokens := cursor.EstimateTokens(result.Text)
+	finishReason := "stop"
+	if result.EndedWithToolCalls() {
+		finishReason = cursor.FinishReasonToolCalls
+	}
 	c.JSON(http.StatusOK, cursor.OpenAIResponse{
 		ID:      "chatcmpl-" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 		Object:  "chat.completion",
@@ -299,8 +320,9 @@ func (s *CursorGatewayService) forwardBuffered(
 				Role:             "assistant",
 				Content:          result.Text,
 				ReasoningContent: result.Thinking,
+				ToolCalls:        cursor.NewOpenAIToolCalls(result.ToolCalls),
 			},
-			FinishReason: "stop",
+			FinishReason: finishReason,
 		}},
 		Usage: cursor.OpenAIUsage{
 			PromptTokens:     promptTokens,

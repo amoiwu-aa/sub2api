@@ -825,6 +825,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			case account.Platform == service.PlatformKiro:
 				// Kiro 走自有上游桥（Amazon Q），不是某个 Anthropic 兼容端点。
 				result, err = h.kiroGatewayService.Forward(requestCtx, c, account, attemptBody)
+			case account.Platform == service.PlatformCursor:
+				// Cursor 同理，走 AgentService/Run 的 HTTP/2 双向流。
+				result, err = h.cursorGatewayService.Forward(requestCtx, c, account, attemptBody)
 			default:
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}

@@ -39,6 +39,10 @@ var (
 	// execStallTimeout 用在一次 exec 没能回执之后。此时上游在等一个永远不会到来
 	// 的回复，没必要再等满 streamStallTimeout。
 	execStallTimeout = 15 * time.Second
+	// toolCallGrace 是收到首个工具调用后再等一小会儿，好把同一轮里并行发出的
+	// 其余调用一起收齐。等完就主动关流：上游此刻在等一个 exec 回执，而无状态桥
+	// 不打算给——工具由客户端执行，结果走下一次请求重放回来。
+	toolCallGrace = 500 * time.Millisecond
 )
 
 // AgentOptions 是一次 Agent 调用的传输与身份配置。
@@ -60,14 +64,18 @@ type AgentTurnInput struct {
 	ModelID           string
 	ModelParams       []ModelParam
 	MaxMode           *bool
+	// Tools 是客户端声明的工具，注册为 MCP 工具供模型调用。
+	Tools []McpTool
 	// ProjectName 影响 RequestContext 里构造出来的项目路径。
 	ProjectName string
 }
 
-// AgentDelta 是一次增量输出。Text 与 Thinking 同一时刻只会有一个非空。
+// AgentDelta 是一次增量输出。Text / Thinking / ToolCall 同一时刻只有一个有值。
 type AgentDelta struct {
 	Text     string
 	Thinking string
+	// ToolCall 非空表示模型要调用一个客户端声明的工具。
+	ToolCall *ToolCall
 }
 
 // AgentTurnResult 是一轮对话的结果。
@@ -89,12 +97,23 @@ type AgentTurnResult struct {
 	KVSeen int
 	// Stalled 为 true 说明这一轮是看门狗超时中止的，不是上游正常结束。
 	Stalled bool
+	// ToolCalls 是模型这一轮要客户端执行的工具调用。非空时这一轮以
+	// finish_reason=tool_calls 收尾，结果由客户端在下一次请求里带回来。
+	ToolCalls []ToolCall
+}
+
+// EndedWithToolCalls 报告这一轮是否以工具调用收尾。
+func (r *AgentTurnResult) EndedWithToolCalls() bool {
+	return r != nil && len(r.ToolCalls) > 0
 }
 
 // Incomplete 报告这一轮是否因挂死或关键未处理事件而不完整。
 // 仅看门狗/未回执类问题；干净的 turn_ended 收尾不算。
+//
+// 以工具调用收尾也算完整：那是双方约好的暂停点，不是故障。上游确实还开着流
+// 在等一个我们不打算给的 exec 回执，但这一轮对客户端而言已经交付完毕。
 func (r *AgentTurnResult) Incomplete() bool {
-	if r == nil {
+	if r == nil || r.EndedWithToolCalls() {
 		return false
 	}
 	return r.Stalled || r.ExecUnanswered > 0 || r.QueryIgnored > 0
@@ -160,6 +179,7 @@ func RunAgentTurn(
 		ModelID:           input.ModelID,
 		ModelParams:       input.ModelParams,
 		MaxMode:           input.MaxMode,
+		Tools:             input.Tools,
 	})
 	if err != nil {
 		return nil, err
@@ -324,6 +344,10 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 	// 在 Next() 上。看门狗到点关掉 body 解除阻塞，把「客户端挂死」降级成
 	// 「这一轮输出不完整」——后者调用方已经能正常收尾。
 	var stalled atomic.Bool
+	// endingOnToolCall 让读循环把「因工具调用而主动关流」与「被看门狗掐断」
+	// 区分开：前者是正常收尾，后者要标成不完整。
+	var endingOnToolCall atomic.Bool
+	var toolCallTimer *time.Timer
 	stallTimer := time.AfterFunc(streamStallTimeout, func() {
 		stalled.Store(true)
 		s.close()
@@ -332,6 +356,9 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 		stallTimer.Stop()
 		if graceTimer != nil {
 			graceTimer.Stop()
+		}
+		if toolCallTimer != nil {
+			toolCallTimer.Stop()
 		}
 	}()
 
@@ -346,8 +373,8 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 		envelope, err := s.reader.Next()
 		if err != nil {
 			// turn_ended 后宽限期到点会关掉 body，读出的错误就是预期的收尾信号；
-			// 看门狗关 body 同理，只是这一轮要标成不完整。
-			if errors.Is(err, io.EOF) || result.TurnEnded {
+			// 工具调用后的主动关流同理。看门狗关 body 也走这里，只是要标成不完整。
+			if errors.Is(err, io.EOF) || result.TurnEnded || endingOnToolCall.Load() {
 				break
 			}
 			if stalled.Load() {
@@ -386,6 +413,28 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 				if err := emit(AgentDelta{Thinking: message.ThinkingDelta}); err != nil {
 					return nil, err
 				}
+			}
+		case KindToolCall:
+			// 客户端声明的工具：不在流上回执，交回客户端执行。
+			// 收齐这一轮的并行调用后主动关流，把控制权还给调用方。
+			if message.ToolCall == nil {
+				continue
+			}
+			stallTimer.Stop()
+			call := ToolCall{
+				ID:        NewOpenAIToolCallID(message.ToolCall.CallID),
+				Name:      message.ToolCall.Name,
+				Arguments: string(message.ToolCall.Arguments),
+			}
+			result.ToolCalls = append(result.ToolCalls, call)
+			if err := emit(AgentDelta{ToolCall: &call}); err != nil {
+				return nil, err
+			}
+			if toolCallTimer == nil {
+				endingOnToolCall.Store(true)
+				toolCallTimer = time.AfterFunc(toolCallGrace, s.close)
+			} else {
+				toolCallTimer.Reset(toolCallGrace)
 			}
 		case KindExec:
 			// 不回执上游会一直等，整轮对话就挂在那里。

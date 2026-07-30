@@ -175,6 +175,9 @@ type RunRequestInput struct {
 	ModelID           string
 	ModelParams       []ModelParam
 	MaxMode           *bool
+	// Tools 是要声明给模型的客户端工具，走 MCP 通道。
+	// 为空时 field 4 编成与纯文本请求完全一致的占位字节。
+	Tools []McpTool
 	// MessageID 留空时自动生成；测试里可固定以便对拍。
 	MessageID string
 }
@@ -260,7 +263,9 @@ func EncodeRunRequest(input RunRequestInput) ([]byte, error) {
 	runRequest := concat(
 		EncodeBytesField(1, input.ConversationState),
 		EncodeBytesField(2, EncodeBytesField(1, userMessageAction)),
-		EncodeBytesField(4, nil),
+		// field 4 是 McpTools。空列表编成零字节，与不带工具时的占位符
+		// EncodeBytesField(4, nil) 逐字节相同，所以纯对话请求的指纹不变。
+		EncodeBytesField(mcpToolsField, EncodeMcpTools(input.Tools)),
 		EncodeStringField(5, input.ConversationID),
 		EncodeBytesField(9, requestedModel),
 		EncodeBoolField(10, false),

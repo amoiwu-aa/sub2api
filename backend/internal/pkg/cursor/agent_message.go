@@ -13,11 +13,15 @@ const (
 	KindThinkingDelta ServerMessageKind = "thinking_delta"
 	KindTurnEnded     ServerMessageKind = "turn_ended"
 	KindExec          ServerMessageKind = "exec"
-	KindCheckpoint    ServerMessageKind = "conversation_checkpoint"
-	KindKV            ServerMessageKind = "kv"
-	KindQuery         ServerMessageKind = "interaction_query"
-	KindHeartbeat     ServerMessageKind = "heartbeat"
-	KindOther         ServerMessageKind = "other"
+	// KindToolCall 是模型对客户端声明的 MCP 工具发起的调用。
+	// 与 KindExec 的区别是它不需要在流上回执：调用方把它翻译成客户端协议的
+	// tool_calls 后就结束这一轮，工具结果由客户端在下一次请求里带回来。
+	KindToolCall   ServerMessageKind = "tool_call"
+	KindCheckpoint ServerMessageKind = "conversation_checkpoint"
+	KindKV         ServerMessageKind = "kv"
+	KindQuery      ServerMessageKind = "interaction_query"
+	KindHeartbeat  ServerMessageKind = "heartbeat"
+	KindOther      ServerMessageKind = "other"
 )
 
 // ServerMessage 是解析后的一条服务端消息。
@@ -29,6 +33,8 @@ type ServerMessage struct {
 
 	// Exec 是服务端要求客户端执行的工具调用。
 	Exec *ExecRequest
+	// ToolCall 是对客户端声明的 MCP 工具的调用。
+	ToolCall *McpToolCall
 	// ConversationState 是 checkpoint 帧带回的会话状态，下一轮要原样回传。
 	ConversationState []byte
 }
@@ -86,9 +92,18 @@ func ParseServerMessage(payload []byte) (ServerMessage, error) {
 			if field.WireType != wireBytes {
 				continue
 			}
-			exec, err := parseExecServerMessage(field.Bytes)
+			exec, toolCall, err := parseExecServerMessage(field.Bytes)
 			if err != nil {
 				return message, err
+			}
+			// MCP 工具调用优先：那是客户端自己声明的工具，要交回客户端执行，
+			// 绝不能落进 exec 的 stub 回执分支——回了 stub 等于告诉模型
+			// 「你的工具坏了」，这一轮就废了。
+			if toolCall != nil {
+				message.Kind = KindToolCall
+				message.ToolCall = toolCall
+				message.Exec = exec
+				continue
 			}
 			message.Kind = KindExec
 			message.Exec = exec
@@ -141,12 +156,13 @@ func applyInteractionUpdate(message *ServerMessage, updates []Field) {
 	}
 }
 
-func parseExecServerMessage(payload []byte) (*ExecRequest, error) {
+func parseExecServerMessage(payload []byte) (*ExecRequest, *McpToolCall, error) {
 	fields, err := ReadFields(payload)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	exec := &ExecRequest{}
+	var toolCall *McpToolCall
 	unknownArgField := 0
 	for _, field := range fields {
 		switch {
@@ -154,6 +170,12 @@ func parseExecServerMessage(payload []byte) (*ExecRequest, error) {
 			exec.ID = field.Varint
 		case field.Number == 15 && field.WireType == wireBytes:
 			exec.ExecID = string(field.Bytes)
+		case field.Number == mcpArgsField && field.WireType == wireBytes:
+			// 解析失败时退回普通 exec：宁可回一个 stub 把这一轮收掉，
+			// 也好过因为一条解不开的帧让整条流报错。
+			if parsed, parseErr := parseMcpArgs(field.Bytes); parseErr == nil && parsed != nil {
+				toolCall = parsed
+			}
 		default:
 			if kind, ok := execArgFields[field.Number]; ok && exec.ArgFieldNum == 0 {
 				exec.ArgFieldNum = field.Number
@@ -169,7 +191,12 @@ func parseExecServerMessage(payload []byte) (*ExecRequest, error) {
 	if exec.ArgFieldNum == 0 {
 		exec.ArgFieldNum = unknownArgField
 	}
-	return exec, nil
+	if toolCall != nil && toolCall.CallID == "" {
+		// 上游没有单独给 MCP 调用发 id，用 exec id 顶上：
+		// 客户端需要一个稳定的 tool_call_id 才能把结果对回来。
+		toolCall.CallID = exec.ExecID
+	}
+	return exec, toolCall, nil
 }
 
 // EncodeExecClientMessage 编码一条 exec 回执（AgentClientMessage.field 2）。

@@ -1,0 +1,281 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+// Anthropic Messages 入口。Claude Code 只说这套协议。
+//
+// 与 ForwardAsChatCompletions 共用同一条内核：请求归一化成 cursor.Conversation，
+// 客户端工具注册为 MCP 工具，模型的工具调用翻译成 tool_use 块交回客户端执行。
+// 差别只在出站的编码形态。
+
+// Forward 执行一次 Agent 调用并按 Anthropic Messages 协议回写。
+func (s *CursorGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+	writerSizeBefore := 0
+	if c != nil {
+		writerSizeBefore = c.Writer.Size()
+	}
+	result, err := s.forwardMessagesOnce(ctx, c, account, body)
+	if shouldRetryNativeBridgeAuth(ctx, c, writerSizeBefore, err, func(retryCtx context.Context) error {
+		return s.tokenProvider.InvalidateToken(retryCtx, account)
+	}, "cursor_gateway_anthropic", accountIDOrZero(account)) {
+		return s.forwardMessagesOnce(markNativeBridgeAuthRetried(ctx), c, account, body)
+	}
+	return result, err
+}
+
+func (s *CursorGatewayService) forwardMessagesOnce(
+	ctx context.Context, c *gin.Context, account *Account, body []byte,
+) (*ForwardResult, error) {
+	startTime := time.Now()
+
+	var req cursor.AnthropicRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request body")
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "model is required")
+	}
+	if len(req.Messages) == 0 {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "messages is required")
+	}
+
+	conversation := req.Conversation()
+	prompt := conversation.Render()
+	if strings.TrimSpace(prompt) == "" {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error",
+			"messages contain no text content")
+	}
+
+	publicModel := req.Model
+	selection := cursor.ResolveModel(publicModel)
+	upstreamModel := selection.ModelID
+
+	options, err := s.agentOptions(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+
+	conversationID := req.ResolveConversationID()
+	if conversationID == "" {
+		conversationID = uuid.NewString()
+	}
+
+	agentCtx, cancel := context.WithTimeout(ctx, cursorAgentTimeout)
+	defer cancel()
+
+	input := cursor.AgentTurnInput{
+		Text:           prompt,
+		ConversationID: conversationID,
+		ModelID:        selection.ModelID,
+		ModelParams:    selection.Params,
+		MaxMode:        selection.MaxMode,
+		Tools:          conversation.Tools,
+	}
+
+	if req.Stream {
+		return s.forwardMessagesStreaming(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
+	}
+	return s.forwardMessagesBuffered(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
+}
+
+// anthropicStreamWriter 维护 Messages SSE 的块索引与开合状态。
+//
+// Anthropic 的流是有状态的：每个内容块必须成对出现 content_block_start /
+// content_block_stop，索引连续。文本与 tool_use 交错时最容易出错，
+// 所以把这套记账收在一个地方。
+type anthropicStreamWriter struct {
+	c              *gin.Context
+	headersWritten bool
+	textOpen       bool
+	blockIndex     int
+	clientGone     bool
+}
+
+func (w *anthropicStreamWriter) write(event cursor.AnthropicEvent) error {
+	if !w.headersWritten {
+		w.c.Header("Content-Type", "text/event-stream")
+		w.c.Header("Cache-Control", "no-cache")
+		w.c.Header("Connection", "keep-alive")
+		w.c.Header("X-Accel-Buffering", "no")
+		w.c.Status(http.StatusOK)
+		w.headersWritten = true
+	}
+	payload, err := json.Marshal(event.Data)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w.c.Writer, "event: %s\ndata: %s\n\n", event.Event, payload); err != nil {
+		w.clientGone = true
+		return err
+	}
+	w.c.Writer.Flush()
+	return nil
+}
+
+func (w *anthropicStreamWriter) openText() error {
+	if w.textOpen {
+		return nil
+	}
+	if err := w.write(cursor.NewAnthropicTextBlockStart(w.blockIndex)); err != nil {
+		return err
+	}
+	w.textOpen = true
+	return nil
+}
+
+func (w *anthropicStreamWriter) closeText() error {
+	if !w.textOpen {
+		return nil
+	}
+	if err := w.write(cursor.NewAnthropicBlockStop(w.blockIndex)); err != nil {
+		return err
+	}
+	w.textOpen = false
+	w.blockIndex++
+	return nil
+}
+
+func (w *anthropicStreamWriter) writeText(text string) error {
+	if err := w.openText(); err != nil {
+		return err
+	}
+	return w.write(cursor.NewAnthropicTextDelta(w.blockIndex, text))
+}
+
+func (w *anthropicStreamWriter) writeToolUse(call cursor.ToolCall) error {
+	if err := w.closeText(); err != nil {
+		return err
+	}
+	if err := w.write(cursor.NewAnthropicToolUseBlockStart(w.blockIndex, call)); err != nil {
+		return err
+	}
+	if err := w.write(cursor.NewAnthropicToolUseDelta(w.blockIndex, call.Arguments)); err != nil {
+		return err
+	}
+	if err := w.write(cursor.NewAnthropicBlockStop(w.blockIndex)); err != nil {
+		return err
+	}
+	w.blockIndex++
+	return nil
+}
+
+func (s *CursorGatewayService) forwardMessagesStreaming(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	options *cursor.AgentOptions,
+	input cursor.AgentTurnInput,
+	publicModel, upstreamModel, prompt string,
+	startTime time.Time,
+) (*ForwardResult, error) {
+	messageID := "msg_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	writer := &anthropicStreamWriter{c: c}
+	promptTokens := cursor.EstimateTokens(prompt)
+
+	if err := writer.write(cursor.NewAnthropicMessageStart(messageID, publicModel, promptTokens)); err != nil {
+		return nil, s.upstreamError(ctx, c, account, publicModel, err, writer.headersWritten)
+	}
+
+	var firstTokenMs *int
+	result, err := cursor.RunAgentTurn(ctx, options, input, func(delta cursor.AgentDelta) error {
+		if firstTokenMs == nil && (delta.Text != "" || delta.Thinking != "" || delta.ToolCall != nil) {
+			elapsed := int(time.Since(startTime).Milliseconds())
+			firstTokenMs = &elapsed
+		}
+		// thinking 不外发（见 cursor.NewAnthropicContent 的说明），但思考期可能
+		// 长达数十秒，中间代理会把静默的连接掐掉——用 ping 顶住。
+		if delta.Thinking != "" {
+			return writer.write(cursor.NewAnthropicPing())
+		}
+		if delta.ToolCall != nil {
+			return writer.writeToolUse(*delta.ToolCall)
+		}
+		if delta.Text == "" {
+			return nil
+		}
+		return writer.writeText(delta.Text)
+	})
+	if err != nil {
+		if writer.clientGone {
+			return s.buildResult(prompt, "", publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
+		}
+		return nil, s.upstreamError(ctx, c, account, publicModel, err, writer.headersWritten)
+	}
+	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+
+	stopReason := "end_turn"
+	if result.EndedWithToolCalls() {
+		stopReason = cursor.StopReasonToolUse
+	}
+	// 一个字都没产出时也要给一个空文本块：客户端普遍假设 content 非空。
+	if !writer.textOpen && writer.blockIndex == 0 {
+		if err := writer.openText(); err != nil {
+			return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
+		}
+	}
+	if err := writer.closeText(); err != nil {
+		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
+	}
+	if err := writer.write(cursor.NewAnthropicMessageDelta(stopReason, cursor.EstimateTokens(result.Text))); err != nil {
+		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
+	}
+	if err := writer.write(cursor.NewAnthropicMessageStop()); err != nil {
+		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
+	}
+	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false), nil
+}
+
+func (s *CursorGatewayService) forwardMessagesBuffered(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	options *cursor.AgentOptions,
+	input cursor.AgentTurnInput,
+	publicModel, upstreamModel, prompt string,
+	startTime time.Time,
+) (*ForwardResult, error) {
+	result, err := cursor.RunAgentTurn(ctx, options, input, nil)
+	if err != nil {
+		return nil, s.upstreamError(ctx, c, account, publicModel, err, false)
+	}
+	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+
+	stopReason := "end_turn"
+	if result.EndedWithToolCalls() {
+		stopReason = cursor.StopReasonToolUse
+	}
+	c.JSON(http.StatusOK, cursor.AnthropicResponse{
+		ID:         "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		Type:       "message",
+		Role:       "assistant",
+		Model:      publicModel,
+		Content:    cursor.NewAnthropicContent(result.Text, result.ToolCalls),
+		StopReason: stopReason,
+		Usage: cursor.AnthropicUsage{
+			InputTokens:  cursor.EstimateTokens(prompt),
+			OutputTokens: cursor.EstimateTokens(result.Text),
+		},
+	})
+	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false), nil
+}
+
+func (s *CursorGatewayService) writeAnthropicError(c *gin.Context, status int, errType, message string) error {
+	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+	c.JSON(status, gin.H{
+		"type":  "error",
+		"error": gin.H{"type": errType, "message": message},
+	})
+	return errors.New(message)
+}
