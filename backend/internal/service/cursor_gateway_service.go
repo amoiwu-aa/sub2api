@@ -501,6 +501,7 @@ func (s *CursorGatewayService) upstreamError(
 	}
 
 	body := cursorGatewayErrorBody(status, message)
+	s.recordUpstreamOpsError(c, account, status, message, connectErr)
 	// 能否 failover 与账号健康度是两件事：即便流已经开出去无法重试，
 	// 429/5xx/401 仍然要影响这个账号下一次能不能被选中。
 	s.reportUpstreamError(ctx, account, status, body, model)
@@ -511,6 +512,47 @@ func (s *CursorGatewayService) upstreamError(
 		return errors.New(message)
 	}
 	return &UpstreamFailoverError{StatusCode: status, ResponseBody: body}
+}
+
+// recordUpstreamOpsError 把上游拒绝的真实原因写进 ops 上下文。
+//
+// 必须单独记一份，不能只靠返回给客户端的错误体：failover 在所有账号都失败之后
+// 会用自己的 "All available accounts exhausted" 覆盖响应，ops_error_logs 的
+// error_message 也跟着变成这句话。不写 ops 的上游字段，面板上就永远看不到
+// 「账单未支付」「24 小时内设备过多」这种只有上游知道、而且必须由人处理的原因。
+func (s *CursorGatewayService) recordUpstreamOpsError(
+	c *gin.Context,
+	account *Account,
+	status int,
+	message string,
+	connectErr *cursor.ConnectError,
+) {
+	if c == nil {
+		return
+	}
+	detail, reason := "", ""
+	if connectErr != nil {
+		detail = connectErr.Description()
+		reason = connectErr.UpstreamCode()
+	}
+	accountName := ""
+	if account != nil {
+		accountName = account.Name
+	}
+	SetOpsUpstreamError(c, status, message, detail)
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           PlatformCursor,
+		AccountID:          accountIDOrZero(account),
+		AccountName:        accountName,
+		UpstreamStatusCode: status,
+		Kind:               "upstream_rejected",
+		Stage:              string(GatewayFailureStageInference),
+		Scope:              string(GatewayFailureScopeAccount),
+		Reason:             reason,
+		Message:            message,
+		Detail:             detail,
+		UpstreamURL:        "https://" + cursor.AgentHost + cursorAgentPathHint(),
+	})
 }
 
 func (s *CursorGatewayService) writeError(c *gin.Context, status int, errType, message string) error {

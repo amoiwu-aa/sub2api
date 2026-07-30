@@ -57,6 +57,18 @@ func TestCursorGatewayUpstreamErrorSurfacesUpstreamReason(t *testing.T) {
 			require.Contains(t, body, connectErr.UpstreamCode())
 			// 那句什么也没说的通用文案不该再出现，否则真实原因等于没透出来。
 			require.NotContains(t, body, "Cursor agent stream ended with an error")
+
+			// failover 用尽账号后会覆盖客户端响应，ops 上下文是真实原因唯一活得下来的地方。
+			require.Contains(t, c.GetString(OpsUpstreamErrorMessageKey), tc.want)
+			raw, ok := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, ok, "必须留下一条 ops 上游错误事件")
+			events, ok := raw.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
+			require.Equal(t, PlatformCursor, events[0].Platform)
+			require.Equal(t, http.StatusTooManyRequests, events[0].UpstreamStatusCode)
+			require.Equal(t, connectErr.UpstreamCode(), events[0].Reason)
+			require.Contains(t, events[0].Detail, tc.want)
 		})
 	}
 }
