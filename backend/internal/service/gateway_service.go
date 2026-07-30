@@ -804,6 +804,24 @@ func NewGatewayService(
 
 // GenerateSessionHash 从预解析请求计算粘性会话 hash
 func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
+	return s.generateSessionHash(parsed, false)
+}
+
+// GenerateStablePrefixSessionHash 与 GenerateSessionHash 的唯一区别是内容兜底那一层
+// 只取「跨轮不变」的部分：system 加第一条用户消息，不含后续对话。
+//
+// 给 cursor / kiro 这类原生桥用。它们的上游没有服务端会话，每轮都要重放整段历史，
+// 而 prompt 缓存是按账号隔离的——用全量消息算 hash 会让每追加一轮就换一个粘性 key，
+// 于是同一段对话每轮都可能落到不同账号上，每次都是冷缓存。省下来的那点负载均衡
+// 远不如缓存命中值钱。
+//
+// 代价是「同一租户 + 同一开场白 + 同一 system」的两段独立对话会共用一个账号。
+// 这只影响调度，不影响正确性：上游无状态，历史完整写在每一次请求体里。
+func (s *GatewayService) GenerateStablePrefixSessionHash(parsed *ParsedRequest) string {
+	return s.generateSessionHash(parsed, true)
+}
+
+func (s *GatewayService) generateSessionHash(parsed *ParsedRequest, stablePrefixOnly bool) string {
 	if parsed == nil {
 		return ""
 	}
@@ -852,14 +870,22 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		_, _ = combined.WriteString(systemText)
 	}
 	contentStart := combined.Len()
-	appendMessageTextsFromRaw(&combined, parsed.MessagesRaw())
+	if stablePrefixOnly {
+		appendFirstUserMessageTextFromRaw(&combined, parsed.MessagesRaw())
+	} else {
+		appendMessageTextsFromRaw(&combined, parsed.MessagesRaw())
+	}
 	if combined.Len() == contentStart {
 		appendResponsesSessionAnchorFromRaw(&combined, parsed.InputRaw())
 	}
 	if combined.Len() > 0 {
+		source := "message_content_fallback"
+		if stablePrefixOnly {
+			source = "stable_prefix_fallback"
+		}
 		hash := s.hashContent(combined.String())
 		slog.Info("sticky.hash_source",
-			"source", "message_content_fallback",
+			"source", source,
 			"hash", hash,
 			"content_len", combined.Len(),
 		)
@@ -1009,6 +1035,40 @@ func appendMessageTextsFromRaw(builder *strings.Builder, raw []byte) {
 				}
 				return true
 			})
+		}
+		return true
+	})
+}
+
+// appendFirstUserMessageTextFromRaw 只写入第一条 user 消息的正文。
+//
+// 取第一条而不是最后一条：它是整段对话里唯一不会随轮次改变的锚点。role 缺失时
+// 按 user 处理——OpenAI 与 Anthropic 都要求带 role，缺了多半是客户端不规范，
+// 当成开场白比整个跳过更接近本意。
+func appendFirstUserMessageTextFromRaw(builder *strings.Builder, raw []byte) {
+	if builder == nil || len(raw) == 0 {
+		return
+	}
+	messages := parseRawJSONView(raw)
+	if !messages.IsArray() {
+		return
+	}
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		if role := msg.Get("role").String(); role != "" && role != "user" {
+			return true
+		}
+		if content := msg.Get("content"); content.Exists() {
+			_, _ = builder.WriteString(extractTextFromContentRaw(content))
+			return false
+		}
+		if parts := msg.Get("parts"); parts.IsArray() {
+			parts.ForEach(func(_, part gjson.Result) bool {
+				if text := part.Get("text").String(); text != "" {
+					_, _ = builder.WriteString(text)
+				}
+				return true
+			})
+			return false
 		}
 		return true
 	})

@@ -76,6 +76,104 @@ func geminiMsg(role string, texts ...string) map[string]any {
 func TestGenerateSessionHash_NilParsedRequest(t *testing.T) {
 	svc := &GatewayService{}
 	require.Empty(t, svc.GenerateSessionHash(nil))
+	require.Empty(t, svc.GenerateStablePrefixSessionHash(nil))
+}
+
+// cursor / kiro 的粘性 key 必须跨轮不变，否则每追加一轮就换账号、每次都撞冷缓存。
+// 这是整个改动的目的，也是最容易被后续重构悄悄改坏的一条。
+func TestGenerateStablePrefixSessionHash_StableAcrossGrowingConversation(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "opencode/1.0", APIKeyID: 7}
+	messages := []any{
+		msg("user", "帮我看下这个 Go 项目的结构"),
+		msg("assistant", "好的，我先列一下目录。"),
+		msg("user", "再看看 internal/service 下面"),
+		msg("assistant", "这个包里有 200 多个文件。"),
+		msg("user", "找一下调度相关的"),
+	}
+
+	var first string
+	for round := 1; round <= len(messages); round += 2 {
+		parsed := mustParseSessionHashRequest(t, anthropicSessionBody("System", messages[:round], ""), ctx)
+		hash := svc.GenerateStablePrefixSessionHash(parsed)
+		require.NotEmpty(t, hash, "round %d", round)
+		if first == "" {
+			first = hash
+			continue
+		}
+		require.Equal(t, first, hash, "round %d 的粘性 key 变了，会导致换号", round)
+	}
+
+	// 对照：默认口径按设计每轮都变，本次改动不能把它一起改掉。
+	full := mustParseSessionHashRequest(t, anthropicSessionBody("System", messages, ""), ctx)
+	short := mustParseSessionHashRequest(t, anthropicSessionBody("System", messages[:1], ""), ctx)
+	require.NotEqual(t, svc.GenerateSessionHash(full), svc.GenerateSessionHash(short))
+}
+
+func TestGenerateStablePrefixSessionHash_DifferentOpeningSeparatesConversations(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "opencode/1.0", APIKeyID: 7}
+
+	a := mustParseSessionHashRequest(t, anthropicSessionBody("System", []any{msg("user", "聊聊 Go")}, ""), ctx)
+	b := mustParseSessionHashRequest(t, anthropicSessionBody("System", []any{msg("user", "聊聊 Rust")}, ""), ctx)
+
+	require.NotEqual(t, svc.GenerateStablePrefixSessionHash(a), svc.GenerateStablePrefixSessionHash(b))
+}
+
+func TestGenerateStablePrefixSessionHash_SystemStillCounts(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "opencode/1.0", APIKeyID: 7}
+	opening := []any{msg("user", "hello")}
+
+	a := mustParseSessionHashRequest(t, anthropicSessionBody("You are assistant A.", opening, ""), ctx)
+	b := mustParseSessionHashRequest(t, anthropicSessionBody("You are assistant B.", opening, ""), ctx)
+
+	require.NotEqual(t, svc.GenerateStablePrefixSessionHash(a), svc.GenerateStablePrefixSessionHash(b),
+		"system 变了就是另一个客户端配置，不该共用账号")
+}
+
+func TestGenerateStablePrefixSessionHash_ExplicitSignalsStillWin(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "opencode/1.0", APIKeyID: 7}
+
+	// 客户端显式给了会话 id 时，两种口径必须给出同一个结果：显式信号本来就跨轮稳定，
+	// 没有理由因为平台不同而分叉。
+	metadata := "user_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2_account__session_123e4567-e89b-12d3-a456-426614174000"
+	withMetadata := mustParseSessionHashRequest(t, anthropicSessionBody("System", []any{msg("user", "hi")}, metadata), ctx)
+	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", svc.GenerateStablePrefixSessionHash(withMetadata))
+
+	system := []any{map[string]any{"type": "text", "text": "cache anchor", "cache_control": map[string]any{"type": "ephemeral"}}}
+	ephemeral := mustParseSessionHashRequest(t, anthropicSessionBody(system, []any{msg("user", "hi")}, ""), ctx)
+	require.Equal(t, svc.GenerateSessionHash(ephemeral), svc.GenerateStablePrefixSessionHash(ephemeral))
+}
+
+func TestGenerateStablePrefixSessionHash_IgnoresTrailingTurns(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "opencode/1.0", APIKeyID: 7}
+
+	// 只有开场白参与计算：后面接什么都不影响，包括又一条 user 消息。
+	opening := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "开场白")}, ""), ctx)
+	extended := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{
+		msg("user", "开场白"),
+		msg("assistant", "收到"),
+		msg("user", "第二个问题"),
+	}, ""), ctx)
+
+	require.Equal(t, svc.GenerateStablePrefixSessionHash(opening), svc.GenerateStablePrefixSessionHash(extended))
+}
+
+func TestGenerateStablePrefixSessionHash_SkipsLeadingNonUserTurns(t *testing.T) {
+	svc := &GatewayService{}
+	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "opencode/1.0", APIKeyID: 7}
+
+	// 有些客户端会把 system 塞进 messages 首位，锚点要落在第一条 user 上而不是它。
+	leading := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{
+		msg("system", "你是一个助手"),
+		msg("user", "开场白"),
+	}, ""), ctx)
+	plain := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "开场白")}, ""), ctx)
+
+	require.Equal(t, svc.GenerateStablePrefixSessionHash(plain), svc.GenerateStablePrefixSessionHash(leading))
 }
 
 func TestGenerateSessionHash_EmptyRequest(t *testing.T) {
