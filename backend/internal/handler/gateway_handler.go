@@ -275,9 +275,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		platform = apiKey.Group.Platform
 	}
 
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	// 二选一而不是先算再覆盖：默认口径要把整段历史拼成一个大字符串，长对话下这
+	// 一趟白算的代价不小。
+	sessionHash := ""
 	if usesStablePrefixSessionHash(platform) {
 		sessionHash = h.gatewayService.GenerateStablePrefixSessionHash(parsedReq)
+	} else {
+		sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
 	}
 
 	// [DEBUG-STICKY] 打印会话 hash 生成结果
