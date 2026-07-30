@@ -376,6 +376,31 @@ func RegisterGatewayRoutes(
 		antigravityV1.GET("/usage", h.Gateway.Usage)
 	}
 
+	// Cursor IDE 专用路由：供官方 Cursor IDE 以「自定义 OpenAI 服务」的方式接入。
+	//
+	// 与 /v1/chat/completions 的两点不同：
+	//
+	//  1. 平台锁死为 cursor，不看分组也不参与 composite 路由。IDE 那边只能填一个
+	//     base URL，没有地方表达「用哪个分组」，锁死比让它撞上别的平台的凭证安全。
+	//  2. 摘掉客户端工具声明，见 stripClientTools。
+	//
+	// 用法：Cursor 设置里把 OpenAI Base URL 覆盖成 <网关>/cursor-ide/v1，
+	// API Key 填网关的 key，再手动添加一个模型名（任意名字都会被 ResolveModel
+	// 归一到目录里的模型，认不出来的退回 Auto）。
+	cursorIDE := r.Group("/cursor-ide/v1")
+	cursorIDE.Use(bodyLimit)
+	cursorIDE.Use(clientRequestID)
+	cursorIDE.Use(opsErrorLogger)
+	cursorIDE.Use(endpointNorm)
+	cursorIDE.Use(middleware.ForcePlatform(service.PlatformCursor))
+	cursorIDE.Use(gin.HandlerFunc(apiKeyAuth))
+	cursorIDE.Use(requireGroupAnthropic)
+	cursorIDE.Use(stripClientTools())
+	{
+		cursorIDE.POST("/chat/completions", h.Gateway.ChatCompletions)
+		cursorIDE.GET("/models", h.Gateway.Models)
+	}
+
 	antigravityV1Beta := r.Group("/antigravity/v1beta")
 	antigravityV1Beta.Use(bodyLimit)
 	antigravityV1Beta.Use(clientRequestID)
@@ -535,6 +560,49 @@ func compositeGeminiModelFromParams(c *gin.Context) string {
 		return strings.TrimSpace(modelAction[:idx])
 	}
 	return modelAction
+}
+
+// stripClientTools 把请求里的工具声明摘掉，让这一路变成纯文本补全。
+//
+// Cursor 的上游把客户端工具注册成 MCP 工具，模型调用时网关只能翻译成
+// tool_calls 并结束这一轮，由客户端执行后在下一次请求里带回结果。官方 Cursor IDE
+// 接自定义 OpenAI 端点时走的是它自己的工具链路，不需要也不接受这套中转；带着
+// tools 反而会让模型停在一个客户端不会响应的调用上，那一轮按完整 prompt 计费却
+// 拿不到正文。
+//
+// 只动这三个字段，其余原样透传：模型名、messages、stream、采样参数都交给下游。
+func stripClientTools() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request == nil || c.Request.Method != http.MethodPost {
+			c.Next()
+			return
+		}
+		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		if err != nil {
+			status := http.StatusBadRequest
+			message := "Failed to read request body"
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				status = http.StatusRequestEntityTooLarge
+				message = "Request body is too large"
+			}
+			c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
+			c.Abort()
+			return
+		}
+		if gjson.ValidBytes(body) {
+			for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"} {
+				if !gjson.GetBytes(body, field).Exists() {
+					continue
+				}
+				if stripped, delErr := sjson.DeleteBytes(body, field); delErr == nil {
+					body = stripped
+				}
+			}
+		}
+		resetRequestBody(c, body)
+		c.Next()
+	}
 }
 
 func resetRequestBody(c *gin.Context, body []byte) {
