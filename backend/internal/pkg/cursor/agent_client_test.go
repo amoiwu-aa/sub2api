@@ -81,6 +81,9 @@ type agentTestServer struct {
 	// hangAfterScript 复现上游「等一个不会到来的回执」的样子：脚本发完既不再发帧，
 	// 也不结束流，把连接一直吊着。
 	hangAfterScript bool
+	// frameDelay 覆盖脚本帧之间的间隔。上游是逐个串行生成工具调用的，帧间隔就是
+	// 一次生成的耗时；调大它才能复现「后续调用还没生成完就被关流丢掉」。
+	frameDelay time.Duration
 
 	mu       sync.Mutex
 	received [][]byte
@@ -120,7 +123,11 @@ func (s *agentTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		flusher.Flush()
 		// 给客户端一点时间处理（例如回 exec 回执），模拟真实的交错。
-		time.Sleep(5 * time.Millisecond)
+		delay := s.frameDelay
+		if delay <= 0 {
+			delay = 5 * time.Millisecond
+		}
+		time.Sleep(delay)
 	}
 	if s.hangAfterScript {
 		select {

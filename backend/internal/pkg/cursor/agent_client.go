@@ -39,10 +39,16 @@ var (
 	// execStallTimeout 用在一次 exec 没能回执之后。此时上游在等一个永远不会到来
 	// 的回复，没必要再等满 streamStallTimeout。
 	execStallTimeout = 15 * time.Second
-	// toolCallGrace 是收到首个工具调用后再等一小会儿，好把同一轮里并行发出的
-	// 其余调用一起收齐。等完就主动关流：上游此刻在等一个 exec 回执，而无状态桥
+	// toolCallGrace 是收到一个工具调用后再等多久，好把同一轮里其余的调用收齐。
+	// 每来一个调用就重置，等满了才主动关流：上游此刻在等一个 exec 回执，而无状态桥
 	// 不打算给——工具由客户端执行，结果走下一次请求重放回来。
-	toolCallGrace = 500 * time.Millisecond
+	//
+	// 上游是逐个串行生成工具调用的，不是一批发过来。实测一个调用从上一帧算起要
+	// 半秒左右才到（参数越长越久），所以窗口取 500ms 时，模型声明四个并行调用
+	// 只有第一个能收到，其余在生成途中被关流丢掉——客户端那边就表现为工具调用
+	// 的参数漏成正文。留到 3 秒是按「参数较长的调用也能生成完」取的，代价是带
+	// 工具的那一轮多等最多 3 秒。
+	toolCallGrace = envDuration("CURSOR_TOOL_CALL_GRACE_MS", 3*time.Second, time.Millisecond)
 )
 
 // AgentOptions 是一次 Agent 调用的传输与身份配置。
@@ -338,6 +344,8 @@ func (s *agentStream) close() {
 func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult, error) {
 	result := &AgentTurnResult{}
 	var text, thinking strings.Builder
+	// 控制 token 可能被切在两个增量之间，过滤要跨增量保持状态。
+	var textFilter, thinkingFilter specialTokenFilter
 	var graceTimer *time.Timer
 
 	// 上游在等一个我们给不出的回执时，这条流会永远不再有新帧，读循环就一直阻塞
@@ -400,17 +408,17 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 		switch message.Kind {
 		case KindTextDelta:
 			stallTimer.Reset(streamStallTimeout)
-			if message.TextDelta != "" {
-				text.WriteString(message.TextDelta)
-				if err := emit(AgentDelta{Text: message.TextDelta}); err != nil {
+			if clean := textFilter.Feed(message.TextDelta); clean != "" {
+				text.WriteString(clean)
+				if err := emit(AgentDelta{Text: clean}); err != nil {
 					return nil, err
 				}
 			}
 		case KindThinkingDelta:
 			stallTimer.Reset(streamStallTimeout)
-			if message.ThinkingDelta != "" {
-				thinking.WriteString(message.ThinkingDelta)
-				if err := emit(AgentDelta{Thinking: message.ThinkingDelta}); err != nil {
+			if clean := thinkingFilter.Feed(message.ThinkingDelta); clean != "" {
+				thinking.WriteString(clean)
+				if err := emit(AgentDelta{Thinking: clean}); err != nil {
 					return nil, err
 				}
 			}
@@ -481,6 +489,17 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 			// 否则这里会一直挂到 ctx 超时。
 			graceTimer = time.AfterFunc(turnEndGrace, s.close)
 		}
+	}
+
+	// 扣住的尾巴到这里还没长成控制 token，说明是普通文本，补发出去。
+	// 此刻整轮已经读完，emit 再报错只可能是客户端先走了，没有可挽回的动作。
+	if tail := textFilter.Flush(); tail != "" {
+		text.WriteString(tail)
+		_ = emit(AgentDelta{Text: tail})
+	}
+	if tail := thinkingFilter.Flush(); tail != "" {
+		thinking.WriteString(tail)
+		_ = emit(AgentDelta{Thinking: tail})
 	}
 
 	result.Text = text.String()

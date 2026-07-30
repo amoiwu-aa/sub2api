@@ -98,6 +98,55 @@ func TestRunAgentTurnCollectsParallelToolCalls(t *testing.T) {
 	require.Equal(t, "Read", result.ToolCalls[1].Name)
 }
 
+func TestRunAgentTurnWaitsOutSlowlyGeneratedToolCalls(t *testing.T) {
+	// 上游不是一批发完并行调用，而是逐个生成、生成一个发一个，帧间隔就是一次
+	// 生成的耗时。收齐窗口比这个间隔短的话，后面的调用会在生成途中被关流丢掉，
+	// 客户端只拿到第一个——线上表现为其余调用的参数漏成正文。
+	//
+	// 这里让帧间隔（120ms）明显大于旧的 500ms 窗口所能容忍的比例，再把窗口设成
+	// 间隔的数倍，验证四个调用都能收齐。
+	shrinkToolCallGrace(t, 400*time.Millisecond)
+
+	server := &agentTestServer{t: t, hangAfterScript: true, frameDelay: 120 * time.Millisecond, script: [][]byte{
+		textDeltaMessage("我并行看几个文件"),
+		mcpToolCallMessage("exec-1", "read", map[string]any{"filePath": "/srv/app/src/server.ts"}),
+		mcpToolCallMessage("exec-2", "read", map[string]any{"filePath": "/srv/app/src/db.ts"}),
+		mcpToolCallMessage("exec-3", "grep", map[string]any{"pattern": "app.get"}),
+		mcpToolCallMessage("exec-4", "bash", map[string]any{"command": "ls docs"}),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "explore", ConversationID: "conv-1"}, nil)
+	require.NoError(t, err)
+
+	require.Len(t, result.ToolCalls, 4, "慢速生成的并行调用被截断了")
+	require.Equal(t, []string{"read", "read", "grep", "bash"}, []string{
+		result.ToolCalls[0].Name, result.ToolCalls[1].Name,
+		result.ToolCalls[2].Name, result.ToolCalls[3].Name,
+	})
+	// 正文只该有那句开场白，工具参数不能混进来。
+	require.Equal(t, "我并行看几个文件", result.Text)
+	require.False(t, result.Incomplete())
+}
+
+func TestRunAgentTurnDropsToolCallsWhenGraceIsTooShort(t *testing.T) {
+	// 反向固定住这个 bug 的形态：窗口短于生成间隔时确实只剩第一个调用。
+	// 这条用例是为了让「把窗口改小」这种回退在测试里立刻现形。
+	shrinkToolCallGrace(t, 30*time.Millisecond)
+
+	server := &agentTestServer{t: t, hangAfterScript: true, frameDelay: 150 * time.Millisecond, script: [][]byte{
+		mcpToolCallMessage("exec-1", "read", map[string]any{"filePath": "/a"}),
+		mcpToolCallMessage("exec-2", "read", map[string]any{"filePath": "/b"}),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "explore", ConversationID: "conv-1"}, nil)
+	require.NoError(t, err)
+	require.Len(t, result.ToolCalls, 1)
+}
+
 func TestRunAgentTurnKeepsTextBeforeToolCall(t *testing.T) {
 	// 模型常常先说一句再调工具，那段正文要留给客户端。
 	shrinkToolCallGrace(t, 100*time.Millisecond)

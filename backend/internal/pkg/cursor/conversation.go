@@ -76,6 +76,22 @@ func (c *Conversation) HasHistory() bool {
 	return nonSystem > 1
 }
 
+// MaxPromptBytes 是渲染后 prompt 的上限，超过就不发给上游。
+//
+// 上游对过大的 prompt 不会报错，而是收下之后彻底沉默：实测 2.5 MB 的 prompt 只
+// 回了 7 个 KV 帧就没了下文，网关只能等满 120 秒的看门狗，最后返回 HTTP 200 +
+// 空正文。更糟的是这一轮照样按完整 prompt 计费——线上两次这样的请求各扣了 1.88
+// 美元，占当天总成本的四成多。
+//
+// 1.25 MB 的 prompt 实测能正常返回，2.5 MB 稳定沉默，阈值取在中间偏保守的位置。
+// 这是量出来的经验值，换上游模型可能要重调，所以留了环境变量。
+var MaxPromptBytes = envBytes("CURSOR_MAX_PROMPT_BYTES", 1_500_000)
+
+// PromptTooLarge 报告这段 prompt 是否超出上游能消化的体积。
+func PromptTooLarge(prompt string) bool {
+	return MaxPromptBytes > 0 && len(prompt) > MaxPromptBytes
+}
+
 // Render 把整段对话渲染成发给 Agent 的单条用户消息。
 //
 // 简单场景（一条系统提示 + 一条用户消息、无工具）会退化成近似原文的形式，
