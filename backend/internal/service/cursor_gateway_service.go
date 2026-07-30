@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -181,6 +182,35 @@ func (s *CursorGatewayService) agentOptions(ctx context.Context, account *Accoun
 		Telemetry: cursor.DeriveTelemetryIDs(accessToken),
 		SessionID: cursorSessionID(account),
 	}, nil
+}
+
+// cursorConversationID 为一段对话派生一个稳定的会话 id。
+//
+// 每个请求换一个新 uuid，上游看到的就是一串「各说一句话就消失」的会话，风控上
+// 显眼，同一段对话在上游侧也无从关联。种子取首条用户消息并混入账号与 API Key：
+// 同一段对话每轮算出同一个 id，不同租户之间不会碰撞。
+//
+// 稳定 id 不会造成上下文翻倍：agent_live_spike_checkpoint_test.go 的 S1 实测过，
+// 沿用同一个 conversation_id 且不带任何状态时模型完全不记得上一轮，这条链路对
+// 上游是无状态的，conversation_id 只是关联标识。
+func cursorConversationID(c *gin.Context, account *Account, conversation *cursor.Conversation) string {
+	if conversation == nil || len(conversation.Turns) == 0 {
+		return uuid.NewString()
+	}
+	seed := conversation.Turns[0]
+	for _, turn := range conversation.Turns {
+		if turn.Role == cursor.RoleUser {
+			seed = turn
+			break
+		}
+	}
+	return generateSessionUUID(strings.Join([]string{
+		"cursor-conversation",
+		strconv.FormatInt(accountIDOrZero(account), 10),
+		strconv.FormatInt(getAPIKeyIDFromContext(c), 10),
+		string(seed.Role),
+		strings.TrimSpace(seed.Text),
+	}, "\x00"))
 }
 
 // cursorSessionID 为账号派生一个稳定的会话标识。

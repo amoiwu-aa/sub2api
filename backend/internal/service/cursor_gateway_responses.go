@@ -103,7 +103,7 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 
 	input := cursor.AgentTurnInput{
 		Text:           prompt,
-		ConversationID: uuid.NewString(),
+		ConversationID: cursorConversationID(c, account, conversation),
 		ModelID:        selection.ModelID,
 		ModelParams:    selection.Params,
 		MaxMode:        selection.MaxMode,
