@@ -1047,6 +1047,7 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 		enrichUsageWithAccountError(usage, account)
 		s.attachLocalWindows(fetchCtx, account, usage, 5*time.Hour, 7*24*time.Hour)
 		s.parkExhaustedKiroAccount(account, usage)
+		warnKiroCreditsRunningLow(account, usage)
 		s.cache.kiroCache.Store(account.ID, &kiroUsageCache{usageInfo: usage, timestamp: time.Now()})
 		return usage, nil
 	})
@@ -1108,6 +1109,7 @@ func (s *AccountUsageService) getCursorUsage(ctx context.Context, account *Accou
 			return nil, err
 		}
 		enrichUsageWithAccountError(usage, account)
+		s.parkExhaustedCursorAccount(account, usage)
 		s.cache.cursorCache.Store(account.ID, &cursorUsageCache{usageInfo: usage, timestamp: time.Now()})
 		return usage, nil
 	})
@@ -1118,6 +1120,15 @@ func (s *AccountUsageService) getCursorUsage(ctx context.Context, account *Accou
 	usage, _ := result.(*UsageInfo)
 	recalcCursorRemainingSeconds(usage)
 	return usage, nil
+}
+
+// CursorQuotaSnapshot 返回缓存里的 Cursor 额度快照。
+//
+// 只读缓存、绝不触发上游拉取：调用方在请求热路径上，不能为了判一次额度就多一次
+// 网络往返。快照的新鲜度由 AccountQuotaPatrolService 的周期巡检保证（缓存 TTL
+// 3 分钟、巡检 10 分钟一轮）。拿不到就返回 false，由调用方决定放行还是拦截。
+func (s *AccountUsageService) CursorQuotaSnapshot(accountID int64) (*UsageInfo, bool) {
+	return s.loadCursorCache(accountID)
 }
 
 // loadCursorCache 读缓存并重算剩余秒数；已失效返回 false。
@@ -1216,6 +1227,48 @@ func (s *AccountUsageService) loadKiroCache(accountID int64) (*UsageInfo, bool) 
 // 不能不暂停——否则调度器会一直往一个必然失败的账号上打。
 const kiroExhaustedFallbackPark = 30 * time.Minute
 
+// kiroCreditsLowWatermark 是「快用完了」的预警线。
+//
+// 取 80% 是因为耗尽在 Kiro 上是硬墙而不是降级：免费档 overageStatus=DISABLED
+// 且 overageCapability=OVERAGE_INCAPABLE，credit 一到上限就直接拒绝请求，
+// 要等到下个计费周期（免费档一个月只有 50 个）。留 20% 的缓冲是为了有时间
+// 换号或降模型——实测一次 Claude Code 规格的请求约 0.15 credit，20% 即 10 个
+// credit 大约还剩 60 多次调用的余地。
+const kiroCreditsLowWatermark = 80.0
+
+// warnKiroCreditsRunningLow 在额度接近上限时留一条 WARN。
+//
+// 与 parkExhaustedKiroAccount 的分工：那个是事后止损（已经用尽，停止调度），
+// 这个是事前预警。两者刻意互斥——耗尽时只报 park 那条，避免同一件事出两条告警。
+//
+// 覆盖面和 parkExhaustedKiroAccount 一样受限于「额度查询只有后台面板会触发」，
+// 没人看面板时不会预警。真要无人值守，得给额度查询加周期任务，那一步会同时
+// 补齐这两条路径。
+func warnKiroCreditsRunningLow(account *Account, usage *UsageInfo) {
+	if account == nil || usage == nil || usage.KiroExhausted {
+		return
+	}
+	if usage.KiroCredits == nil || usage.KiroCreditsLimit <= 0 {
+		return
+	}
+	if usage.KiroCredits.Utilization < kiroCreditsLowWatermark {
+		return
+	}
+
+	attrs := []any{
+		"account_id", account.ID,
+		"credits_used", usage.KiroCreditsUsed,
+		"credits_limit", usage.KiroCreditsLimit,
+		"credits_remaining", usage.KiroCreditsLimit - usage.KiroCreditsUsed,
+		"utilization_percent", usage.KiroCredits.Utilization,
+		"overage_enabled", usage.KiroOverageEnabled,
+	}
+	if usage.KiroCredits.ResetsAt != nil {
+		attrs = append(attrs, "resets_at", *usage.KiroCredits.ResetsAt)
+	}
+	slog.Warn("kiro.credits_running_low", attrs...)
+}
+
 // parkExhaustedKiroAccount 把额度耗尽的账号暂停调度到额度重置为止。
 //
 // 用 SetTempUnschedulable 而不是别的手段，是因为语义正好对上：这不是
@@ -1234,12 +1287,13 @@ const kiroExhaustedFallbackPark = 30 * time.Minute
 // 其他人（IDE、别的客户端）把共享额度耗完了——重置时间一到会自己恢复，
 // 但在那之前换本组织的另一个账号也没用，它们共用同一个池子。
 // 详见 KiroQuotaFetcher 的说明。
-func (s *AccountUsageService) parkExhaustedKiroAccount(account *Account, usage *UsageInfo) {
+// 返回是否真的停了号，供巡检统计本轮动作数。
+func (s *AccountUsageService) parkExhaustedKiroAccount(account *Account, usage *UsageInfo) bool {
 	if account == nil || usage == nil || !usage.KiroExhausted {
-		return
+		return false
 	}
 	if s.accountRepo == nil {
-		return
+		return false
 	}
 
 	until := time.Now().Add(kiroExhaustedFallbackPark)
@@ -1254,7 +1308,7 @@ func (s *AccountUsageService) parkExhaustedKiroAccount(account *Account, usage *
 	// 保证标记一定写下去。
 	if err := s.accountRepo.SetTempUnschedulable(context.Background(), account.ID, until, reason); err != nil {
 		slog.Warn("kiro.park_exhausted_account_failed", "account_id", account.ID, "error", err)
-		return
+		return false
 	}
 	slog.Info("kiro.account_parked_until_quota_reset",
 		"account_id", account.ID,
@@ -1262,6 +1316,76 @@ func (s *AccountUsageService) parkExhaustedKiroAccount(account *Account, usage *
 		"credits_used", usage.KiroCreditsUsed,
 		"credits_limit", usage.KiroCreditsLimit,
 	)
+	return true
+}
+
+// cursorUsageParkWatermark 是 Cursor 停止调度的额度水位（百分比）。
+//
+// 这里的取舍与 Kiro 正好相反。Kiro 开了超额就不停——还能用，只是花钱，停掉
+// 等于平白损失容量。Cursor 必须停，因为它的 on-demand 默认开启且 limit 为
+// null（无上限）：额度打满后每一次请求都直接计入按量账单，没有任何自然刹车。
+// 实测该账号 included 20 美元用尽后 on-demand 已累计 32.66 美元且仍在增长，
+// 停止调度是唯一能让它停下来的手段。
+//
+// 取 100 而不是留缓冲，是因为超出部分本来就要按 $0.04/credit 真金白银付；
+// 要更保守可以调低，代价是提前放弃一部分已经付过钱的订阅额度。
+const cursorUsageParkWatermark = 100.0
+
+// cursorExhaustedFallbackPark 是拿不到计费周期结束时间时的暂停时长。
+// 比 Kiro 的 30 分钟长，因为 Cursor 周期以月计，短暂停会反复放行再暂停。
+const cursorExhaustedFallbackPark = 6 * time.Hour
+
+// parkExhaustedCursorAccount 在 Auto 与 API 两档额度都打满时停止调度该账号。
+//
+// 必须两档都满才停，不能任一触线就停：Cursor 的这两档是独立结算的，打满时间点
+// 往往差很远（实测 API 已 100% 时 Auto 才 56.67%）。只要还有一档有余量，账号就
+// 仍有价值——那部分是已经付过钱的订阅额度，停号等于主动作废。单档打满由网关的
+// 模型级门控处理（见 cursor_quota_gate.go）：只挡走那一档的模型，另一档照常放行。
+//
+// 走到这里意味着两档都没了，任何请求都只会落进无上限的 on-demand 账单，
+// 停止调度是唯一的刹车。
+//
+// 与 Kiro 同款局限：这条路径挂在用量查询上，需要配合周期巡检才能无人值守。
+//
+// 返回是否真的停了号，供巡检统计本轮动作数。
+func (s *AccountUsageService) parkExhaustedCursorAccount(account *Account, usage *UsageInfo) bool {
+	if account == nil || usage == nil || usage.CursorIsUnlimited {
+		return false
+	}
+	if s.accountRepo == nil {
+		return false
+	}
+
+	autoFull := usage.CursorAutoUsage != nil && usage.CursorAutoUsage.Utilization >= cursorUsageParkWatermark
+	apiFull := usage.CursorAPIUsage != nil && usage.CursorAPIUsage.Utilization >= cursorUsageParkWatermark
+	if !autoFull || !apiFull {
+		return false
+	}
+	hit := []string{
+		fmt.Sprintf("auto %.1f%%", usage.CursorAutoUsage.Utilization),
+		fmt.Sprintf("api %.1f%%", usage.CursorAPIUsage.Utilization),
+	}
+
+	until := time.Now().Add(cursorExhaustedFallbackPark)
+	if usage.CursorBillingCycleEnd != nil && usage.CursorBillingCycleEnd.After(time.Now()) {
+		until = *usage.CursorBillingCycleEnd
+	}
+
+	reason := fmt.Sprintf("cursor quota exhausted (%s), on-demand used $%.2f, parked until billing cycle end",
+		strings.Join(hit, ", "), usage.CursorOnDemandUsed)
+
+	if err := s.accountRepo.SetTempUnschedulable(context.Background(), account.ID, until, reason); err != nil {
+		slog.Warn("cursor.park_exhausted_account_failed", "account_id", account.ID, "error", err)
+		return false
+	}
+	slog.Info("cursor.account_parked_until_cycle_end",
+		"account_id", account.ID,
+		"until", until,
+		"exhausted", strings.Join(hit, ", "),
+		"on_demand_used", usage.CursorOnDemandUsed,
+		"on_demand_enabled", usage.CursorOnDemandEnabled,
+	)
+	return true
 }
 
 // recalcKiroRemainingSeconds 重算距重置的剩余秒数，避免返回缓存里过时的值。

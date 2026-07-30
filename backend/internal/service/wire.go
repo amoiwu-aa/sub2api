@@ -349,6 +349,13 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 	return svc
 }
 
+// ProvideAccountQuotaPatrolService creates and starts AccountQuotaPatrolService.
+func ProvideAccountQuotaPatrolService(accountRepo AccountRepository, usageService *AccountUsageService) *AccountQuotaPatrolService {
+	svc := NewAccountQuotaPatrolService(accountRepo, usageService, defaultQuotaPatrolInterval)
+	svc.Start()
+	return svc
+}
+
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
@@ -765,6 +772,7 @@ var ProviderSet = wire.NewSet(
 	ProvideCursorTokenProvider,
 	NewKiroGatewayService,
 	NewCursorGatewayService,
+	wire.Bind(new(cursorQuotaSnapshotReader), new(*AccountUsageService)),
 	ProvideOpenAITokenProvider,
 	ProvideOpenAIQuotaService,
 	ProvideGrokQuotaService,
@@ -809,6 +817,7 @@ var ProviderSet = wire.NewSet(
 	ProvideDashboardAggregationService,
 	ProvideUsageCleanupService,
 	ProvideDeferredService,
+	ProvideAccountQuotaPatrolService,
 	NewAntigravityQuotaFetcher,
 	NewKiroQuotaFetcher,
 	NewCursorQuotaFetcher,

@@ -30,10 +30,12 @@ const (
 type CursorGatewayService struct {
 	tokenProvider    *CursorTokenProvider
 	rateLimitService *RateLimitService
+	// quotaReader 用于按模型判定 Auto / API 两档额度是否还有余量。
+	quotaReader cursorQuotaSnapshotReader
 }
 
-func NewCursorGatewayService(tokenProvider *CursorTokenProvider, rateLimitService *RateLimitService) *CursorGatewayService {
-	return &CursorGatewayService{tokenProvider: tokenProvider, rateLimitService: rateLimitService}
+func NewCursorGatewayService(tokenProvider *CursorTokenProvider, rateLimitService *RateLimitService, quotaReader cursorQuotaSnapshotReader) *CursorGatewayService {
+	return &CursorGatewayService{tokenProvider: tokenProvider, rateLimitService: rateLimitService, quotaReader: quotaReader}
 }
 
 // reportUpstreamError 把上游故障喂给账号健康度体系。
@@ -84,10 +86,18 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	if strings.TrimSpace(prompt) == "" {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", "messages contain no text content")
 	}
+	if cursor.PromptTooLarge(prompt) {
+		return nil, s.writeError(c, http.StatusRequestEntityTooLarge, "invalid_request_error",
+			cursorPromptTooLargeMessage(prompt))
+	}
 
 	publicModel := req.Model
 	selection := cursor.ResolveModel(publicModel)
 	upstreamModel := selection.ModelID
+
+	if err := s.ensureModelQuota(c, account, selection.ModelID); err != nil {
+		return nil, err
+	}
 
 	options, err := s.agentOptions(ctx, account)
 	if err != nil {
@@ -331,6 +341,17 @@ func (s *CursorGatewayService) forwardBuffered(
 		},
 	})
 	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false), nil
+}
+
+// cursorPromptTooLargeMessage 说明超限原因。带上实际字节数和上限，客户端才知道
+// 要裁掉多少历史；不说明的话只会看到一个没头没尾的 413。
+func cursorPromptTooLargeMessage(prompt string) string {
+	return fmt.Sprintf(
+		"Conversation history is too large for the Cursor upstream: rendered prompt is %d bytes, limit is %d bytes. "+
+			"Beyond this size the upstream accepts the request and then stops responding, "+
+			"so the turn would burn the full stall timeout and still return nothing. "+
+			"Drop earlier turns and retry.",
+		len(prompt), cursor.MaxPromptBytes)
 }
 
 // recordAgentIncomplete 把「HTTP 200 但流实际挂死」的情况打进日志和 ops 上游错误，

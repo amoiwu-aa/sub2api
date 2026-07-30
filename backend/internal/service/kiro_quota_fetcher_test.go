@@ -206,6 +206,59 @@ func TestGetKiroUsageWithoutFetcher(t *testing.T) {
 	require.NotNil(t, usage.UpdatedAt)
 }
 
+// TestWarnKiroCreditsRunningLow 固定预警线的触发条件。
+//
+// 这里只能验「不 panic 且按条件短路」，因为函数的产出是一条日志。真正要
+// 锁住的是判定逻辑：耗尽时不重复报警（park 那条已经覆盖）、没有额度维度时
+// 不误报、刚好压线要报。
+func TestWarnKiroCreditsRunningLow(t *testing.T) {
+	withCredits := func(used, limit, utilization float64, exhausted bool) *UsageInfo {
+		return &UsageInfo{
+			KiroCreditsUsed:  used,
+			KiroCreditsLimit: limit,
+			KiroExhausted:    exhausted,
+			KiroCredits:      &UsageProgress{Utilization: utilization},
+		}
+	}
+
+	t.Run("越过预警线要报", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			warnKiroCreditsRunningLow(kiroQuotaAccount(), withCredits(41, 50, 82, false))
+		})
+	})
+
+	t.Run("刚好压在线上也报", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			warnKiroCreditsRunningLow(kiroQuotaAccount(), withCredits(40, 50, kiroCreditsLowWatermark, false))
+		})
+	})
+
+	// 已耗尽时 parkExhaustedKiroAccount 会报 park，这里再报一条就是同一件事两条告警。
+	t.Run("已耗尽不重复报", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			warnKiroCreditsRunningLow(kiroQuotaAccount(), withCredits(50, 50, 100, true))
+		})
+	})
+
+	t.Run("入参缺失时不报也不炸", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			warnKiroCreditsRunningLow(nil, withCredits(41, 50, 82, false))
+			warnKiroCreditsRunningLow(kiroQuotaAccount(), nil)
+			// 上游没给 CREDIT 维度（企业档某些响应）不能误报。
+			warnKiroCreditsRunningLow(kiroQuotaAccount(), &UsageInfo{KiroCreditsLimit: 50})
+			// 上限为 0 时百分比无意义。
+			warnKiroCreditsRunningLow(kiroQuotaAccount(), withCredits(1, 0, 100, false))
+		})
+	})
+}
+
+// TestKiroCreditsLowWatermarkLeavesHeadroom 固定预警线必须留出缓冲。
+// 免费档是硬墙（用尽即拒、要等下个周期），预警贴着 100% 就失去意义了。
+func TestKiroCreditsLowWatermarkLeavesHeadroom(t *testing.T) {
+	require.Less(t, kiroCreditsLowWatermark, 100.0)
+	require.GreaterOrEqual(t, kiroCreditsLowWatermark, 50.0)
+}
+
 // parkRecorder 记录 SetTempUnschedulable 的调用，其余方法不实现——
 // 本测试只关心暂停调度这一个行为。
 type parkRecorder struct {

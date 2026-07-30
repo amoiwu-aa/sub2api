@@ -83,8 +83,16 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error",
 			"input contains no text content")
 	}
+	if cursor.PromptTooLarge(prompt) {
+		return nil, s.writeResponsesError(c, http.StatusRequestEntityTooLarge, "invalid_request_error",
+			cursorPromptTooLargeMessage(prompt))
+	}
 
 	selection := cursor.ResolveModel(publicModel)
+	if reason := s.quotaBlockReason(account, selection.ModelID); reason != "" {
+		return nil, s.writeResponsesError(c, http.StatusTooManyRequests, "quota_exceeded", reason)
+	}
+
 	options, err := s.agentOptions(ctx, account)
 	if err != nil {
 		return nil, err

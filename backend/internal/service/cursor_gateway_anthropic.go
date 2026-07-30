@@ -57,10 +57,18 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error",
 			"messages contain no text content")
 	}
+	if cursor.PromptTooLarge(prompt) {
+		return nil, s.writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error",
+			cursorPromptTooLargeMessage(prompt))
+	}
 
 	publicModel := req.Model
 	selection := cursor.ResolveModel(publicModel)
 	upstreamModel := selection.ModelID
+
+	if err := s.ensureModelQuota(c, account, selection.ModelID); err != nil {
+		return nil, err
+	}
 
 	options, err := s.agentOptions(ctx, account)
 	if err != nil {
