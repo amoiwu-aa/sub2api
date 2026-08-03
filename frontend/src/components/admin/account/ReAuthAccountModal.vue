@@ -138,12 +138,19 @@
         :show-help="isAnthropic"
         :show-proxy-warning="isAnthropic"
         :show-cookie-option="isAnthropic"
+        :show-chatgpt-cookie-option="isOpenAI"
+        :chatgpt-cookie-preview="chatgptCookiePreview"
+        :chatgpt-cookie-action="chatgptCookieAction"
+        chatgpt-cookie-mode="reauthorize"
         :allow-multiple="false"
         :method-label="t('admin.accounts.inputMethod')"
         :platform="isOpenAI ? 'openai' : isGemini ? 'gemini' : isAntigravity ? 'antigravity' : isGrok ? 'grok' : 'anthropic'"
         :show-project-id="isGemini && geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
+        @preview-chatgpt-cookie="handlePreviewChatGPTCookie"
+        @import-chatgpt-cookie="handleReimportChatGPTCookie"
+        @clear-chatgpt-cookie-preview="chatgptCookiePreview = null"
       />
 
     </div>
@@ -205,7 +212,7 @@ import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
-import type { Account } from '@/types'
+import type { Account, ChatGPTCookiePreviewResult } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OAuthAuthorizationFlow from '@/components/account/OAuthAuthorizationFlow.vue'
@@ -244,6 +251,8 @@ const grokOAuth = useGrokOAuth()
 
 // Refs
 const oauthFlowRef = ref<OAuthFlowExposed | null>(null)
+const chatgptCookiePreview = ref<ChatGPTCookiePreviewResult | null>(null)
+const chatgptCookieAction = ref<'preview' | 'submit' | null>(null)
 
 // State
 const addMethod = ref<AddMethod>('oauth')
@@ -295,8 +304,7 @@ const currentError = computed(() => {
 
 // Computed
 const isManualInputMethod = computed(() => {
-  // OpenAI/Gemini/Antigravity always use manual input (no cookie auth option)
-  return isOpenAILike.value || isGemini.value || isAntigravity.value || isGrok.value || oauthFlowRef.value?.inputMethod === 'manual'
+  return oauthFlowRef.value?.inputMethod === 'manual'
 })
 
 const canExchangeCode = computed(() => {
@@ -342,6 +350,8 @@ const resetState = () => {
   geminiOAuth.resetState()
   antigravityOAuth.resetState()
   grokOAuth.resetState()
+  chatgptCookiePreview.value = null
+  chatgptCookieAction.value = null
   oauthFlowRef.value?.reset()
 }
 
@@ -369,6 +379,70 @@ const handleGenerateUrl = async () => {
     appStore.showError(t('admin.accounts.reAuthUnsupportedPlatform'))
   } else {
     await claudeOAuth.generateAuthUrl(addMethod.value, props.account.proxy_id)
+  }
+}
+
+const handlePreviewChatGPTCookie = async (payload: { content: string; userAgent?: string }) => {
+  if (!props.account || !isOpenAI.value) return
+
+  chatgptCookieAction.value = 'preview'
+  chatgptCookiePreview.value = null
+  openaiOAuth.loading.value = true
+  openaiOAuth.error.value = ''
+  try {
+    chatgptCookiePreview.value = await adminAPI.accounts.previewChatGPTCookie({
+      content: payload.content,
+      user_agent: payload.userAgent,
+      proxy_id: props.account.proxy_id
+    })
+  } catch (error: any) {
+    openaiOAuth.error.value =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      error.message ||
+      t('admin.accounts.oauth.openai.chatgptCookiePreviewFailed')
+  } finally {
+    openaiOAuth.loading.value = false
+    chatgptCookieAction.value = null
+  }
+}
+
+const handleReimportChatGPTCookie = async (payload: { content: string; userAgent?: string }) => {
+  if (!props.account || !isOpenAI.value) return
+
+  chatgptCookieAction.value = 'submit'
+  openaiOAuth.loading.value = true
+  openaiOAuth.error.value = ''
+  try {
+    const result = await adminAPI.accounts.reimportChatGPTCookie(props.account.id, {
+      content: payload.content,
+      user_agent: payload.userAgent
+    })
+    if (result.updated !== 1 || result.failed !== 0) {
+      const details = (result.errors || [])
+        .map((item) => item.message)
+        .filter(Boolean)
+        .join('\n')
+      openaiOAuth.error.value =
+        details || t('admin.accounts.oauth.openai.chatgptCookieReimportFailed')
+      appStore.showError(openaiOAuth.error.value)
+      return
+    }
+
+    const updatedAccount = await adminAPI.accounts.getById(props.account.id)
+    appStore.showSuccess(t('admin.accounts.oauth.openai.chatgptCookieReimportSuccess'))
+    emit('reauthorized', updatedAccount)
+    handleClose()
+  } catch (error: any) {
+    openaiOAuth.error.value =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      error.message ||
+      t('admin.accounts.oauth.openai.chatgptCookieReimportFailed')
+    appStore.showError(openaiOAuth.error.value)
+  } finally {
+    openaiOAuth.loading.value = false
+    chatgptCookieAction.value = null
   }
 }
 

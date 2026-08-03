@@ -3545,6 +3545,9 @@
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
         :show-access-token-option="false"
+        :show-chatgpt-cookie-option="form.platform === 'openai'"
+        :chatgpt-cookie-preview="chatgptCookiePreview"
+        :chatgpt-cookie-action="chatgptCookieAction"
         :show-codex-session-import-option="form.platform === 'openai'"
         :show-agent-identity-option="form.platform === 'openai'"
         :show-codex-pat-option="form.platform === 'openai'"
@@ -3558,6 +3561,9 @@
         @validate-refresh-token="handleValidateRefreshToken"
         @validate-mobile-refresh-token="handleOpenAIValidateMobileRT"
         @validate-session-token="handleValidateSessionToken"
+        @preview-chatgpt-cookie="handleOpenAIPreviewChatGPTCookie"
+        @import-chatgpt-cookie="handleOpenAIImportChatGPTCookie"
+        @clear-chatgpt-cookie-preview="chatgptCookiePreview = null"
         @import-codex-session="handleOpenAIImportCodexSession"
         @import-codex-pat="handleOpenAIImportCodexPAT"
         @import-sso="handleGrokImportSSO"
@@ -3943,7 +3949,9 @@ import type {
   AccountType,
   CheckMixedChannelResponse,
   CreateAccountRequest,
+  ChatGPTCookiePreviewResult,
   CodexSessionImportMessage,
+  CodexSessionImportResult,
   OpenAICompactMode,
   OpenAIResponsesMode,
   OpenAIEndpointCapability
@@ -4084,6 +4092,8 @@ const currentOAuthError = computed(() => {
 
 // Refs
 const oauthFlowRef = ref<OAuthFlowExposed | null>(null)
+const chatgptCookiePreview = ref<ChatGPTCookiePreviewResult | null>(null)
+const chatgptCookieAction = ref<'preview' | 'submit' | null>(null)
 
 // Model mapping type
 interface ModelMapping {
@@ -5394,6 +5404,8 @@ const resetForm = () => {
   geminiOAuth.resetState()
   antigravityOAuth.resetState()
   grokOAuth.resetState()
+  chatgptCookiePreview.value = null
+  chatgptCookieAction.value = null
   oauthFlowRef.value?.reset()
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
@@ -5831,6 +5843,8 @@ const goBackToBasicInfo = () => {
   geminiOAuth.resetState()
   antigravityOAuth.resetState()
   grokOAuth.resetState()
+  chatgptCookiePreview.value = null
+  chatgptCookieAction.value = null
   // 退回第一步必须停掉轮询，否则登录完成时会往一个已经不在的表单里建号。
   resetCursorState()
   oauthFlowRef.value?.reset()
@@ -6255,6 +6269,119 @@ const isAgentIdentityImportContent = (content: string) => {
   }
 }
 
+const applyOpenAIImportResult = (result: CodexSessionImportResult) => {
+  const oauthClient = openaiOAuth
+  const successCount = result.created + result.updated
+  const params = {
+    created: result.created,
+    updated: result.updated,
+    skipped: result.skipped,
+    failed: result.failed
+  }
+
+  if (successCount > 0 && result.failed === 0) {
+    appStore.showSuccess(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
+    emit('created')
+    handleClose()
+    return
+  }
+
+  const errorText = formatCodexImportMessages(result.errors)
+  const warningText = formatCodexImportMessages(result.warnings)
+  oauthClient.error.value = [errorText, warningText].filter(Boolean).join('\n')
+
+  if (result.failed === 0) {
+    appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
+    return
+  }
+
+  if (successCount > 0) {
+    appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportPartial', params))
+    emit('created')
+    return
+  }
+
+  appStore.showError(t('admin.accounts.oauth.openai.codexSessionImportFailed'))
+}
+
+const handleOpenAIPreviewChatGPTCookie = async (payload: { content: string; userAgent?: string }) => {
+  const content = payload.content.trim()
+  if (!content) {
+    openaiOAuth.error.value = t('admin.accounts.oauth.openai.chatgptCookieEmpty')
+    return
+  }
+
+  chatgptCookieAction.value = 'preview'
+  chatgptCookiePreview.value = null
+  openaiOAuth.loading.value = true
+  openaiOAuth.error.value = ''
+  try {
+    chatgptCookiePreview.value = await adminAPI.accounts.previewChatGPTCookie({
+      content,
+      user_agent: payload.userAgent?.trim() || undefined,
+      proxy_id: form.proxy_id
+    })
+  } catch (error: any) {
+    openaiOAuth.error.value =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      error.message ||
+      t('admin.accounts.oauth.openai.chatgptCookiePreviewFailed')
+  } finally {
+    openaiOAuth.loading.value = false
+    chatgptCookieAction.value = null
+  }
+}
+
+const handleOpenAIImportChatGPTCookie = async (payload: { content: string; userAgent?: string }) => {
+  const oauthClient = openaiOAuth
+  const content = payload.content.trim()
+  if (!content) {
+    oauthClient.error.value = t('admin.accounts.oauth.openai.chatgptCookieEmpty')
+    return
+  }
+
+  const credentialExtras = buildOpenAICodexImportCredentialExtras()
+  if (credentialExtras === null) {
+    return
+  }
+
+  chatgptCookieAction.value = 'submit'
+  oauthClient.loading.value = true
+  oauthClient.error.value = ''
+
+  try {
+    const result = await adminAPI.accounts.importChatGPTCookie({
+      content,
+      user_agent: payload.userAgent?.trim() || undefined,
+      name: form.name,
+      notes: form.notes || null,
+      proxy_id: form.proxy_id,
+      concurrency: form.concurrency,
+      load_factor: form.load_factor ?? undefined,
+      priority: form.priority,
+      rate_multiplier: form.rate_multiplier,
+      group_ids: form.group_ids,
+      expires_at: form.expires_at,
+      auto_pause_on_expired: autoPauseOnExpired.value,
+      credential_extras: Object.keys(credentialExtras).length > 0 ? credentialExtras : undefined,
+      extra: buildOpenAICodexImportExtra(),
+      update_existing: true
+    })
+    applyOpenAIImportResult(result)
+  } catch (error: any) {
+    oauthClient.error.value =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      error.message ||
+      t('admin.accounts.oauth.openai.chatgptCookieImportFailed')
+    appStore.showError(oauthClient.error.value)
+  } finally {
+    oauthClient.loading.value = false
+    chatgptCookieAction.value = null
+  }
+}
+
 const handleOpenAIImportCodexSession = async (content: string) => {
   const oauthClient = openaiOAuth
   const trimmed = content.trim()
@@ -6293,38 +6420,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       extra,
       update_existing: true
     })
-
-    const successCount = result.created + result.updated
-    const params = {
-      created: result.created,
-      updated: result.updated,
-      skipped: result.skipped,
-      failed: result.failed
-    }
-
-    if (successCount > 0 && result.failed === 0) {
-      appStore.showSuccess(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
-      emit('created')
-      handleClose()
-      return
-    }
-
-    const errorText = formatCodexImportMessages(result.errors)
-    const warningText = formatCodexImportMessages(result.warnings)
-    oauthClient.error.value = [errorText, warningText].filter(Boolean).join('\n')
-
-    if (result.failed === 0) {
-      appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
-      return
-    }
-
-    if (successCount > 0) {
-      appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportPartial', params))
-      emit('created')
-      return
-    }
-
-    appStore.showError(t('admin.accounts.oauth.openai.codexSessionImportFailed'))
+    applyOpenAIImportResult(result)
   } catch (error: any) {
     oauthClient.error.value =
       error.response?.data?.detail ||

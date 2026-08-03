@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/chatgptcookie"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
@@ -127,6 +128,106 @@ type OpenAITokenInfo struct {
 	PlanType              string `json:"plan_type,omitempty"`
 	SubscriptionExpiresAt string `json:"subscription_expires_at,omitempty"`
 	PrivacyMode           string `json:"privacy_mode,omitempty"`
+}
+
+// ChatGPTCookieExchangeInput describes a one-shot browser-session exchange.
+// Content is used only for the upstream request and is never persisted.
+type ChatGPTCookieExchangeInput struct {
+	Content   string
+	UserAgent string
+	ProxyID   *int64
+}
+
+// ExchangeChatGPTCookie converts a Cookie-Editor export into the credential
+// shape consumed by the existing Codex session importer.
+func (s *OpenAIOAuthService) ExchangeChatGPTCookie(
+	ctx context.Context,
+	input *ChatGPTCookieExchangeInput,
+) (*chatgptcookie.Result, error) {
+	if input == nil || strings.TrimSpace(input.Content) == "" {
+		return nil, infraerrors.BadRequest("CHATGPT_COOKIE_REQUIRED", "ChatGPT Cookie-Editor content is required")
+	}
+	if s == nil || s.privacyClientFactory == nil {
+		return nil, infraerrors.New(
+			http.StatusServiceUnavailable,
+			"CHATGPT_COOKIE_CLIENT_UNAVAILABLE",
+			"ChatGPT browser-session client is unavailable",
+		)
+	}
+
+	var proxyURL string
+	if input.ProxyID != nil {
+		if s.proxyRepo == nil {
+			return nil, infraerrors.BadRequest("CHATGPT_COOKIE_PROXY_UNAVAILABLE", "proxy repository is unavailable")
+		}
+		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
+		if err != nil {
+			return nil, infraerrors.Newf(
+				http.StatusBadRequest,
+				"CHATGPT_COOKIE_PROXY_NOT_FOUND",
+				"proxy not found: %v",
+				err,
+			)
+		}
+		if proxy == nil {
+			return nil, infraerrors.BadRequest("CHATGPT_COOKIE_PROXY_NOT_FOUND", "proxy not found")
+		}
+		proxyURL = proxy.URL()
+	}
+
+	reqClient, err := s.privacyClientFactory(proxyURL)
+	if err != nil {
+		return nil, infraerrors.Newf(
+			http.StatusBadRequest,
+			"CHATGPT_COOKIE_PROXY_INVALID",
+			"failed to build ChatGPT browser-session client: %v",
+			err,
+		)
+	}
+	startedAt := time.Now()
+	result, err := chatgptcookie.Convert(
+		ctx,
+		reqClient.GetClient(),
+		[]byte(input.Content),
+		chatgptcookie.Options{UserAgent: input.UserAgent},
+	)
+	if err != nil {
+		slog.Warn(
+			"chatgpt_cookie_exchange",
+			"result", "failed",
+			"error_kind", chatgptcookie.KindOf(err),
+			"latency_ms", time.Since(startedAt).Milliseconds(),
+		)
+		return nil, mapChatGPTCookieExchangeError(err)
+	}
+	slog.Info(
+		"chatgpt_cookie_exchange",
+		"result", "success",
+		"input_format", result.InputFormat,
+		"cookie_count", result.CookieCount,
+		"endpoint_host", result.EndpointHost,
+		"latency_ms", time.Since(startedAt).Milliseconds(),
+	)
+	return result, nil
+}
+
+func mapChatGPTCookieExchangeError(err error) error {
+	switch chatgptcookie.KindOf(err) {
+	case chatgptcookie.ErrorInvalidInput:
+		return infraerrors.Newf(http.StatusBadRequest, "CHATGPT_COOKIE_INVALID", "%v", err)
+	case chatgptcookie.ErrorSessionRejected:
+		// Do not surface upstream 401 as this admin API's status: frontend auth
+		// interceptors may otherwise treat it as the administrator being logged out.
+		return infraerrors.Newf(http.StatusBadRequest, "CHATGPT_COOKIE_REJECTED", "%v", err)
+	case chatgptcookie.ErrorRateLimited:
+		return infraerrors.Newf(http.StatusTooManyRequests, "CHATGPT_COOKIE_RATE_LIMITED", "%v", err)
+	case chatgptcookie.ErrorUpstreamProtocol:
+		return infraerrors.Newf(http.StatusBadGateway, "CHATGPT_COOKIE_PROTOCOL_CHANGED", "%v", err)
+	case chatgptcookie.ErrorUpstream:
+		return infraerrors.Newf(http.StatusBadGateway, "CHATGPT_COOKIE_UPSTREAM_FAILED", "%v", err)
+	default:
+		return infraerrors.Newf(http.StatusInternalServerError, "CHATGPT_COOKIE_CONVERSION_FAILED", "%v", err)
+	}
 }
 
 // ExchangeCode exchanges authorization code for tokens

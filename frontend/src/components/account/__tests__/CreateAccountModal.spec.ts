@@ -5,11 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   createAccountMock,
   probeUpstreamBillingMock,
+  previewChatGPTCookieMock,
+  importChatGPTCookieMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
+  previewChatGPTCookieMock: vi.fn(),
+  importChatGPTCookieMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
 }))
@@ -32,6 +36,8 @@ vi.mock('@/api/admin', () => ({
       create: createAccountMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
       checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }),
+      previewChatGPTCookie: previewChatGPTCookieMock,
+      importChatGPTCookie: importChatGPTCookieMock,
       importCodexSession: importCodexSessionMock,
       createOpenAICodexPAT: createOpenAICodexPATMock,
     },
@@ -69,15 +75,26 @@ const OAuthAuthorizationFlowStub = defineComponent({
   name: 'OAuthAuthorizationFlow',
   props: {
     showManualOption: Boolean,
+    showChatgptCookieOption: Boolean,
+    chatgptCookiePreview: Object,
+    chatgptCookieAction: String,
     showCodexSessionImportOption: Boolean,
     showAgentIdentityOption: Boolean,
     showCodexPatOption: Boolean,
     initialInputMethod: String,
   },
   data: () => ({ inputMethod: 'manual' }),
-  emits: ['import-codex-session', 'import-codex-pat'],
+  emits: [
+    'preview-chatgpt-cookie',
+    'import-chatgpt-cookie',
+    'clear-chatgpt-cookie-preview',
+    'import-codex-session',
+    'import-codex-pat'
+  ],
   template: `
     <div>
+      <button data-testid="preview-chatgpt-cookie" @click="$emit('preview-chatgpt-cookie', { content: 'browser-cookie', userAgent: 'Test Browser' })">preview cookie</button>
+      <button data-testid="import-chatgpt-cookie" @click="$emit('import-chatgpt-cookie', { content: 'browser-cookie', userAgent: 'Test Browser' })">cookie</button>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
       <button data-testid="import-codex-pat" @click="$emit('import-codex-pat', 'pat-token')">pat</button>
     </div>
@@ -149,6 +166,21 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   beforeEach(() => {
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
     probeUpstreamBillingMock.mockReset().mockResolvedValue({})
+    previewChatGPTCookieMock.mockReset().mockResolvedValue({
+      input_format: 'Header String',
+      cookie_count: 1,
+      endpoint_host: 'chatgpt.com',
+      email: 'user@example.com',
+      expires_at: '2026-08-03T20:00:00Z'
+    })
+    importChatGPTCookieMock.mockReset().mockResolvedValue({
+      created: 1,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+      warnings: [],
+    })
     importCodexSessionMock.mockReset().mockResolvedValue({
       created: 1,
       updated: 0,
@@ -222,6 +254,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
     expect(flow.props('showManualOption')).toBe(true)
+    expect(flow.props('showChatgptCookieOption')).toBe(true)
     expect(flow.props('showCodexSessionImportOption')).toBe(true)
     expect(flow.props('showAgentIdentityOption')).toBe(true)
     expect(flow.props('showCodexPatOption')).toBe(true)
@@ -296,6 +329,42 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
+  })
+
+  it('passes ChatGPT browser cookies to the dedicated import API with the account settings', async () => {
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="import-chatgpt-cookie"]').trigger('click')
+    await flushPromises()
+
+    expect(importChatGPTCookieMock).toHaveBeenCalledTimes(1)
+    expect(importChatGPTCookieMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'browser-cookie',
+        user_agent: 'Test Browser',
+        name: 'Codex import',
+        update_existing: true
+      })
+    )
+    expect(importChatGPTCookieMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
+  })
+
+  it('previews ChatGPT cookies without creating an account', async () => {
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="preview-chatgpt-cookie"]').trigger('click')
+    await flushPromises()
+
+    expect(previewChatGPTCookieMock).toHaveBeenCalledWith({
+      content: 'browser-cookie',
+      user_agent: 'Test Browser',
+      proxy_id: null
+    })
+    expect(importChatGPTCookieMock).not.toHaveBeenCalled()
+    expect(
+      wrapper.getComponent(OAuthAuthorizationFlowStub).props('chatgptCookiePreview')
+    ).toMatchObject({
+      input_format: 'Header String',
+      endpoint_host: 'chatgpt.com'
+    })
   })
 
   it('leaves Codex PAT import billing ownership to the backend', async () => {

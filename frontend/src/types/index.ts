@@ -1599,6 +1599,31 @@ export interface CodexSessionImportRequest {
   confirm_mixed_channel_risk?: boolean
 }
 
+export interface ChatGPTCookieImportRequest extends CodexSessionImportRequest {
+  user_agent?: string
+}
+
+export interface ChatGPTCookiePreviewRequest {
+  content: string
+  user_agent?: string
+  proxy_id?: number | null
+}
+
+export interface ChatGPTCookiePreviewResult {
+  input_format: string
+  cookie_count: number
+  endpoint_host: string
+  email?: string
+  account_id?: string
+  plan_type?: string
+  expires_at: string
+}
+
+export interface ChatGPTCookieReimportRequest {
+  content: string
+  user_agent?: string
+}
+
 export interface OpenAICodexPATCreateRequest {
   access_token: string
   name?: string

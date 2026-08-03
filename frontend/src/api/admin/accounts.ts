@@ -16,6 +16,10 @@ import type {
   TempUnschedulableStatus,
   AdminDataPayload,
   AdminDataImportResult,
+  ChatGPTCookieImportRequest,
+  ChatGPTCookiePreviewRequest,
+  ChatGPTCookiePreviewResult,
+  ChatGPTCookieReimportRequest,
   CodexSessionImportRequest,
   CodexSessionImportResult,
   OpenAICodexPATCreateRequest,
@@ -667,6 +671,40 @@ export async function importCodexSession(payload: CodexSessionImportRequest): Pr
   return data
 }
 
+export async function importChatGPTCookie(
+  payload: ChatGPTCookieImportRequest
+): Promise<CodexSessionImportResult> {
+  const { data } = await apiClient.post<CodexSessionImportResult>(
+    '/admin/accounts/import/chatgpt-cookie',
+    payload,
+    { timeout: 120000 }
+  )
+  return data
+}
+
+export async function previewChatGPTCookie(
+  payload: ChatGPTCookiePreviewRequest
+): Promise<ChatGPTCookiePreviewResult> {
+  const { data } = await apiClient.post<ChatGPTCookiePreviewResult>(
+    '/admin/accounts/import/chatgpt-cookie/preview',
+    payload,
+    { timeout: 120000 }
+  )
+  return data
+}
+
+export async function reimportChatGPTCookie(
+  accountId: number,
+  payload: ChatGPTCookieReimportRequest
+): Promise<CodexSessionImportResult> {
+  const { data } = await apiClient.post<CodexSessionImportResult>(
+    `/admin/accounts/${accountId}/reimport/chatgpt-cookie`,
+    payload,
+    { timeout: 120000 }
+  )
+  return data
+}
+
 export async function createOpenAICodexPAT(payload: OpenAICodexPATCreateRequest): Promise<Account> {
   const { data } = await apiClient.post<Account>('/admin/openai/create-from-codex-pat', payload)
   return data
@@ -978,6 +1016,9 @@ export const accountsAPI = {
   exportData,
   importData,
   importCodexSession,
+  importChatGPTCookie,
+  previewChatGPTCookie,
+  reimportChatGPTCookie,
   createOpenAICodexPAT,
   getAntigravityDefaultModelMapping,
   batchDelete,

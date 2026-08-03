@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -39,6 +40,7 @@ type CodexSessionImportRequest struct {
 	UpdateExisting          *bool          `json:"update_existing"`
 	SkipDefaultGroupBind    *bool          `json:"skip_default_group_bind"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"`
+	targetAccountID         *int64
 }
 
 type CodexSessionImportResult struct {
@@ -163,15 +165,36 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		Items: make([]CodexSessionImportItem, 0, len(entries)),
 	}
 
-	existingAccounts, err := h.listAccountsFiltered(ctx, service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "", "created_at", "desc")
-	if err != nil {
-		return result, err
+	var targetAccount *service.Account
+	var existingAccounts []service.Account
+	if req.targetAccountID != nil {
+		account, err := h.adminService.GetAccount(ctx, *req.targetAccountID)
+		if err != nil {
+			return result, err
+		}
+		if account.Platform != service.PlatformOpenAI || account.Type != service.AccountTypeOAuth || account.ParentAccountID != nil {
+			return result, infraerrors.BadRequest(
+				"CHATGPT_COOKIE_TARGET_INVALID",
+				"ChatGPT Cookie re-import requires a non-shadow OpenAI OAuth account",
+			)
+		}
+		targetAccount = account
+		existingAccounts = []service.Account{*account}
+	} else {
+		accounts, err := h.listAccountsFiltered(ctx, service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "", "created_at", "desc")
+		if err != nil {
+			return result, err
+		}
+		existingAccounts = accounts
 	}
 	index := buildCodexAccountIndex(existingAccounts)
 
 	updateExisting := true
 	if req.UpdateExisting != nil {
 		updateExisting = *req.UpdateExisting
+	}
+	if targetAccount != nil {
+		updateExisting = true
 	}
 	concurrency := 3
 	if req.Concurrency != nil {
@@ -254,6 +277,26 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		markCodexIdentitySeen(seenIdentity, item.IdentityKeys, entry.Index, item.UserID)
 
 		existing, matchedKey := index.Find(item.IdentityKeys, item.UserID)
+		if targetAccount != nil {
+			if !chatGPTCookieTargetIdentityMatches(targetAccount, item) {
+				message := "Cookie identity does not match the selected account"
+				result.Failed++
+				result.Items = append(result.Items, CodexSessionImportItem{
+					Index:   entry.Index,
+					Name:    targetAccount.Name,
+					Action:  "failed",
+					Message: message,
+				})
+				result.Errors = append(result.Errors, CodexSessionImportMessage{
+					Index:   entry.Index,
+					Name:    targetAccount.Name,
+					Message: message,
+				})
+				continue
+			}
+			existing = targetAccount
+			matchedKey = "target:" + strconv.FormatInt(targetAccount.ID, 10)
+		}
 		if existing != nil && updateExisting {
 			if strings.HasPrefix(matchedKey, "account:") && item.UserID != "" &&
 				codexCredentialString(existing.Credentials, "chatgpt_user_id") == "" {
@@ -378,6 +421,37 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 	}
 
 	return result, nil
+}
+
+func chatGPTCookieTargetIdentityMatches(target *service.Account, item *codexImportAccount) bool {
+	if target == nil || item == nil {
+		return false
+	}
+
+	storedAccountID := codexCredentialString(target.Credentials, "chatgpt_account_id")
+	storedUserID := codexCredentialString(target.Credentials, "chatgpt_user_id")
+	storedEmail := strings.ToLower(codexCredentialString(target.Credentials, "email"))
+	incomingAccountID := strings.TrimSpace(item.AccountID)
+	incomingUserID := strings.TrimSpace(item.UserID)
+	incomingEmail := strings.ToLower(strings.TrimSpace(item.Email))
+
+	matchedStrongIdentity := false
+	for _, pair := range [][2]string{
+		{storedAccountID, incomingAccountID},
+		{storedUserID, incomingUserID},
+	} {
+		if pair[0] == "" || pair[1] == "" {
+			continue
+		}
+		if pair[0] != pair[1] {
+			return false
+		}
+		matchedStrongIdentity = true
+	}
+	if matchedStrongIdentity {
+		return true
+	}
+	return storedEmail != "" && incomingEmail != "" && storedEmail == incomingEmail
 }
 
 func parseCodexSessionImportEntries(req CodexSessionImportRequest) ([]codexImportEntry, error) {

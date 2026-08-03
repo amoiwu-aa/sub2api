@@ -264,6 +264,13 @@
                   :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
                   :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at" />
                 <span
+                  v-if="row.extra?.openai_credential_source === 'chatgpt_cookie'"
+                  class="inline-flex items-center rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
+                  :title="row.extra?.chatgpt_cookie_imported_at || t('admin.accounts.chatgptCookieSource')"
+                >
+                  {{ t('admin.accounts.chatgptCookieSource') }}
+                </span>
+                <span
                   v-if="getAntigravityTierLabel(row)"
                   :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
                 >
@@ -407,12 +414,23 @@
           <template #cell-expires_at="{ row, value }">
             <div class="flex flex-col items-start gap-1">
               <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatExpiresAt(value) }}</span>
-              <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
+              <div v-if="isExpired(value) || cookieExpiryWarningKey(row, value) || (row.auto_pause_on_expired && value)" class="flex flex-wrap items-center gap-1">
                 <span
                   v-if="isExpired(value)"
                   class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
                 >
                   {{ t('admin.accounts.expired') }}
+                </span>
+                <span
+                  v-else-if="cookieExpiryWarningKey(row, value)"
+                  :class="[
+                    'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium',
+                    cookieExpiryWarningKey(row, value) === 'admin.accounts.expiresWithin24Hours'
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                      : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                  ]"
+                >
+                  {{ t(cookieExpiryWarningKey(row, value) || '') }}
                 </span>
                 <span
                   v-if="row.auto_pause_on_expired && value"
@@ -573,6 +591,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
+import { chatgptCookieExpiryWarningKey } from '@/utils/chatgptCookieAccount'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
@@ -2274,6 +2293,7 @@ const isExpired = (value: number | null) => {
   if (!value) return false
   return value * 1000 <= Date.now()
 }
+const cookieExpiryWarningKey = chatgptCookieExpiryWarningKey
 // 所绑定代理的有效期(逻辑同 /admin/proxies,见 utils/proxyExpiry)
 const proxyExpiryBadge = (p: AccountProxy): string => proxyExpiryBadgeClass(p.expires_at, p.status)
 const proxyExpiryText = (p: AccountProxy): string => {

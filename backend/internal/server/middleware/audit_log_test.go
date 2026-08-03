@@ -188,3 +188,47 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
 }
+
+// ChatGPT Cookie 导入会在请求体中携带完整浏览器会话，审计日志必须整体省略请求体，
+// 而不是依赖键名脱敏。
+func TestChatGPTCookieImportRouteOmitsAuditBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const route = "POST /api/v1/admin/accounts/import/chatgpt-cookie"
+	for _, sensitiveRoute := range []string{
+		route,
+		"POST /api/v1/admin/accounts/import/chatgpt-cookie/preview",
+		"POST /api/v1/admin/accounts/:id/reimport/chatgpt-cookie",
+	} {
+		require.Contains(t, auditBodyOmittedRoutes, sensitiveRoute)
+	}
+
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+		c.Next()
+	})
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	router.POST("/api/v1/admin/accounts/import/chatgpt-cookie", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/import/chatgpt-cookie",
+		bytes.NewBufferString(`{"content":"__Secure-next-auth.session-token=audit-canary-cookie"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	auditService.Stop()
+
+	repository.mu.Lock()
+	logs := append([]*service.AuditLog(nil), repository.logs...)
+	repository.mu.Unlock()
+	require.Len(t, logs, 1)
+	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
+	require.NotContains(t, logs[0].RequestBody, "audit-canary")
+}

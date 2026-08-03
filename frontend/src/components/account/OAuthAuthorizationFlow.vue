@@ -92,6 +92,17 @@
                 t('admin.accounts.oauth.openai.accessTokenAuth')
               }}</span>
             </label>
+            <label v-if="showChatgptCookieOption" class="flex cursor-pointer items-center gap-2">
+              <input
+                v-model="inputMethod"
+                type="radio"
+                value="chatgpt_cookie"
+                class="text-blue-600 focus:ring-blue-500"
+              />
+              <span class="text-sm text-blue-900 dark:text-blue-200">{{
+                t('admin.accounts.oauth.openai.chatgptCookieAuth')
+              }}</span>
+            </label>
             <label v-if="showCodexSessionImportOption" class="flex cursor-pointer items-center gap-2">
               <input
                 v-model="inputMethod"
@@ -284,6 +295,219 @@
               <Icon v-else name="sparkles" size="sm" class="mr-2" />
               {{ loading ? t(getOAuthKey('convertingSSO')) : t(getOAuthKey('convertSSOAndCreate')) }}
             </button>
+          </div>
+        </div>
+
+        <!-- ChatGPT browser cookie conversion and account import -->
+        <div v-if="inputMethod === 'chatgpt_cookie'" class="space-y-4">
+          <div
+            class="rounded-lg border border-blue-300 bg-white/80 p-4 dark:border-blue-600 dark:bg-gray-800/80"
+          >
+            <p class="mb-3 text-sm text-blue-700 dark:text-blue-300">
+              {{ t('admin.accounts.oauth.openai.chatgptCookieDesc') }}
+            </p>
+
+            <div
+              class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-900/30"
+            >
+              <div class="flex items-start gap-2">
+                <Icon
+                  name="exclamationTriangle"
+                  size="sm"
+                  class="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400"
+                />
+                <p class="text-xs text-amber-800 dark:text-amber-300">
+                  {{ t('admin.accounts.oauth.openai.chatgptCookieSecurity') }}
+                </p>
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label
+                for="chatgpt-cookie-content"
+                class="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >
+                <Icon name="key" size="sm" class="text-blue-500" />
+                {{ t('admin.accounts.oauth.openai.chatgptCookieInputLabel') }}
+              </label>
+              <textarea
+                id="chatgpt-cookie-content"
+                v-model="chatgptCookieInput"
+                rows="8"
+                class="input w-full resize-y font-mono text-sm"
+                :placeholder="t('admin.accounts.oauth.openai.chatgptCookiePlaceholder')"
+                :disabled="loading"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+              ></textarea>
+              <p class="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                {{ t('admin.accounts.oauth.openai.chatgptCookieHint') }}
+              </p>
+            </div>
+
+            <details class="mb-4 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+              <summary
+                class="cursor-pointer select-none text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
+                {{ t('admin.accounts.oauth.openai.chatgptCookieAdvanced') }}
+              </summary>
+              <div class="mt-3">
+                <label
+                  for="chatgpt-cookie-user-agent"
+                  class="mb-2 block text-xs font-medium text-gray-600 dark:text-gray-400"
+                >
+                  {{ t('admin.accounts.oauth.openai.chatgptCookieUserAgentLabel') }}
+                </label>
+                <input
+                  id="chatgpt-cookie-user-agent"
+                  v-model="chatgptCookieUserAgent"
+                  type="text"
+                  class="input w-full font-mono text-xs"
+                  :placeholder="t('admin.accounts.oauth.openai.chatgptCookieUserAgentPlaceholder')"
+                  :disabled="loading"
+                  autocomplete="off"
+                  spellcheck="false"
+                  @keydown.enter.prevent="handleImportChatGPTCookie"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.accounts.oauth.openai.chatgptCookieUserAgentHint') }}
+                </p>
+              </div>
+            </details>
+
+            <div
+              v-if="chatgptCookiePreview"
+              data-testid="chatgpt-cookie-preview"
+              class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-700 dark:bg-emerald-900/20"
+            >
+              <div class="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+                <Icon name="checkCircle" size="sm" />
+                {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewSuccess') }}
+              </div>
+              <dl class="grid grid-cols-1 gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
+                <div>
+                  <dt class="text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewFormat') }}
+                  </dt>
+                  <dd class="font-medium text-gray-800 dark:text-gray-200">
+                    {{ chatgptCookiePreview.input_format }}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewCount') }}
+                  </dt>
+                  <dd class="font-medium text-gray-800 dark:text-gray-200">
+                    {{ chatgptCookiePreview.cookie_count }}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewHost') }}
+                  </dt>
+                  <dd class="font-medium text-gray-800 dark:text-gray-200">
+                    {{ chatgptCookiePreview.endpoint_host }}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewExpiry') }}
+                  </dt>
+                  <dd class="font-medium text-gray-800 dark:text-gray-200">
+                    {{ chatgptCookiePreviewExpiry }}
+                  </dd>
+                </div>
+                <div v-if="chatgptCookiePreview.email">
+                  <dt class="text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewEmail') }}
+                  </dt>
+                  <dd class="break-all font-medium text-gray-800 dark:text-gray-200">
+                    {{ chatgptCookiePreview.email }}
+                  </dd>
+                </div>
+                <div v-if="chatgptCookiePreview.account_id">
+                  <dt class="text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewAccount') }}
+                  </dt>
+                  <dd
+                    class="truncate font-mono font-medium text-gray-800 dark:text-gray-200"
+                    :title="chatgptCookiePreview.account_id"
+                  >
+                    {{ chatgptCookiePreview.account_id }}
+                  </dd>
+                </div>
+                <div v-if="chatgptCookiePreview.plan_type">
+                  <dt class="text-gray-500 dark:text-gray-400">
+                    {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewPlan') }}
+                  </dt>
+                  <dd class="font-medium text-gray-800 dark:text-gray-200">
+                    {{ chatgptCookiePreview.plan_type }}
+                  </dd>
+                </div>
+              </dl>
+              <p class="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+                {{ t('admin.accounts.oauth.openai.chatgptCookiePreviewSafe') }}
+              </p>
+            </div>
+
+            <div
+              v-if="error"
+              class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-700 dark:bg-red-900/30"
+            >
+              <p class="whitespace-pre-line text-sm text-red-600 dark:text-red-400">
+                {{ error }}
+              </p>
+            </div>
+
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                class="btn btn-secondary flex-1"
+                :disabled="loading || !chatgptCookieInput.trim()"
+                @click="handlePreviewChatGPTCookie"
+              >
+                <svg
+                  v-if="loading && chatgptCookieAction === 'preview'"
+                  class="-ml-1 mr-2 h-4 w-4 animate-spin"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <Icon v-else name="shield" size="sm" class="mr-2" />
+                {{
+                  loading && chatgptCookieAction === 'preview'
+                    ? t('admin.accounts.oauth.openai.chatgptCookiePreviewing')
+                    : t('admin.accounts.oauth.openai.chatgptCookiePreviewButton')
+                }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary flex-1"
+                :disabled="loading || !chatgptCookieInput.trim()"
+                @click="handleImportChatGPTCookie"
+              >
+                <svg
+                  v-if="loading && chatgptCookieAction === 'submit'"
+                  class="-ml-1 mr-2 h-4 w-4 animate-spin"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <Icon v-else name="sparkles" size="sm" class="mr-2" />
+                {{
+                  loading && chatgptCookieAction === 'submit'
+                    ? t('admin.accounts.oauth.openai.chatgptCookieConverting')
+                    : chatgptCookieMode === 'reauthorize'
+                      ? t('admin.accounts.oauth.openai.chatgptCookieReimport')
+                      : t('admin.accounts.oauth.openai.chatgptCookieImportAndCreate')
+                }}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -815,7 +1039,7 @@ import { useI18n } from 'vue-i18n'
 import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
 import type { AddMethod, AuthInputMethod } from '@/composables/useAccountOAuth'
-import type { AccountPlatform } from '@/types'
+import type { AccountPlatform, ChatGPTCookiePreviewResult } from '@/types'
 
 interface Props {
   addMethod: AddMethod
@@ -832,11 +1056,15 @@ interface Props {
   showMobileRefreshTokenOption?: boolean // Whether to show mobile refresh token option (OpenAI only)
   showSessionTokenOption?: boolean
   showAccessTokenOption?: boolean
+  showChatgptCookieOption?: boolean
   showCodexSessionImportOption?: boolean
   showAgentIdentityOption?: boolean
   showCodexPatOption?: boolean
   showSsoOption?: boolean
   showManualOption?: boolean
+  chatgptCookiePreview?: ChatGPTCookiePreviewResult | null
+  chatgptCookieAction?: 'preview' | 'submit' | null
+  chatgptCookieMode?: 'create' | 'reauthorize'
   initialInputMethod?: AuthInputMethod
   platform?: AccountPlatform // Platform type for different UI/text
   showProjectId?: boolean // New prop to control project ID visibility
@@ -856,11 +1084,15 @@ const props = withDefaults(defineProps<Props>(), {
   showMobileRefreshTokenOption: false,
   showSessionTokenOption: false,
   showAccessTokenOption: false,
+  showChatgptCookieOption: false,
   showCodexSessionImportOption: false,
   showAgentIdentityOption: false,
   showCodexPatOption: false,
   showSsoOption: false,
   showManualOption: true,
+  chatgptCookiePreview: null,
+  chatgptCookieAction: null,
+  chatgptCookieMode: 'create',
   initialInputMethod: 'manual',
   platform: 'anthropic',
   showProjectId: true
@@ -874,6 +1106,9 @@ const emit = defineEmits<{
   'validate-mobile-refresh-token': [refreshToken: string]
   'validate-session-token': [sessionToken: string]
   'import-access-token': [accessToken: string]
+  'preview-chatgpt-cookie': [payload: { content: string; userAgent?: string }]
+  'import-chatgpt-cookie': [payload: { content: string; userAgent?: string }]
+  'clear-chatgpt-cookie-preview': []
   'import-codex-session': [content: string]
   'import-codex-pat': [accessToken: string]
   'import-sso': [content: string]
@@ -919,6 +1154,10 @@ const authCodeInput = ref('')
 const sessionKeyInput = ref('')
 const refreshTokenInput = ref('')
 const sessionTokenInput = ref('')
+const chatgptCookieInput = ref('')
+const defaultBrowserUserAgent =
+  typeof navigator !== 'undefined' ? navigator.userAgent : ''
+const chatgptCookieUserAgent = ref(defaultBrowserUserAgent)
 const codexSessionInput = ref('')
 const codexPATInput = ref('')
 const ssoCookieInput = ref('')
@@ -934,6 +1173,7 @@ const methodOptionCount = computed(() => [
   props.showMobileRefreshTokenOption,
   props.showSessionTokenOption,
   props.showAccessTokenOption,
+  props.showChatgptCookieOption,
   props.showCodexSessionImportOption,
   props.showAgentIdentityOption,
   props.showCodexPatOption,
@@ -977,6 +1217,13 @@ const parsedSSOCount = computed(() => {
     .filter((item) => item).length
 })
 
+const chatgptCookiePreviewExpiry = computed(() => {
+  const raw = props.chatgptCookiePreview?.expires_at
+  if (!raw) return ''
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleString()
+})
+
 // Watchers
 watch(() => props.initialInputMethod, (newVal) => {
   inputMethod.value = newVal
@@ -984,6 +1231,10 @@ watch(() => props.initialInputMethod, (newVal) => {
 
 watch(inputMethod, (newVal) => {
   emit('update:inputMethod', newVal)
+})
+
+watch([chatgptCookieInput, chatgptCookieUserAgent], () => {
+  emit('clear-chatgpt-cookie-preview')
 })
 
 // Auto-extract code from callback URL (OpenAI/Gemini/Antigravity/Grok)
@@ -1058,6 +1309,28 @@ const handleImportCodexSession = () => {
   }
 }
 
+const handleImportChatGPTCookie = () => {
+  const content = chatgptCookieInput.value.trim()
+  if (!content) return
+
+  const userAgent = chatgptCookieUserAgent.value.trim()
+  emit('import-chatgpt-cookie', {
+    content,
+    ...(userAgent ? { userAgent } : {})
+  })
+}
+
+const handlePreviewChatGPTCookie = () => {
+  const content = chatgptCookieInput.value.trim()
+  if (!content) return
+
+  const userAgent = chatgptCookieUserAgent.value.trim()
+  emit('preview-chatgpt-cookie', {
+    content,
+    ...(userAgent ? { userAgent } : {})
+  })
+}
+
 const handleImportCodexPAT = () => {
   if (codexPATInput.value.trim()) {
     emit('import-codex-pat', codexPATInput.value.trim())
@@ -1078,6 +1351,8 @@ defineExpose({
   sessionKey: sessionKeyInput,
   refreshToken: refreshTokenInput,
   sessionToken: sessionTokenInput,
+  chatgptCookie: chatgptCookieInput,
+  chatgptCookieUserAgent,
   codexSession: codexSessionInput,
   codexPAT: codexPATInput,
   ssoCookie: ssoCookieInput,
@@ -1089,6 +1364,8 @@ defineExpose({
     sessionKeyInput.value = ''
     refreshTokenInput.value = ''
     sessionTokenInput.value = ''
+    chatgptCookieInput.value = ''
+    chatgptCookieUserAgent.value = defaultBrowserUserAgent
     codexSessionInput.value = ''
     codexPATInput.value = ''
     ssoCookieInput.value = ''
