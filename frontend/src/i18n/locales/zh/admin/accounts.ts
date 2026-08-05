@@ -434,6 +434,7 @@ export default {
         resetTooltipReady: '消耗 1 次重置次数以立即恢复当前窗口',
         resetTooltipNeedQuery: '先点击「次数」加载剩余重置次数',
         resetTooltipNoCredits: '没有可用的重置次数',
+        unavailable: '临时额度不可用',
         resetTooltipShadow: 'Spark 影子账号不能重置次数;请在母账号上重置',
         expiresAt: '到期 {time}',
         expiresAtFull: '重置次数到期时间: {time}',

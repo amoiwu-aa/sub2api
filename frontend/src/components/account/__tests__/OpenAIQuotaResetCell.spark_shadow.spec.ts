@@ -85,6 +85,24 @@ describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
     wrapper.unmount()
   })
 
+  it('查询确认没有重置次数后明确显示临时额度不可用', async () => {
+    vi.mocked(refreshOpenAIQuota).mockResolvedValue({
+      rate_limit_reset_credits: {
+        available_count: 0,
+        credits: [],
+      },
+      fetched_at: 1770000000,
+      cache_persisted: true,
+    })
+
+    const wrapper = mount(OpenAIQuotaResetCell, { props: { account: makeAccount({ parent_account_id: null }) } })
+    await wrapper.findAll('button')[0].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.openaiQuotaReset.unavailable')
+    wrapper.unmount()
+  })
+
   it('从账号 extra 缓存恢复重置卡次数和到期时间', () => {
     const account = makeAccount({
       parent_account_id: null,

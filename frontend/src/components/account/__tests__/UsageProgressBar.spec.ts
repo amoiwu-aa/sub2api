@@ -97,6 +97,22 @@ describe('UsageProgressBar', () => {
     expect(wrapper.text()).not.toContain('usage.resetPending')
   })
 
+  it('上游没有返回有效窗口时显示不可用，而不是 0% 或「现在」', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '5h',
+        utilization: 0,
+        showNowWhenIdle: true,
+        unavailable: true,
+        color: 'indigo'
+      }
+    })
+
+    expect(wrapper.text()).toContain('common.notAvailable')
+    expect(wrapper.text()).not.toContain('0%')
+    expect(wrapper.text()).not.toContain('usage.resetNow')
+  })
+
   it('剩余容量模式在 100% 时显示满格绿色', () => {
     const wrapper = mount(UsageProgressBar, {
       props: {

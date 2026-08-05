@@ -242,6 +242,24 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 		}
 	})
 
+	t.Run("zero-length 5h window is unavailable instead of idle", func(t *testing.T) {
+		extra := map[string]any{
+			"codex_5h_used_percent":        0.0,
+			"codex_5h_window_minutes":      0,
+			"codex_5h_reset_after_seconds": 0,
+		}
+		progress := buildCodexUsageProgressFromExtra(extra, "5h", now)
+		if progress == nil {
+			t.Fatal("expected non-nil progress")
+		}
+		if !progress.Unavailable {
+			t.Fatal("expected zero-length upstream window to be unavailable")
+		}
+		if progress.UnavailableReason != "upstream_window_unavailable" {
+			t.Fatalf("unexpected unavailable reason: %q", progress.UnavailableReason)
+		}
+	})
+
 	t.Run("expired 7d window zeroes utilization", func(t *testing.T) {
 		extra := map[string]any{
 			"codex_7d_used_percent": 88.0,

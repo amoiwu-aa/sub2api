@@ -568,11 +568,19 @@ func buildCodexSparkWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) m
 	if spark == nil {
 		return nil
 	}
+	return buildCodexRateLimitExtraUpdates(spark, now)
+}
 
+// buildCodexRateLimitExtraUpdates converts a /wham/usage rate-limit envelope
+// into the canonical codex_5h/codex_7d account snapshot fields.
+func buildCodexRateLimitExtraUpdates(rateLimit *OpenAIRateLimit, now time.Time) map[string]any {
+	if rateLimit == nil {
+		return nil
+	}
 	// Reuse OpenAICodexUsageSnapshot / Normalize to map primary/secondary windows
 	// to canonical 5h/7d buckets (same logic as probeOpenAICodexSnapshot).
 	snap := &OpenAICodexUsageSnapshot{}
-	if w := spark.PrimaryWindow; w != nil {
+	if w := rateLimit.PrimaryWindow; w != nil {
 		p := w.UsedPercent
 		snap.PrimaryUsedPercent = &p
 		ra := int(w.ResetAfterSeconds)
@@ -580,7 +588,7 @@ func buildCodexSparkWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) m
 		wm := int(w.LimitWindowSeconds / 60)
 		snap.PrimaryWindowMinutes = &wm
 	}
-	if w := spark.SecondaryWindow; w != nil {
+	if w := rateLimit.SecondaryWindow; w != nil {
 		p := w.UsedPercent
 		snap.SecondaryUsedPercent = &p
 		ra := int(w.ResetAfterSeconds)
@@ -624,6 +632,28 @@ func buildCodexSparkWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) m
 	}
 	updates["codex_usage_updated_at"] = now.Format(time.RFC3339)
 	return updates
+}
+
+// openAIQuotaFiveHourExhaustedUntil returns an explicit upstream-enforced 5h
+// exhaustion window. Missing/null windows, zero-length windows, and stale
+// resets must never be treated as exhaustion.
+func openAIQuotaFiveHourExhaustedUntil(rateLimit *OpenAIRateLimit, now time.Time) (time.Time, bool) {
+	if rateLimit == nil || !rateLimit.LimitReached {
+		return time.Time{}, false
+	}
+	for _, window := range []*OpenAIRateLimitWindow{rateLimit.PrimaryWindow, rateLimit.SecondaryWindow} {
+		if window == nil || window.LimitWindowSeconds <= 0 || window.LimitWindowSeconds > int64((6*time.Hour).Seconds()) {
+			continue
+		}
+		if window.UsedPercent < 100 || window.ResetAfterSeconds <= 0 {
+			continue
+		}
+		resetAt := now.Add(time.Duration(window.ResetAfterSeconds) * time.Second)
+		if resetAt.After(now) {
+			return resetAt, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // mapUpstreamStatus collapses upstream HTTP statuses into a stable set we

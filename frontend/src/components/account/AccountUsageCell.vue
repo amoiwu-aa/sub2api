@@ -128,6 +128,7 @@
           :resets-at="usageInfo.five_hour.resets_at"
           :window-stats="usageInfo.five_hour.window_stats"
           :show-now-when-idle="true"
+          :unavailable="usageInfo.five_hour.unavailable"
           color="indigo"
         />
         <UsageProgressBar

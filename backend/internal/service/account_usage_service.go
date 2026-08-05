@@ -167,12 +167,14 @@ type WindowStats struct {
 
 // UsageProgress 使用量进度
 type UsageProgress struct {
-	Utilization      float64      `json:"utilization"`            // 使用率百分比 (0-100+，100表示100%)
-	ResetsAt         *time.Time   `json:"resets_at"`              // 重置时间
-	RemainingSeconds int          `json:"remaining_seconds"`      // 距重置剩余秒数
-	WindowStats      *WindowStats `json:"window_stats,omitempty"` // 窗口期统计（从窗口开始到当前的使用量）
-	UsedRequests     int64        `json:"used_requests,omitempty"`
-	LimitRequests    int64        `json:"limit_requests,omitempty"`
+	Utilization       float64      `json:"utilization"`           // 使用率百分比 (0-100+，100表示100%)
+	ResetsAt          *time.Time   `json:"resets_at"`             // 重置时间
+	RemainingSeconds  int          `json:"remaining_seconds"`     // 距重置剩余秒数
+	Unavailable       bool         `json:"unavailable,omitempty"` // 上游未返回有效窗口，不能将 0% 误解为可用
+	UnavailableReason string       `json:"unavailable_reason,omitempty"`
+	WindowStats       *WindowStats `json:"window_stats,omitempty"` // 窗口期统计（从窗口开始到当前的使用量）
+	UsedRequests      int64        `json:"used_requests,omitempty"`
+	LimitRequests     int64        `json:"limit_requests,omitempty"`
 }
 
 // AntigravityModelQuota Antigravity 单个模型的配额信息
@@ -688,7 +690,25 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 
 	applyExtraToUsage(usage, account.Extra, now)
 
-	if (force || shouldRefreshOpenAICodexSnapshot(account, usage, now)) && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
+	if force && !account.IsShadow() && s.openAIQuotaService != nil {
+		// The periodic quota patrol must use the authoritative /wham/usage
+		// response even when websocket header sampling is disabled. Otherwise an
+		// OAuth account can keep being scheduled until a request receives a 429.
+		quotaUsage, err := s.openAIQuotaService.QueryUsage(ctx, account.ID)
+		if err != nil {
+			return usage, err
+		}
+		if updates := buildCodexRateLimitExtraUpdates(quotaUsage.RateLimit, now); len(updates) > 0 {
+			mergeAccountExtra(account, updates)
+			s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+			applyExtraToUsage(usage, account.Extra, now)
+		}
+		if resetAt, exhausted := openAIQuotaFiveHourExhaustedUntil(quotaUsage.RateLimit, now); exhausted {
+			if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+				slog.Warn("openai_quota_patrol_rate_limit_persist_failed", "account_id", account.ID, "error", err)
+			}
+		}
+	} else if (force || shouldRefreshOpenAICodexSnapshot(account, usage, now)) && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
 		if account.IsShadow() {
 			// Spark shadow accounts fetch usage from /wham/usage (bengalfox channel)
 			// via the shared OpenAIQuotaService, which resolves credentials from the
@@ -1876,6 +1896,14 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 	}
 
 	progress := &UsageProgress{Utilization: parseExtraFloat64(usedRaw)}
+	if rawWindowMinutes, hasWindowMinutes := extra["codex_"+window+"_window_minutes"]; hasWindowMinutes && parseExtraInt(rawWindowMinutes) <= 0 {
+		// /wham/usage returns a null/empty secondary window for accounts that
+		// do not currently expose a 5h limit. Preserve local request stats, but
+		// do not render that absence as "0% / now".
+		progress.Unavailable = true
+		progress.UnavailableReason = "upstream_window_unavailable"
+		return progress
+	}
 	if resetAtRaw, ok := extra[resetAtKey]; ok {
 		if resetAt, err := parseTime(fmt.Sprint(resetAtRaw)); err == nil {
 			progress.ResetsAt = &resetAt

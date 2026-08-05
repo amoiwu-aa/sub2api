@@ -1474,6 +1474,7 @@ export default {
         resetTooltipReady: 'Consume 1 reset credit to immediately restore the window',
         resetTooltipNeedQuery: 'Click Credits first to load the available count',
         resetTooltipNoCredits: 'No reset credits available',
+        unavailable: 'Temporary quota unavailable',
         resetTooltipShadow: 'Spark shadow accounts cannot reset credits; reset on the parent account',
         expiresAt: 'Expires {time}',
         expiresAtFull: 'Reset credit expires at {time}',

@@ -102,6 +102,12 @@
         </span>
       </div>
     </div>
+    <div
+      v-else-if="data && !isShadow && availableResetCount === 0"
+      class="text-[10px] text-gray-500 dark:text-gray-400"
+    >
+      {{ t('admin.accounts.openaiQuotaReset.unavailable') }}
+    </div>
 
     <!-- Error / success feedback -->
     <div

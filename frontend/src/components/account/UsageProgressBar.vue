@@ -43,12 +43,18 @@
       </div>
 
       <!-- Percentage -->
-      <span :class="['w-[32px] shrink-0 text-right text-[10px] font-medium', textClass]">
+      <span v-if="!unavailable" :class="['w-[32px] shrink-0 text-right text-[10px] font-medium', textClass]">
         {{ displayPercent }}
+      </span>
+      <span
+        v-else
+        class="w-[32px] shrink-0 text-right text-[10px] font-medium text-gray-500 dark:text-gray-400"
+      >
+        {{ t('common.notAvailable') }}
       </span>
 
       <!-- Reset time -->
-      <span v-if="shouldShowResetTime" class="shrink-0 text-[10px] text-gray-400">
+      <span v-if="shouldShowResetTime && !unavailable" class="shrink-0 text-[10px] text-gray-400">
         {{ formatResetTime }}
       </span>
     </div>
@@ -70,6 +76,7 @@ const props = defineProps<{
   windowStats?: WindowStats | null
   showNowWhenIdle?: boolean
   remainingCapacity?: boolean
+  unavailable?: boolean
 }>()
 
 const { t } = useI18n()
@@ -110,6 +117,9 @@ const labelClass = computed(() => {
 
 // Progress bar color based on utilization
 const barClass = computed(() => {
+  if (props.unavailable) {
+    return 'bg-gray-400 dark:bg-gray-500'
+  }
   if (props.remainingCapacity) {
     if (props.utilization <= 20) {
       return 'bg-red-500'
@@ -162,9 +172,12 @@ const displayPercent = computed(() => {
 })
 
 const shouldShowResetTime = computed(() => {
+  if (props.unavailable) return false
   if (props.resetsAt) return true
   return Boolean(props.showNowWhenIdle && props.utilization <= 0)
 })
+
+const unavailable = computed(() => Boolean(props.unavailable))
 
 // Format reset time
 const formatResetTime = computed(() => {

@@ -7,11 +7,12 @@ import (
 	"time"
 )
 
-// quotaPatrolPlatforms 是巡检覆盖的平台：目前只有这两个实现了额度耗尽停号。
+// quotaPatrolPlatforms 是巡检覆盖的平台：这些平台具备可主动查询的额度数据，
+// 并在额度耗尽时可以提前停止调度。
 //
 // 其余平台要么没有可查的上游额度接口，要么额度耗尽表现为请求失败后由
 // failover 自然切走，不需要提前停止调度。
-var quotaPatrolPlatforms = []string{PlatformKiro, PlatformCursor}
+var quotaPatrolPlatforms = []string{PlatformKiro, PlatformCursor, PlatformOpenAI}
 
 // defaultQuotaPatrolInterval 是巡检间隔。
 //
@@ -114,6 +115,11 @@ func (s *AccountQuotaPatrolService) patrol() {
 	checked := 0
 	for i := range accounts {
 		account := &accounts[i]
+		// OpenAI 的配额接口依赖 OAuth 令牌；API Key 账号没有可查询的
+		// /wham/usage 端点，不能纳入主动巡检。
+		if account.Platform == PlatformOpenAI && account.Type != AccountTypeOAuth {
+			continue
+		}
 
 		// 停号与预警的判定都在 GetUsage 真正拉取额度那条路径里（见 getKiroUsage /
 		// getCursorUsage），这里不重复调用一遍。
@@ -121,7 +127,12 @@ func (s *AccountQuotaPatrolService) patrol() {
 		// 之所以能确定判定一定会发生：额度缓存 TTL 是 3 分钟，而巡检间隔 10 分钟，
 		// 每一轮都必然穿透缓存走到拉取分支。反过来，万一真命中了缓存，那也只说明
 		// 3 分钟内刚有人查过额度，那次查询已经判定过了。两种情况都不会漏。
-		if _, err := s.usageService.GetUsage(ctx, account.ID); err != nil {
+		// OpenAI's normal path may rely on response-header sampling. The patrol
+		// must force an authoritative /wham/usage query so an explicitly
+		// exhausted 5h window is removed from scheduling without a dashboard
+		// operator having to trigger the check manually.
+		forceProbe := account.Platform == PlatformOpenAI
+		if _, err := s.usageService.GetUsage(ctx, account.ID, forceProbe); err != nil {
 			slog.Warn("quota_patrol.fetch_usage_failed",
 				"account_id", account.ID, "platform", account.Platform, "error", err)
 			continue
