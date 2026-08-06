@@ -377,6 +377,7 @@ func TestUpstreamBillingProbeFallsBackToNewAPIPricing(t *testing.T) {
 				"success": true,
 				"pricing_version": "pricing-v1",
 				"group_ratio": {"default": 1, "vip": 0.8},
+				"usable_group": {"default": "site-specific-shape"},
 				"data": [
 					{
 						"model_name": "gpt-5.6",

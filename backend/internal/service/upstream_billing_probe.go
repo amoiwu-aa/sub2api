@@ -159,11 +159,10 @@ type newAPIRatioConfigResponse struct {
 }
 
 type newAPIPricingResponse struct {
-	Success        bool                         `json:"success"`
-	Data           []newAPIPricingModel         `json:"data"`
-	GroupRatio     map[string]float64           `json:"group_ratio"`
-	PricingVersion string                       `json:"pricing_version"`
-	UsableGroup    map[string]newAPIUsableGroup `json:"usable_group"`
+	Success        bool                 `json:"success"`
+	Data           []newAPIPricingModel `json:"data"`
+	GroupRatio     map[string]float64   `json:"group_ratio"`
+	PricingVersion string               `json:"pricing_version"`
 }
 
 type newAPIPricingModel struct {
@@ -173,11 +172,6 @@ type newAPIPricingModel struct {
 	ModelPrice      float64  `json:"model_price"`
 	CompletionRatio float64  `json:"completion_ratio"`
 	EnableGroups    []string `json:"enable_groups"`
-}
-
-type newAPIUsableGroup struct {
-	Description string  `json:"desc"`
-	Ratio       float64 `json:"ratio"`
 }
 
 type newAPIModelBilling struct {
