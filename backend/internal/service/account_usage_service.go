@@ -703,7 +703,7 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 			s.persistOpenAICodexProbeSnapshot(account.ID, updates)
 			applyExtraToUsage(usage, account.Extra, now)
 		}
-		if resetAt, exhausted := openAIQuotaFiveHourExhaustedUntil(quotaUsage.RateLimit, now); exhausted {
+		if resetAt, exhausted := openAIQuotaExhaustedUntil(quotaUsage.RateLimit, now); exhausted {
 			if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
 				slog.Warn("openai_quota_patrol_rate_limit_persist_failed", "account_id", account.ID, "error", err)
 			}

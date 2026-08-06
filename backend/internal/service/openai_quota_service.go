@@ -634,26 +634,32 @@ func buildCodexRateLimitExtraUpdates(rateLimit *OpenAIRateLimit, now time.Time) 
 	return updates
 }
 
-// openAIQuotaFiveHourExhaustedUntil returns an explicit upstream-enforced 5h
-// exhaustion window. Missing/null windows, zero-length windows, and stale
+// openAIQuotaExhaustedUntil returns the latest reset time among explicitly
+// exhausted upstream windows. Some accounts now expose only a weekly window,
+// so the patrol must follow the windows actually returned by /wham/usage rather
+// than assuming every account has a 5h window.
+//
+// Missing/null windows, zero-length windows, incomplete utilization, and stale
 // resets must never be treated as exhaustion.
-func openAIQuotaFiveHourExhaustedUntil(rateLimit *OpenAIRateLimit, now time.Time) (time.Time, bool) {
+func openAIQuotaExhaustedUntil(rateLimit *OpenAIRateLimit, now time.Time) (time.Time, bool) {
 	if rateLimit == nil || !rateLimit.LimitReached {
 		return time.Time{}, false
 	}
+
+	var latestResetAt time.Time
 	for _, window := range []*OpenAIRateLimitWindow{rateLimit.PrimaryWindow, rateLimit.SecondaryWindow} {
-		if window == nil || window.LimitWindowSeconds <= 0 || window.LimitWindowSeconds > int64((6*time.Hour).Seconds()) {
+		if window == nil || window.LimitWindowSeconds <= 0 {
 			continue
 		}
 		if window.UsedPercent < 100 || window.ResetAfterSeconds <= 0 {
 			continue
 		}
 		resetAt := now.Add(time.Duration(window.ResetAfterSeconds) * time.Second)
-		if resetAt.After(now) {
-			return resetAt, true
+		if resetAt.After(now) && resetAt.After(latestResetAt) {
+			latestResetAt = resetAt
 		}
 	}
-	return time.Time{}, false
+	return latestResetAt, latestResetAt.After(now)
 }
 
 // mapUpstreamStatus collapses upstream HTTP statuses into a stable set we
