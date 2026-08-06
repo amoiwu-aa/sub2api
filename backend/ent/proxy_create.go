@@ -187,6 +187,76 @@ func (_c *ProxyCreate) SetNillableExpiryWarnDays(v *int) *ProxyCreate {
 	return _c
 }
 
+// SetTrafficUploadBytes sets the "traffic_upload_bytes" field.
+func (_c *ProxyCreate) SetTrafficUploadBytes(v int64) *ProxyCreate {
+	_c.mutation.SetTrafficUploadBytes(v)
+	return _c
+}
+
+// SetNillableTrafficUploadBytes sets the "traffic_upload_bytes" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableTrafficUploadBytes(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetTrafficUploadBytes(*v)
+	}
+	return _c
+}
+
+// SetTrafficDownloadBytes sets the "traffic_download_bytes" field.
+func (_c *ProxyCreate) SetTrafficDownloadBytes(v int64) *ProxyCreate {
+	_c.mutation.SetTrafficDownloadBytes(v)
+	return _c
+}
+
+// SetNillableTrafficDownloadBytes sets the "traffic_download_bytes" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableTrafficDownloadBytes(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetTrafficDownloadBytes(*v)
+	}
+	return _c
+}
+
+// SetTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field.
+func (_c *ProxyCreate) SetTrafficTodayUploadBytes(v int64) *ProxyCreate {
+	_c.mutation.SetTrafficTodayUploadBytes(v)
+	return _c
+}
+
+// SetNillableTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableTrafficTodayUploadBytes(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetTrafficTodayUploadBytes(*v)
+	}
+	return _c
+}
+
+// SetTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field.
+func (_c *ProxyCreate) SetTrafficTodayDownloadBytes(v int64) *ProxyCreate {
+	_c.mutation.SetTrafficTodayDownloadBytes(v)
+	return _c
+}
+
+// SetNillableTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableTrafficTodayDownloadBytes(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetTrafficTodayDownloadBytes(*v)
+	}
+	return _c
+}
+
+// SetTrafficTodayDate sets the "traffic_today_date" field.
+func (_c *ProxyCreate) SetTrafficTodayDate(v time.Time) *ProxyCreate {
+	_c.mutation.SetTrafficTodayDate(v)
+	return _c
+}
+
+// SetNillableTrafficTodayDate sets the "traffic_today_date" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableTrafficTodayDate(v *time.Time) *ProxyCreate {
+	if v != nil {
+		_c.SetTrafficTodayDate(*v)
+	}
+	return _c
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_c *ProxyCreate) AddAccountIDs(ids ...int64) *ProxyCreate {
 	_c.mutation.AddAccountIDs(ids...)
@@ -270,6 +340,29 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultExpiryWarnDays
 		_c.mutation.SetExpiryWarnDays(v)
 	}
+	if _, ok := _c.mutation.TrafficUploadBytes(); !ok {
+		v := proxy.DefaultTrafficUploadBytes
+		_c.mutation.SetTrafficUploadBytes(v)
+	}
+	if _, ok := _c.mutation.TrafficDownloadBytes(); !ok {
+		v := proxy.DefaultTrafficDownloadBytes
+		_c.mutation.SetTrafficDownloadBytes(v)
+	}
+	if _, ok := _c.mutation.TrafficTodayUploadBytes(); !ok {
+		v := proxy.DefaultTrafficTodayUploadBytes
+		_c.mutation.SetTrafficTodayUploadBytes(v)
+	}
+	if _, ok := _c.mutation.TrafficTodayDownloadBytes(); !ok {
+		v := proxy.DefaultTrafficTodayDownloadBytes
+		_c.mutation.SetTrafficTodayDownloadBytes(v)
+	}
+	if _, ok := _c.mutation.TrafficTodayDate(); !ok {
+		if proxy.DefaultTrafficTodayDate == nil {
+			return fmt.Errorf("ent: uninitialized proxy.DefaultTrafficTodayDate (forgotten import ent/runtime?)")
+		}
+		v := proxy.DefaultTrafficTodayDate()
+		_c.mutation.SetTrafficTodayDate(v)
+	}
 	return nil
 }
 
@@ -336,6 +429,41 @@ func (_c *ProxyCreate) check() error {
 	}
 	if _, ok := _c.mutation.ExpiryWarnDays(); !ok {
 		return &ValidationError{Name: "expiry_warn_days", err: errors.New(`ent: missing required field "Proxy.expiry_warn_days"`)}
+	}
+	if _, ok := _c.mutation.TrafficUploadBytes(); !ok {
+		return &ValidationError{Name: "traffic_upload_bytes", err: errors.New(`ent: missing required field "Proxy.traffic_upload_bytes"`)}
+	}
+	if v, ok := _c.mutation.TrafficUploadBytes(); ok {
+		if err := proxy.TrafficUploadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_upload_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_upload_bytes": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.TrafficDownloadBytes(); !ok {
+		return &ValidationError{Name: "traffic_download_bytes", err: errors.New(`ent: missing required field "Proxy.traffic_download_bytes"`)}
+	}
+	if v, ok := _c.mutation.TrafficDownloadBytes(); ok {
+		if err := proxy.TrafficDownloadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_download_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_download_bytes": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.TrafficTodayUploadBytes(); !ok {
+		return &ValidationError{Name: "traffic_today_upload_bytes", err: errors.New(`ent: missing required field "Proxy.traffic_today_upload_bytes"`)}
+	}
+	if v, ok := _c.mutation.TrafficTodayUploadBytes(); ok {
+		if err := proxy.TrafficTodayUploadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_today_upload_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_today_upload_bytes": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.TrafficTodayDownloadBytes(); !ok {
+		return &ValidationError{Name: "traffic_today_download_bytes", err: errors.New(`ent: missing required field "Proxy.traffic_today_download_bytes"`)}
+	}
+	if v, ok := _c.mutation.TrafficTodayDownloadBytes(); ok {
+		if err := proxy.TrafficTodayDownloadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_today_download_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_today_download_bytes": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.TrafficTodayDate(); !ok {
+		return &ValidationError{Name: "traffic_today_date", err: errors.New(`ent: missing required field "Proxy.traffic_today_date"`)}
 	}
 	return nil
 }
@@ -415,6 +543,26 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ExpiryWarnDays(); ok {
 		_spec.SetField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
 		_node.ExpiryWarnDays = value
+	}
+	if value, ok := _c.mutation.TrafficUploadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficUploadBytes, field.TypeInt64, value)
+		_node.TrafficUploadBytes = value
+	}
+	if value, ok := _c.mutation.TrafficDownloadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficDownloadBytes, field.TypeInt64, value)
+		_node.TrafficDownloadBytes = value
+	}
+	if value, ok := _c.mutation.TrafficTodayUploadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayUploadBytes, field.TypeInt64, value)
+		_node.TrafficTodayUploadBytes = value
+	}
+	if value, ok := _c.mutation.TrafficTodayDownloadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayDownloadBytes, field.TypeInt64, value)
+		_node.TrafficTodayDownloadBytes = value
+	}
+	if value, ok := _c.mutation.TrafficTodayDate(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayDate, field.TypeTime, value)
+		_node.TrafficTodayDate = value
 	}
 	if nodes := _c.mutation.AccountsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -699,6 +847,90 @@ func (u *ProxyUpsert) AddExpiryWarnDays(v int) *ProxyUpsert {
 	return u
 }
 
+// SetTrafficUploadBytes sets the "traffic_upload_bytes" field.
+func (u *ProxyUpsert) SetTrafficUploadBytes(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldTrafficUploadBytes, v)
+	return u
+}
+
+// UpdateTrafficUploadBytes sets the "traffic_upload_bytes" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateTrafficUploadBytes() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldTrafficUploadBytes)
+	return u
+}
+
+// AddTrafficUploadBytes adds v to the "traffic_upload_bytes" field.
+func (u *ProxyUpsert) AddTrafficUploadBytes(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldTrafficUploadBytes, v)
+	return u
+}
+
+// SetTrafficDownloadBytes sets the "traffic_download_bytes" field.
+func (u *ProxyUpsert) SetTrafficDownloadBytes(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldTrafficDownloadBytes, v)
+	return u
+}
+
+// UpdateTrafficDownloadBytes sets the "traffic_download_bytes" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateTrafficDownloadBytes() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldTrafficDownloadBytes)
+	return u
+}
+
+// AddTrafficDownloadBytes adds v to the "traffic_download_bytes" field.
+func (u *ProxyUpsert) AddTrafficDownloadBytes(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldTrafficDownloadBytes, v)
+	return u
+}
+
+// SetTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field.
+func (u *ProxyUpsert) SetTrafficTodayUploadBytes(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldTrafficTodayUploadBytes, v)
+	return u
+}
+
+// UpdateTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateTrafficTodayUploadBytes() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldTrafficTodayUploadBytes)
+	return u
+}
+
+// AddTrafficTodayUploadBytes adds v to the "traffic_today_upload_bytes" field.
+func (u *ProxyUpsert) AddTrafficTodayUploadBytes(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldTrafficTodayUploadBytes, v)
+	return u
+}
+
+// SetTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field.
+func (u *ProxyUpsert) SetTrafficTodayDownloadBytes(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldTrafficTodayDownloadBytes, v)
+	return u
+}
+
+// UpdateTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateTrafficTodayDownloadBytes() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldTrafficTodayDownloadBytes)
+	return u
+}
+
+// AddTrafficTodayDownloadBytes adds v to the "traffic_today_download_bytes" field.
+func (u *ProxyUpsert) AddTrafficTodayDownloadBytes(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldTrafficTodayDownloadBytes, v)
+	return u
+}
+
+// SetTrafficTodayDate sets the "traffic_today_date" field.
+func (u *ProxyUpsert) SetTrafficTodayDate(v time.Time) *ProxyUpsert {
+	u.Set(proxy.FieldTrafficTodayDate, v)
+	return u
+}
+
+// UpdateTrafficTodayDate sets the "traffic_today_date" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateTrafficTodayDate() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldTrafficTodayDate)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -972,6 +1204,104 @@ func (u *ProxyUpsertOne) AddExpiryWarnDays(v int) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateExpiryWarnDays() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetTrafficUploadBytes sets the "traffic_upload_bytes" field.
+func (u *ProxyUpsertOne) SetTrafficUploadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficUploadBytes(v)
+	})
+}
+
+// AddTrafficUploadBytes adds v to the "traffic_upload_bytes" field.
+func (u *ProxyUpsertOne) AddTrafficUploadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficUploadBytes(v)
+	})
+}
+
+// UpdateTrafficUploadBytes sets the "traffic_upload_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateTrafficUploadBytes() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficUploadBytes()
+	})
+}
+
+// SetTrafficDownloadBytes sets the "traffic_download_bytes" field.
+func (u *ProxyUpsertOne) SetTrafficDownloadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficDownloadBytes(v)
+	})
+}
+
+// AddTrafficDownloadBytes adds v to the "traffic_download_bytes" field.
+func (u *ProxyUpsertOne) AddTrafficDownloadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficDownloadBytes(v)
+	})
+}
+
+// UpdateTrafficDownloadBytes sets the "traffic_download_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateTrafficDownloadBytes() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficDownloadBytes()
+	})
+}
+
+// SetTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field.
+func (u *ProxyUpsertOne) SetTrafficTodayUploadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficTodayUploadBytes(v)
+	})
+}
+
+// AddTrafficTodayUploadBytes adds v to the "traffic_today_upload_bytes" field.
+func (u *ProxyUpsertOne) AddTrafficTodayUploadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficTodayUploadBytes(v)
+	})
+}
+
+// UpdateTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateTrafficTodayUploadBytes() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficTodayUploadBytes()
+	})
+}
+
+// SetTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field.
+func (u *ProxyUpsertOne) SetTrafficTodayDownloadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficTodayDownloadBytes(v)
+	})
+}
+
+// AddTrafficTodayDownloadBytes adds v to the "traffic_today_download_bytes" field.
+func (u *ProxyUpsertOne) AddTrafficTodayDownloadBytes(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficTodayDownloadBytes(v)
+	})
+}
+
+// UpdateTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateTrafficTodayDownloadBytes() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficTodayDownloadBytes()
+	})
+}
+
+// SetTrafficTodayDate sets the "traffic_today_date" field.
+func (u *ProxyUpsertOne) SetTrafficTodayDate(v time.Time) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficTodayDate(v)
+	})
+}
+
+// UpdateTrafficTodayDate sets the "traffic_today_date" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateTrafficTodayDate() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficTodayDate()
 	})
 }
 
@@ -1414,6 +1744,104 @@ func (u *ProxyUpsertBulk) AddExpiryWarnDays(v int) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateExpiryWarnDays() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateExpiryWarnDays()
+	})
+}
+
+// SetTrafficUploadBytes sets the "traffic_upload_bytes" field.
+func (u *ProxyUpsertBulk) SetTrafficUploadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficUploadBytes(v)
+	})
+}
+
+// AddTrafficUploadBytes adds v to the "traffic_upload_bytes" field.
+func (u *ProxyUpsertBulk) AddTrafficUploadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficUploadBytes(v)
+	})
+}
+
+// UpdateTrafficUploadBytes sets the "traffic_upload_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateTrafficUploadBytes() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficUploadBytes()
+	})
+}
+
+// SetTrafficDownloadBytes sets the "traffic_download_bytes" field.
+func (u *ProxyUpsertBulk) SetTrafficDownloadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficDownloadBytes(v)
+	})
+}
+
+// AddTrafficDownloadBytes adds v to the "traffic_download_bytes" field.
+func (u *ProxyUpsertBulk) AddTrafficDownloadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficDownloadBytes(v)
+	})
+}
+
+// UpdateTrafficDownloadBytes sets the "traffic_download_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateTrafficDownloadBytes() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficDownloadBytes()
+	})
+}
+
+// SetTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field.
+func (u *ProxyUpsertBulk) SetTrafficTodayUploadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficTodayUploadBytes(v)
+	})
+}
+
+// AddTrafficTodayUploadBytes adds v to the "traffic_today_upload_bytes" field.
+func (u *ProxyUpsertBulk) AddTrafficTodayUploadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficTodayUploadBytes(v)
+	})
+}
+
+// UpdateTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateTrafficTodayUploadBytes() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficTodayUploadBytes()
+	})
+}
+
+// SetTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field.
+func (u *ProxyUpsertBulk) SetTrafficTodayDownloadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficTodayDownloadBytes(v)
+	})
+}
+
+// AddTrafficTodayDownloadBytes adds v to the "traffic_today_download_bytes" field.
+func (u *ProxyUpsertBulk) AddTrafficTodayDownloadBytes(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddTrafficTodayDownloadBytes(v)
+	})
+}
+
+// UpdateTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateTrafficTodayDownloadBytes() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficTodayDownloadBytes()
+	})
+}
+
+// SetTrafficTodayDate sets the "traffic_today_date" field.
+func (u *ProxyUpsertBulk) SetTrafficTodayDate(v time.Time) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetTrafficTodayDate(v)
+	})
+}
+
+// UpdateTrafficTodayDate sets the "traffic_today_date" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateTrafficTodayDate() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateTrafficTodayDate()
 	})
 }
 

@@ -145,9 +145,10 @@ type openAIHTTP2FallbackState struct {
 // 7. 代理变更时清空旧连接池，避免复用错误代理
 // 8. 账号并发数与连接池上限对应（账号隔离策略下）
 type httpUpstreamService struct {
-	cfg     *config.Config                  // 全局配置
-	mu      sync.RWMutex                    // 保护 clients map 的读写锁
-	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
+	proxyTraffic service.ProxyTrafficRecorder
+	cfg          *config.Config                  // 全局配置
+	mu           sync.RWMutex                    // 保护 clients map 的读写锁
+	clients      map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
 	openAIHTTP2Fallbacks sync.Map
 }
@@ -161,9 +162,18 @@ type httpUpstreamService struct {
 // 返回:
 //   - service.HTTPUpstream 接口实现
 func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
+	return newHTTPUpstream(cfg, nil)
+}
+
+func ProvideHTTPUpstream(cfg *config.Config, proxyTraffic service.ProxyTrafficRecorder) service.HTTPUpstream {
+	return newHTTPUpstream(cfg, proxyTraffic)
+}
+
+func newHTTPUpstream(cfg *config.Config, proxyTraffic service.ProxyTrafficRecorder) service.HTTPUpstream {
 	return &httpUpstreamService{
-		cfg:     cfg,
-		clients: make(map[string]*upstreamClientEntry),
+		cfg:          cfg,
+		clients:      make(map[string]*upstreamClientEntry),
+		proxyTraffic: proxyTraffic,
 	}
 }
 
@@ -201,6 +211,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 
 	// 执行请求
 	client := httpClientForUpstreamRequest(entry.client, req)
+	client = s.httpClientWithProxyTraffic(client, req, proxyURL, accountID)
 	client = httpClientWithGrokAccessDeniedFallback(client)
 	resp, err := servertiming.Do(client, req)
 	if err != nil {
@@ -265,6 +276,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 
 	client := httpClientForUpstreamRequest(entry.client, req)
+	client = s.httpClientWithProxyTraffic(client, req, proxyURL, accountID)
 	client = httpClientWithGrokAccessDeniedFallback(client)
 	resp, err := servertiming.Do(client, req)
 	if err != nil {
@@ -293,6 +305,111 @@ func httpClientForUpstreamRequest(client *http.Client, req *http.Request) *http.
 		return http.ErrUseLastResponse
 	}
 	return &clone
+}
+
+func (s *httpUpstreamService) httpClientWithProxyTraffic(client *http.Client, req *http.Request, proxyURL string, accountID int64) *http.Client {
+	if s == nil || s.proxyTraffic == nil || client == nil || strings.TrimSpace(proxyURL) == "" || accountID <= 0 {
+		return client
+	}
+	ctx := context.Background()
+	if req != nil && req.Context() != nil {
+		ctx = req.Context()
+	}
+	proxyID := s.proxyTraffic.ResolveProxyID(ctx, accountID, proxyURL)
+	if proxyID <= 0 {
+		return client
+	}
+
+	clone := *client
+	base := clone.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	clone.Transport = &proxyTrafficRoundTripper{
+		base:     base,
+		recorder: s.proxyTraffic,
+		proxyID:  proxyID,
+	}
+	return &clone
+}
+
+type proxyTrafficRoundTripper struct {
+	base     http.RoundTripper
+	recorder service.ProxyTrafficRecorder
+	proxyID  int64
+}
+
+func (t *proxyTrafficRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t == nil || t.base == nil || req == nil || t.recorder == nil || t.proxyID <= 0 {
+		if t == nil || t.base == nil {
+			return nil, errors.New("proxy traffic transport is not configured")
+		}
+		return t.base.RoundTrip(req)
+	}
+
+	request := req.Clone(req.Context())
+	var requestBody *proxyTrafficCountingBody
+	if req.Body != nil && req.Body != http.NoBody {
+		requestBody = &proxyTrafficCountingBody{ReadCloser: req.Body}
+		request.Body = requestBody
+	}
+
+	resp, err := t.base.RoundTrip(request)
+	uploadBytes := int64(0)
+	if requestBody != nil {
+		uploadBytes = requestBody.Bytes()
+	}
+	if err != nil {
+		t.recorder.Record(t.proxyID, uploadBytes, 0)
+		return nil, err
+	}
+	if resp == nil || resp.Body == nil {
+		t.recorder.Record(t.proxyID, uploadBytes, 0)
+		return resp, nil
+	}
+
+	responseBody := &proxyTrafficCountingBody{ReadCloser: resp.Body}
+	resp.Body = &proxyTrafficResponseBody{
+		ReadCloser: responseBody,
+		onClose: func() {
+			t.recorder.Record(t.proxyID, uploadBytes, responseBody.Bytes())
+		},
+	}
+	return resp, nil
+}
+
+type proxyTrafficCountingBody struct {
+	io.ReadCloser
+	bytes atomic.Int64
+}
+
+func (b *proxyTrafficCountingBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.bytes.Add(int64(n))
+	}
+	return n, err
+}
+
+func (b *proxyTrafficCountingBody) Bytes() int64 {
+	if b == nil {
+		return 0
+	}
+	return b.bytes.Load()
+}
+
+type proxyTrafficResponseBody struct {
+	io.ReadCloser
+	once    sync.Once
+	onClose func()
+}
+
+func (b *proxyTrafficResponseBody) Close() error {
+	err := b.ReadCloser.Close()
+	if b.onClose != nil {
+		b.once.Do(b.onClose)
+	}
+	return err
 }
 
 // grokAccessDeniedFallbackTransport preserves the subscription CLI proxy as

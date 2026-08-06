@@ -1,9 +1,12 @@
 package schema
 
 import (
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 
 	"entgo.io/ent"
+	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema"
 	"entgo.io/ent/schema/edge"
@@ -64,6 +67,26 @@ func (Proxy) Fields() []ent.Field {
 		field.Int("expiry_warn_days").
 			Default(7).
 			Comment("Days before expiry to flag as expiring-soon (per proxy)."),
+		field.Int64("traffic_upload_bytes").
+			Default(0).
+			NonNegative().
+			Comment("Cumulative HTTP request-body bytes sent through this proxy."),
+		field.Int64("traffic_download_bytes").
+			Default(0).
+			NonNegative().
+			Comment("Cumulative HTTP response-body bytes received through this proxy."),
+		field.Int64("traffic_today_upload_bytes").
+			Default(0).
+			NonNegative().
+			Comment("HTTP request-body bytes sent through this proxy on traffic_today_date."),
+		field.Int64("traffic_today_download_bytes").
+			Default(0).
+			NonNegative().
+			Comment("HTTP response-body bytes received through this proxy on traffic_today_date."),
+		field.Time("traffic_today_date").
+			Default(time.Now).
+			SchemaType(map[string]string{dialect.Postgres: "date"}).
+			Comment("UTC calendar date for the daily proxy traffic counters."),
 	}
 }
 

@@ -327,10 +327,14 @@ type Proxy struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	ExpiresAt      *time.Time `json:"expires_at"`
-	FallbackMode   string     `json:"fallback_mode"`
-	BackupProxyID  *int64     `json:"backup_proxy_id"`
-	ExpiryWarnDays int        `json:"expiry_warn_days"`
+	ExpiresAt                 *time.Time `json:"expires_at"`
+	FallbackMode              string     `json:"fallback_mode"`
+	BackupProxyID             *int64     `json:"backup_proxy_id"`
+	ExpiryWarnDays            int        `json:"expiry_warn_days"`
+	TrafficUploadBytes        int64      `json:"traffic_upload_bytes"`
+	TrafficDownloadBytes      int64      `json:"traffic_download_bytes"`
+	TrafficTodayUploadBytes   int64      `json:"traffic_today_upload_bytes"`
+	TrafficTodayDownloadBytes int64      `json:"traffic_today_download_bytes"`
 }
 
 type ProxyWithAccountCount struct {

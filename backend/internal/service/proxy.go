@@ -14,24 +14,41 @@ const (
 )
 
 type Proxy struct {
-	ID             int64
-	Name           string
-	Protocol       string
-	Host           string
-	Port           int
-	Username       string
-	Password       string
-	Status         string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	ExpiresAt      *time.Time
-	FallbackMode   string
-	BackupProxyID  *int64
-	ExpiryWarnDays int
+	ID                        int64
+	Name                      string
+	Protocol                  string
+	Host                      string
+	Port                      int
+	Username                  string
+	Password                  string
+	Status                    string
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	ExpiresAt                 *time.Time
+	FallbackMode              string
+	BackupProxyID             *int64
+	ExpiryWarnDays            int
+	TrafficUploadBytes        int64
+	TrafficDownloadBytes      int64
+	TrafficTodayUploadBytes   int64
+	TrafficTodayDownloadBytes int64
+	TrafficTodayDate          time.Time
 }
 
 func (p *Proxy) IsActive() bool {
 	return p.Status == StatusActive
+}
+
+func (p *Proxy) TrafficToday() (uploadBytes, downloadBytes int64) {
+	if p == nil || p.TrafficTodayDate.IsZero() {
+		return 0, 0
+	}
+	now := time.Now().UTC()
+	trafficDate := p.TrafficTodayDate.UTC()
+	if now.Year() != trafficDate.Year() || now.YearDay() != trafficDate.YearDay() {
+		return 0, 0
+	}
+	return p.TrafficTodayUploadBytes, p.TrafficTodayDownloadBytes
 }
 
 // IsExpired 报告代理是否已过期（基于 expires_at，与 status 无关）。

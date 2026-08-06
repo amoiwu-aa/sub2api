@@ -909,6 +909,10 @@ export interface Proxy {
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
   expiry_warn_days: number
+  traffic_upload_bytes?: number
+  traffic_download_bytes?: number
+  traffic_today_upload_bytes?: number
+  traffic_today_download_bytes?: number
   created_at: string
   updated_at: string
 }

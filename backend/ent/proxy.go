@@ -45,6 +45,16 @@ type Proxy struct {
 	BackupProxyID *int64 `json:"backup_proxy_id,omitempty"`
 	// Days before expiry to flag as expiring-soon (per proxy).
 	ExpiryWarnDays int `json:"expiry_warn_days,omitempty"`
+	// Cumulative HTTP request-body bytes sent through this proxy.
+	TrafficUploadBytes int64 `json:"traffic_upload_bytes,omitempty"`
+	// Cumulative HTTP response-body bytes received through this proxy.
+	TrafficDownloadBytes int64 `json:"traffic_download_bytes,omitempty"`
+	// HTTP request-body bytes sent through this proxy on traffic_today_date.
+	TrafficTodayUploadBytes int64 `json:"traffic_today_upload_bytes,omitempty"`
+	// HTTP response-body bytes received through this proxy on traffic_today_date.
+	TrafficTodayDownloadBytes int64 `json:"traffic_today_download_bytes,omitempty"`
+	// UTC calendar date for the daily proxy traffic counters.
+	TrafficTodayDate time.Time `json:"traffic_today_date,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the ProxyQuery when eager-loading is set.
 	Edges        ProxyEdges `json:"edges"`
@@ -87,11 +97,11 @@ func (*Proxy) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
+		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays, proxy.FieldTrafficUploadBytes, proxy.FieldTrafficDownloadBytes, proxy.FieldTrafficTodayUploadBytes, proxy.FieldTrafficTodayDownloadBytes:
 			values[i] = new(sql.NullInt64)
 		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode:
 			values[i] = new(sql.NullString)
-		case proxy.FieldCreatedAt, proxy.FieldUpdatedAt, proxy.FieldDeletedAt, proxy.FieldExpiresAt:
+		case proxy.FieldCreatedAt, proxy.FieldUpdatedAt, proxy.FieldDeletedAt, proxy.FieldExpiresAt, proxy.FieldTrafficTodayDate:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -203,6 +213,36 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ExpiryWarnDays = int(value.Int64)
 			}
+		case proxy.FieldTrafficUploadBytes:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field traffic_upload_bytes", values[i])
+			} else if value.Valid {
+				_m.TrafficUploadBytes = value.Int64
+			}
+		case proxy.FieldTrafficDownloadBytes:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field traffic_download_bytes", values[i])
+			} else if value.Valid {
+				_m.TrafficDownloadBytes = value.Int64
+			}
+		case proxy.FieldTrafficTodayUploadBytes:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field traffic_today_upload_bytes", values[i])
+			} else if value.Valid {
+				_m.TrafficTodayUploadBytes = value.Int64
+			}
+		case proxy.FieldTrafficTodayDownloadBytes:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field traffic_today_download_bytes", values[i])
+			} else if value.Valid {
+				_m.TrafficTodayDownloadBytes = value.Int64
+			}
+		case proxy.FieldTrafficTodayDate:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field traffic_today_date", values[i])
+			} else if value.Valid {
+				_m.TrafficTodayDate = value.Time
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -300,6 +340,21 @@ func (_m *Proxy) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("expiry_warn_days=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ExpiryWarnDays))
+	builder.WriteString(", ")
+	builder.WriteString("traffic_upload_bytes=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TrafficUploadBytes))
+	builder.WriteString(", ")
+	builder.WriteString("traffic_download_bytes=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TrafficDownloadBytes))
+	builder.WriteString(", ")
+	builder.WriteString("traffic_today_upload_bytes=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TrafficTodayUploadBytes))
+	builder.WriteString(", ")
+	builder.WriteString("traffic_today_download_bytes=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TrafficTodayDownloadBytes))
+	builder.WriteString(", ")
+	builder.WriteString("traffic_today_date=")
+	builder.WriteString(_m.TrafficTodayDate.Format(time.ANSIC))
 	builder.WriteByte(')')
 	return builder.String()
 }

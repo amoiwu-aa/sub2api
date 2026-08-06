@@ -1687,6 +1687,34 @@ func init() {
 	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
+	// proxyDescTrafficUploadBytes is the schema descriptor for traffic_upload_bytes field.
+	proxyDescTrafficUploadBytes := proxyFields[11].Descriptor()
+	// proxy.DefaultTrafficUploadBytes holds the default value on creation for the traffic_upload_bytes field.
+	proxy.DefaultTrafficUploadBytes = proxyDescTrafficUploadBytes.Default.(int64)
+	// proxy.TrafficUploadBytesValidator is a validator for the "traffic_upload_bytes" field. It is called by the builders before save.
+	proxy.TrafficUploadBytesValidator = proxyDescTrafficUploadBytes.Validators[0].(func(int64) error)
+	// proxyDescTrafficDownloadBytes is the schema descriptor for traffic_download_bytes field.
+	proxyDescTrafficDownloadBytes := proxyFields[12].Descriptor()
+	// proxy.DefaultTrafficDownloadBytes holds the default value on creation for the traffic_download_bytes field.
+	proxy.DefaultTrafficDownloadBytes = proxyDescTrafficDownloadBytes.Default.(int64)
+	// proxy.TrafficDownloadBytesValidator is a validator for the "traffic_download_bytes" field. It is called by the builders before save.
+	proxy.TrafficDownloadBytesValidator = proxyDescTrafficDownloadBytes.Validators[0].(func(int64) error)
+	// proxyDescTrafficTodayUploadBytes is the schema descriptor for traffic_today_upload_bytes field.
+	proxyDescTrafficTodayUploadBytes := proxyFields[13].Descriptor()
+	// proxy.DefaultTrafficTodayUploadBytes holds the default value on creation for the traffic_today_upload_bytes field.
+	proxy.DefaultTrafficTodayUploadBytes = proxyDescTrafficTodayUploadBytes.Default.(int64)
+	// proxy.TrafficTodayUploadBytesValidator is a validator for the "traffic_today_upload_bytes" field. It is called by the builders before save.
+	proxy.TrafficTodayUploadBytesValidator = proxyDescTrafficTodayUploadBytes.Validators[0].(func(int64) error)
+	// proxyDescTrafficTodayDownloadBytes is the schema descriptor for traffic_today_download_bytes field.
+	proxyDescTrafficTodayDownloadBytes := proxyFields[14].Descriptor()
+	// proxy.DefaultTrafficTodayDownloadBytes holds the default value on creation for the traffic_today_download_bytes field.
+	proxy.DefaultTrafficTodayDownloadBytes = proxyDescTrafficTodayDownloadBytes.Default.(int64)
+	// proxy.TrafficTodayDownloadBytesValidator is a validator for the "traffic_today_download_bytes" field. It is called by the builders before save.
+	proxy.TrafficTodayDownloadBytesValidator = proxyDescTrafficTodayDownloadBytes.Validators[0].(func(int64) error)
+	// proxyDescTrafficTodayDate is the schema descriptor for traffic_today_date field.
+	proxyDescTrafficTodayDate := proxyFields[15].Descriptor()
+	// proxy.DefaultTrafficTodayDate holds the default value on creation for the traffic_today_date field.
+	proxy.DefaultTrafficTodayDate = proxyDescTrafficTodayDate.Default.(func() time.Time)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.

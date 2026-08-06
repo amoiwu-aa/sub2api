@@ -125,6 +125,31 @@ func ExpiryWarnDays(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiryWarnDays, v))
 }
 
+// TrafficUploadBytes applies equality check predicate on the "traffic_upload_bytes" field. It's identical to TrafficUploadBytesEQ.
+func TrafficUploadBytes(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficUploadBytes, v))
+}
+
+// TrafficDownloadBytes applies equality check predicate on the "traffic_download_bytes" field. It's identical to TrafficDownloadBytesEQ.
+func TrafficDownloadBytes(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficDownloadBytes, v))
+}
+
+// TrafficTodayUploadBytes applies equality check predicate on the "traffic_today_upload_bytes" field. It's identical to TrafficTodayUploadBytesEQ.
+func TrafficTodayUploadBytes(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficTodayUploadBytes, v))
+}
+
+// TrafficTodayDownloadBytes applies equality check predicate on the "traffic_today_download_bytes" field. It's identical to TrafficTodayDownloadBytesEQ.
+func TrafficTodayDownloadBytes(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficTodayDownloadBytes, v))
+}
+
+// TrafficTodayDate applies equality check predicate on the "traffic_today_date" field. It's identical to TrafficTodayDateEQ.
+func TrafficTodayDate(v time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficTodayDate, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldCreatedAt, v))
@@ -888,6 +913,206 @@ func ExpiryWarnDaysLT(v int) predicate.Proxy {
 // ExpiryWarnDaysLTE applies the LTE predicate on the "expiry_warn_days" field.
 func ExpiryWarnDaysLTE(v int) predicate.Proxy {
 	return predicate.Proxy(sql.FieldLTE(FieldExpiryWarnDays, v))
+}
+
+// TrafficUploadBytesEQ applies the EQ predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficUploadBytes, v))
+}
+
+// TrafficUploadBytesNEQ applies the NEQ predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldTrafficUploadBytes, v))
+}
+
+// TrafficUploadBytesIn applies the In predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldTrafficUploadBytes, vs...))
+}
+
+// TrafficUploadBytesNotIn applies the NotIn predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldTrafficUploadBytes, vs...))
+}
+
+// TrafficUploadBytesGT applies the GT predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldTrafficUploadBytes, v))
+}
+
+// TrafficUploadBytesGTE applies the GTE predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldTrafficUploadBytes, v))
+}
+
+// TrafficUploadBytesLT applies the LT predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldTrafficUploadBytes, v))
+}
+
+// TrafficUploadBytesLTE applies the LTE predicate on the "traffic_upload_bytes" field.
+func TrafficUploadBytesLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldTrafficUploadBytes, v))
+}
+
+// TrafficDownloadBytesEQ applies the EQ predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficDownloadBytes, v))
+}
+
+// TrafficDownloadBytesNEQ applies the NEQ predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldTrafficDownloadBytes, v))
+}
+
+// TrafficDownloadBytesIn applies the In predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldTrafficDownloadBytes, vs...))
+}
+
+// TrafficDownloadBytesNotIn applies the NotIn predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldTrafficDownloadBytes, vs...))
+}
+
+// TrafficDownloadBytesGT applies the GT predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldTrafficDownloadBytes, v))
+}
+
+// TrafficDownloadBytesGTE applies the GTE predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldTrafficDownloadBytes, v))
+}
+
+// TrafficDownloadBytesLT applies the LT predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldTrafficDownloadBytes, v))
+}
+
+// TrafficDownloadBytesLTE applies the LTE predicate on the "traffic_download_bytes" field.
+func TrafficDownloadBytesLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldTrafficDownloadBytes, v))
+}
+
+// TrafficTodayUploadBytesEQ applies the EQ predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficTodayUploadBytes, v))
+}
+
+// TrafficTodayUploadBytesNEQ applies the NEQ predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldTrafficTodayUploadBytes, v))
+}
+
+// TrafficTodayUploadBytesIn applies the In predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldTrafficTodayUploadBytes, vs...))
+}
+
+// TrafficTodayUploadBytesNotIn applies the NotIn predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldTrafficTodayUploadBytes, vs...))
+}
+
+// TrafficTodayUploadBytesGT applies the GT predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldTrafficTodayUploadBytes, v))
+}
+
+// TrafficTodayUploadBytesGTE applies the GTE predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldTrafficTodayUploadBytes, v))
+}
+
+// TrafficTodayUploadBytesLT applies the LT predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldTrafficTodayUploadBytes, v))
+}
+
+// TrafficTodayUploadBytesLTE applies the LTE predicate on the "traffic_today_upload_bytes" field.
+func TrafficTodayUploadBytesLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldTrafficTodayUploadBytes, v))
+}
+
+// TrafficTodayDownloadBytesEQ applies the EQ predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficTodayDownloadBytes, v))
+}
+
+// TrafficTodayDownloadBytesNEQ applies the NEQ predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldTrafficTodayDownloadBytes, v))
+}
+
+// TrafficTodayDownloadBytesIn applies the In predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldTrafficTodayDownloadBytes, vs...))
+}
+
+// TrafficTodayDownloadBytesNotIn applies the NotIn predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldTrafficTodayDownloadBytes, vs...))
+}
+
+// TrafficTodayDownloadBytesGT applies the GT predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldTrafficTodayDownloadBytes, v))
+}
+
+// TrafficTodayDownloadBytesGTE applies the GTE predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldTrafficTodayDownloadBytes, v))
+}
+
+// TrafficTodayDownloadBytesLT applies the LT predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldTrafficTodayDownloadBytes, v))
+}
+
+// TrafficTodayDownloadBytesLTE applies the LTE predicate on the "traffic_today_download_bytes" field.
+func TrafficTodayDownloadBytesLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldTrafficTodayDownloadBytes, v))
+}
+
+// TrafficTodayDateEQ applies the EQ predicate on the "traffic_today_date" field.
+func TrafficTodayDateEQ(v time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldTrafficTodayDate, v))
+}
+
+// TrafficTodayDateNEQ applies the NEQ predicate on the "traffic_today_date" field.
+func TrafficTodayDateNEQ(v time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldTrafficTodayDate, v))
+}
+
+// TrafficTodayDateIn applies the In predicate on the "traffic_today_date" field.
+func TrafficTodayDateIn(vs ...time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldTrafficTodayDate, vs...))
+}
+
+// TrafficTodayDateNotIn applies the NotIn predicate on the "traffic_today_date" field.
+func TrafficTodayDateNotIn(vs ...time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldTrafficTodayDate, vs...))
+}
+
+// TrafficTodayDateGT applies the GT predicate on the "traffic_today_date" field.
+func TrafficTodayDateGT(v time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldTrafficTodayDate, v))
+}
+
+// TrafficTodayDateGTE applies the GTE predicate on the "traffic_today_date" field.
+func TrafficTodayDateGTE(v time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldTrafficTodayDate, v))
+}
+
+// TrafficTodayDateLT applies the LT predicate on the "traffic_today_date" field.
+func TrafficTodayDateLT(v time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldTrafficTodayDate, v))
+}
+
+// TrafficTodayDateLTE applies the LTE predicate on the "traffic_today_date" field.
+func TrafficTodayDateLTE(v time.Time) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldTrafficTodayDate, v))
 }
 
 // HasAccounts applies the HasEdge predicate on the "accounts" edge.

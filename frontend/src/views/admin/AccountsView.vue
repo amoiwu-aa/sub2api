@@ -329,7 +329,7 @@
             />
           </template>
           <template #cell-proxy="{ row }">
-            <div class="flex flex-col gap-1">
+            <div class="flex min-w-[160px] flex-col gap-1">
               <div v-if="row.proxy" class="flex items-center gap-2">
                 <span class="text-sm text-gray-700 dark:text-gray-300">{{ row.proxy.name }}</span>
                 <span v-if="row.proxy.country_code" class="text-xs text-gray-500 dark:text-gray-400">
@@ -337,6 +337,14 @@
                 </span>
               </div>
               <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+              <div
+                v-if="row.proxy"
+                class="flex flex-wrap gap-x-2 text-xs text-gray-500 dark:text-dark-400"
+                :title="t('admin.accounts.proxyTrafficHint')"
+              >
+                <span>{{ t('admin.accounts.proxyTrafficToday', { value: formatProxyTraffic(proxyTrafficTodayBytes(row.proxy)) }) }}</span>
+                <span>{{ t('admin.accounts.proxyTrafficTotal', { value: formatProxyTraffic(proxyTrafficTotalBytes(row.proxy)) }) }}</span>
+              </div>
               <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
                 <span class="text-gray-600 dark:text-gray-300">{{ formatDateTime(row.proxy.expires_at) }}</span>
                 <span :class="proxyExpiryBadge(row.proxy)">{{ proxyExpiryText(row.proxy) }}</span>
@@ -589,7 +597,7 @@ import {
   formatNeedsProxies,
   type AccountExportFormat
 } from '@/utils/accountExportFormats'
-import { formatDateTime, formatRelativeTime } from '@/utils/format'
+import { formatBytes, formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
@@ -2304,6 +2312,11 @@ const proxyExpiryText = (p: AccountProxy): string => {
   const { key, params } = proxyExpiryLabelKey(p.expires_at, p.status)
   return params ? t(key, params) : t(key)
 }
+const proxyTrafficTodayBytes = (p: AccountProxy): number =>
+  Math.max(0, (p.traffic_today_upload_bytes ?? 0) + (p.traffic_today_download_bytes ?? 0))
+const proxyTrafficTotalBytes = (p: AccountProxy): number =>
+  Math.max(0, (p.traffic_upload_bytes ?? 0) + (p.traffic_download_bytes ?? 0))
+const formatProxyTraffic = (bytes: number): string => formatBytes(bytes, bytes < 1024 * 1024 ? 0 : 2)
 
 // 表格滚动时关闭行操作菜单，并让顶部工具菜单继续贴紧触发按钮。
 const handleScroll = () => {

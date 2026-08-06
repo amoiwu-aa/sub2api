@@ -43,6 +43,16 @@ const (
 	FieldBackupProxyID = "backup_proxy_id"
 	// FieldExpiryWarnDays holds the string denoting the expiry_warn_days field in the database.
 	FieldExpiryWarnDays = "expiry_warn_days"
+	// FieldTrafficUploadBytes holds the string denoting the traffic_upload_bytes field in the database.
+	FieldTrafficUploadBytes = "traffic_upload_bytes"
+	// FieldTrafficDownloadBytes holds the string denoting the traffic_download_bytes field in the database.
+	FieldTrafficDownloadBytes = "traffic_download_bytes"
+	// FieldTrafficTodayUploadBytes holds the string denoting the traffic_today_upload_bytes field in the database.
+	FieldTrafficTodayUploadBytes = "traffic_today_upload_bytes"
+	// FieldTrafficTodayDownloadBytes holds the string denoting the traffic_today_download_bytes field in the database.
+	FieldTrafficTodayDownloadBytes = "traffic_today_download_bytes"
+	// FieldTrafficTodayDate holds the string denoting the traffic_today_date field in the database.
+	FieldTrafficTodayDate = "traffic_today_date"
 	// EdgeAccounts holds the string denoting the accounts edge name in mutations.
 	EdgeAccounts = "accounts"
 	// EdgeBackupProxy holds the string denoting the backup_proxy edge name in mutations.
@@ -79,6 +89,11 @@ var Columns = []string{
 	FieldFallbackMode,
 	FieldBackupProxyID,
 	FieldExpiryWarnDays,
+	FieldTrafficUploadBytes,
+	FieldTrafficDownloadBytes,
+	FieldTrafficTodayUploadBytes,
+	FieldTrafficTodayDownloadBytes,
+	FieldTrafficTodayDate,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -125,6 +140,24 @@ var (
 	FallbackModeValidator func(string) error
 	// DefaultExpiryWarnDays holds the default value on creation for the "expiry_warn_days" field.
 	DefaultExpiryWarnDays int
+	// DefaultTrafficUploadBytes holds the default value on creation for the "traffic_upload_bytes" field.
+	DefaultTrafficUploadBytes int64
+	// TrafficUploadBytesValidator is a validator for the "traffic_upload_bytes" field. It is called by the builders before save.
+	TrafficUploadBytesValidator func(int64) error
+	// DefaultTrafficDownloadBytes holds the default value on creation for the "traffic_download_bytes" field.
+	DefaultTrafficDownloadBytes int64
+	// TrafficDownloadBytesValidator is a validator for the "traffic_download_bytes" field. It is called by the builders before save.
+	TrafficDownloadBytesValidator func(int64) error
+	// DefaultTrafficTodayUploadBytes holds the default value on creation for the "traffic_today_upload_bytes" field.
+	DefaultTrafficTodayUploadBytes int64
+	// TrafficTodayUploadBytesValidator is a validator for the "traffic_today_upload_bytes" field. It is called by the builders before save.
+	TrafficTodayUploadBytesValidator func(int64) error
+	// DefaultTrafficTodayDownloadBytes holds the default value on creation for the "traffic_today_download_bytes" field.
+	DefaultTrafficTodayDownloadBytes int64
+	// TrafficTodayDownloadBytesValidator is a validator for the "traffic_today_download_bytes" field. It is called by the builders before save.
+	TrafficTodayDownloadBytesValidator func(int64) error
+	// DefaultTrafficTodayDate holds the default value on creation for the "traffic_today_date" field.
+	DefaultTrafficTodayDate func() time.Time
 )
 
 // OrderOption defines the ordering options for the Proxy queries.
@@ -203,6 +236,31 @@ func ByBackupProxyID(opts ...sql.OrderTermOption) OrderOption {
 // ByExpiryWarnDays orders the results by the expiry_warn_days field.
 func ByExpiryWarnDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldExpiryWarnDays, opts...).ToFunc()
+}
+
+// ByTrafficUploadBytes orders the results by the traffic_upload_bytes field.
+func ByTrafficUploadBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficUploadBytes, opts...).ToFunc()
+}
+
+// ByTrafficDownloadBytes orders the results by the traffic_download_bytes field.
+func ByTrafficDownloadBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficDownloadBytes, opts...).ToFunc()
+}
+
+// ByTrafficTodayUploadBytes orders the results by the traffic_today_upload_bytes field.
+func ByTrafficTodayUploadBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficTodayUploadBytes, opts...).ToFunc()
+}
+
+// ByTrafficTodayDownloadBytes orders the results by the traffic_today_download_bytes field.
+func ByTrafficTodayDownloadBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficTodayDownloadBytes, opts...).ToFunc()
+}
+
+// ByTrafficTodayDate orders the results by the traffic_today_date field.
+func ByTrafficTodayDate(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficTodayDate, opts...).ToFunc()
 }
 
 // ByAccountsCount orders the results by accounts count.

@@ -81,6 +81,7 @@ func provideCleanup(
 	opsCleanup *service.OpsCleanupService,
 	opsScheduledReport *service.OpsScheduledReportService,
 	opsSystemLogSink *service.OpsSystemLogSink,
+	proxyTraffic service.ProxyTrafficRecorder,
 	opsService *service.OpsService,
 	opsIngressReject *service.OpsIngressRejectAggregator,
 	apiKeyService *service.APIKeyService,
@@ -131,6 +132,12 @@ func provideCleanup(
 			{"OpsIngressRejectAggregator", func() error {
 				if opsIngressReject != nil {
 					opsIngressReject.Stop()
+				}
+				return nil
+			}},
+			{"ProxyTrafficRecorder", func() error {
+				if proxyTraffic != nil {
+					proxyTraffic.Stop()
 				}
 				return nil
 			}},

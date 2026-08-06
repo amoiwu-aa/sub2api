@@ -247,6 +247,104 @@ func (_u *ProxyUpdate) AddExpiryWarnDays(v int) *ProxyUpdate {
 	return _u
 }
 
+// SetTrafficUploadBytes sets the "traffic_upload_bytes" field.
+func (_u *ProxyUpdate) SetTrafficUploadBytes(v int64) *ProxyUpdate {
+	_u.mutation.ResetTrafficUploadBytes()
+	_u.mutation.SetTrafficUploadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficUploadBytes sets the "traffic_upload_bytes" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableTrafficUploadBytes(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetTrafficUploadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficUploadBytes adds value to the "traffic_upload_bytes" field.
+func (_u *ProxyUpdate) AddTrafficUploadBytes(v int64) *ProxyUpdate {
+	_u.mutation.AddTrafficUploadBytes(v)
+	return _u
+}
+
+// SetTrafficDownloadBytes sets the "traffic_download_bytes" field.
+func (_u *ProxyUpdate) SetTrafficDownloadBytes(v int64) *ProxyUpdate {
+	_u.mutation.ResetTrafficDownloadBytes()
+	_u.mutation.SetTrafficDownloadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficDownloadBytes sets the "traffic_download_bytes" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableTrafficDownloadBytes(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetTrafficDownloadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficDownloadBytes adds value to the "traffic_download_bytes" field.
+func (_u *ProxyUpdate) AddTrafficDownloadBytes(v int64) *ProxyUpdate {
+	_u.mutation.AddTrafficDownloadBytes(v)
+	return _u
+}
+
+// SetTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field.
+func (_u *ProxyUpdate) SetTrafficTodayUploadBytes(v int64) *ProxyUpdate {
+	_u.mutation.ResetTrafficTodayUploadBytes()
+	_u.mutation.SetTrafficTodayUploadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableTrafficTodayUploadBytes(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetTrafficTodayUploadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficTodayUploadBytes adds value to the "traffic_today_upload_bytes" field.
+func (_u *ProxyUpdate) AddTrafficTodayUploadBytes(v int64) *ProxyUpdate {
+	_u.mutation.AddTrafficTodayUploadBytes(v)
+	return _u
+}
+
+// SetTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field.
+func (_u *ProxyUpdate) SetTrafficTodayDownloadBytes(v int64) *ProxyUpdate {
+	_u.mutation.ResetTrafficTodayDownloadBytes()
+	_u.mutation.SetTrafficTodayDownloadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableTrafficTodayDownloadBytes(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetTrafficTodayDownloadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficTodayDownloadBytes adds value to the "traffic_today_download_bytes" field.
+func (_u *ProxyUpdate) AddTrafficTodayDownloadBytes(v int64) *ProxyUpdate {
+	_u.mutation.AddTrafficTodayDownloadBytes(v)
+	return _u
+}
+
+// SetTrafficTodayDate sets the "traffic_today_date" field.
+func (_u *ProxyUpdate) SetTrafficTodayDate(v time.Time) *ProxyUpdate {
+	_u.mutation.SetTrafficTodayDate(v)
+	return _u
+}
+
+// SetNillableTrafficTodayDate sets the "traffic_today_date" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableTrafficTodayDate(v *time.Time) *ProxyUpdate {
+	if v != nil {
+		_u.SetTrafficTodayDate(*v)
+	}
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdate) AddAccountIDs(ids ...int64) *ProxyUpdate {
 	_u.mutation.AddAccountIDs(ids...)
@@ -378,6 +476,26 @@ func (_u *ProxyUpdate) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.TrafficUploadBytes(); ok {
+		if err := proxy.TrafficUploadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_upload_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_upload_bytes": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.TrafficDownloadBytes(); ok {
+		if err := proxy.TrafficDownloadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_download_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_download_bytes": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.TrafficTodayUploadBytes(); ok {
+		if err := proxy.TrafficTodayUploadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_today_upload_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_today_upload_bytes": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.TrafficTodayDownloadBytes(); ok {
+		if err := proxy.TrafficTodayDownloadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_today_download_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_today_download_bytes": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -446,6 +564,33 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TrafficUploadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficUploadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficDownloadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficDownloadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficTodayUploadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficTodayUploadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficTodayUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficTodayDownloadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficTodayDownloadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficTodayDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficTodayDate(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayDate, field.TypeTime, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -759,6 +904,104 @@ func (_u *ProxyUpdateOne) AddExpiryWarnDays(v int) *ProxyUpdateOne {
 	return _u
 }
 
+// SetTrafficUploadBytes sets the "traffic_upload_bytes" field.
+func (_u *ProxyUpdateOne) SetTrafficUploadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetTrafficUploadBytes()
+	_u.mutation.SetTrafficUploadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficUploadBytes sets the "traffic_upload_bytes" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableTrafficUploadBytes(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetTrafficUploadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficUploadBytes adds value to the "traffic_upload_bytes" field.
+func (_u *ProxyUpdateOne) AddTrafficUploadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.AddTrafficUploadBytes(v)
+	return _u
+}
+
+// SetTrafficDownloadBytes sets the "traffic_download_bytes" field.
+func (_u *ProxyUpdateOne) SetTrafficDownloadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetTrafficDownloadBytes()
+	_u.mutation.SetTrafficDownloadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficDownloadBytes sets the "traffic_download_bytes" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableTrafficDownloadBytes(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetTrafficDownloadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficDownloadBytes adds value to the "traffic_download_bytes" field.
+func (_u *ProxyUpdateOne) AddTrafficDownloadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.AddTrafficDownloadBytes(v)
+	return _u
+}
+
+// SetTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field.
+func (_u *ProxyUpdateOne) SetTrafficTodayUploadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetTrafficTodayUploadBytes()
+	_u.mutation.SetTrafficTodayUploadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableTrafficTodayUploadBytes(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetTrafficTodayUploadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficTodayUploadBytes adds value to the "traffic_today_upload_bytes" field.
+func (_u *ProxyUpdateOne) AddTrafficTodayUploadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.AddTrafficTodayUploadBytes(v)
+	return _u
+}
+
+// SetTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field.
+func (_u *ProxyUpdateOne) SetTrafficTodayDownloadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetTrafficTodayDownloadBytes()
+	_u.mutation.SetTrafficTodayDownloadBytes(v)
+	return _u
+}
+
+// SetNillableTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableTrafficTodayDownloadBytes(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetTrafficTodayDownloadBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficTodayDownloadBytes adds value to the "traffic_today_download_bytes" field.
+func (_u *ProxyUpdateOne) AddTrafficTodayDownloadBytes(v int64) *ProxyUpdateOne {
+	_u.mutation.AddTrafficTodayDownloadBytes(v)
+	return _u
+}
+
+// SetTrafficTodayDate sets the "traffic_today_date" field.
+func (_u *ProxyUpdateOne) SetTrafficTodayDate(v time.Time) *ProxyUpdateOne {
+	_u.mutation.SetTrafficTodayDate(v)
+	return _u
+}
+
+// SetNillableTrafficTodayDate sets the "traffic_today_date" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableTrafficTodayDate(v *time.Time) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetTrafficTodayDate(*v)
+	}
+	return _u
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by IDs.
 func (_u *ProxyUpdateOne) AddAccountIDs(ids ...int64) *ProxyUpdateOne {
 	_u.mutation.AddAccountIDs(ids...)
@@ -903,6 +1146,26 @@ func (_u *ProxyUpdateOne) check() error {
 			return &ValidationError{Name: "fallback_mode", err: fmt.Errorf(`ent: validator failed for field "Proxy.fallback_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.TrafficUploadBytes(); ok {
+		if err := proxy.TrafficUploadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_upload_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_upload_bytes": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.TrafficDownloadBytes(); ok {
+		if err := proxy.TrafficDownloadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_download_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_download_bytes": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.TrafficTodayUploadBytes(); ok {
+		if err := proxy.TrafficTodayUploadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_today_upload_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_today_upload_bytes": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.TrafficTodayDownloadBytes(); ok {
+		if err := proxy.TrafficTodayDownloadBytesValidator(v); err != nil {
+			return &ValidationError{Name: "traffic_today_download_bytes", err: fmt.Errorf(`ent: validator failed for field "Proxy.traffic_today_download_bytes": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -988,6 +1251,33 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.AddedExpiryWarnDays(); ok {
 		_spec.AddField(proxy.FieldExpiryWarnDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TrafficUploadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficUploadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficDownloadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficDownloadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficTodayUploadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficTodayUploadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficTodayUploadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficTodayDownloadBytes(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficTodayDownloadBytes(); ok {
+		_spec.AddField(proxy.FieldTrafficTodayDownloadBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.TrafficTodayDate(); ok {
+		_spec.SetField(proxy.FieldTrafficTodayDate, field.TypeTime, value)
 	}
 	if _u.mutation.AccountsCleared() {
 		edge := &sqlgraph.EdgeSpec{

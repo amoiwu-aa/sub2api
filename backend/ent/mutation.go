@@ -36271,33 +36271,42 @@ func (m *PromoCodeUsageMutation) ResetEdge(name string) error {
 // ProxyMutation represents an operation that mutates the Proxy nodes in the graph.
 type ProxyMutation struct {
 	config
-	op                  Op
-	typ                 string
-	id                  *int64
-	created_at          *time.Time
-	updated_at          *time.Time
-	deleted_at          *time.Time
-	name                *string
-	protocol            *string
-	host                *string
-	port                *int
-	addport             *int
-	username            *string
-	password            *string
-	status              *string
-	expires_at          *time.Time
-	fallback_mode       *string
-	expiry_warn_days    *int
-	addexpiry_warn_days *int
-	clearedFields       map[string]struct{}
-	accounts            map[int64]struct{}
-	removedaccounts     map[int64]struct{}
-	clearedaccounts     bool
-	backup_proxy        *int64
-	clearedbackup_proxy bool
-	done                bool
-	oldValue            func(context.Context) (*Proxy, error)
-	predicates          []predicate.Proxy
+	op                              Op
+	typ                             string
+	id                              *int64
+	created_at                      *time.Time
+	updated_at                      *time.Time
+	deleted_at                      *time.Time
+	name                            *string
+	protocol                        *string
+	host                            *string
+	port                            *int
+	addport                         *int
+	username                        *string
+	password                        *string
+	status                          *string
+	expires_at                      *time.Time
+	fallback_mode                   *string
+	expiry_warn_days                *int
+	addexpiry_warn_days             *int
+	traffic_upload_bytes            *int64
+	addtraffic_upload_bytes         *int64
+	traffic_download_bytes          *int64
+	addtraffic_download_bytes       *int64
+	traffic_today_upload_bytes      *int64
+	addtraffic_today_upload_bytes   *int64
+	traffic_today_download_bytes    *int64
+	addtraffic_today_download_bytes *int64
+	traffic_today_date              *time.Time
+	clearedFields                   map[string]struct{}
+	accounts                        map[int64]struct{}
+	removedaccounts                 map[int64]struct{}
+	clearedaccounts                 bool
+	backup_proxy                    *int64
+	clearedbackup_proxy             bool
+	done                            bool
+	oldValue                        func(context.Context) (*Proxy, error)
+	predicates                      []predicate.Proxy
 }
 
 var _ ent.Mutation = (*ProxyMutation)(nil)
@@ -37007,6 +37016,266 @@ func (m *ProxyMutation) ResetExpiryWarnDays() {
 	m.addexpiry_warn_days = nil
 }
 
+// SetTrafficUploadBytes sets the "traffic_upload_bytes" field.
+func (m *ProxyMutation) SetTrafficUploadBytes(i int64) {
+	m.traffic_upload_bytes = &i
+	m.addtraffic_upload_bytes = nil
+}
+
+// TrafficUploadBytes returns the value of the "traffic_upload_bytes" field in the mutation.
+func (m *ProxyMutation) TrafficUploadBytes() (r int64, exists bool) {
+	v := m.traffic_upload_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficUploadBytes returns the old "traffic_upload_bytes" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldTrafficUploadBytes(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficUploadBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficUploadBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficUploadBytes: %w", err)
+	}
+	return oldValue.TrafficUploadBytes, nil
+}
+
+// AddTrafficUploadBytes adds i to the "traffic_upload_bytes" field.
+func (m *ProxyMutation) AddTrafficUploadBytes(i int64) {
+	if m.addtraffic_upload_bytes != nil {
+		*m.addtraffic_upload_bytes += i
+	} else {
+		m.addtraffic_upload_bytes = &i
+	}
+}
+
+// AddedTrafficUploadBytes returns the value that was added to the "traffic_upload_bytes" field in this mutation.
+func (m *ProxyMutation) AddedTrafficUploadBytes() (r int64, exists bool) {
+	v := m.addtraffic_upload_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTrafficUploadBytes resets all changes to the "traffic_upload_bytes" field.
+func (m *ProxyMutation) ResetTrafficUploadBytes() {
+	m.traffic_upload_bytes = nil
+	m.addtraffic_upload_bytes = nil
+}
+
+// SetTrafficDownloadBytes sets the "traffic_download_bytes" field.
+func (m *ProxyMutation) SetTrafficDownloadBytes(i int64) {
+	m.traffic_download_bytes = &i
+	m.addtraffic_download_bytes = nil
+}
+
+// TrafficDownloadBytes returns the value of the "traffic_download_bytes" field in the mutation.
+func (m *ProxyMutation) TrafficDownloadBytes() (r int64, exists bool) {
+	v := m.traffic_download_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficDownloadBytes returns the old "traffic_download_bytes" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldTrafficDownloadBytes(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficDownloadBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficDownloadBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficDownloadBytes: %w", err)
+	}
+	return oldValue.TrafficDownloadBytes, nil
+}
+
+// AddTrafficDownloadBytes adds i to the "traffic_download_bytes" field.
+func (m *ProxyMutation) AddTrafficDownloadBytes(i int64) {
+	if m.addtraffic_download_bytes != nil {
+		*m.addtraffic_download_bytes += i
+	} else {
+		m.addtraffic_download_bytes = &i
+	}
+}
+
+// AddedTrafficDownloadBytes returns the value that was added to the "traffic_download_bytes" field in this mutation.
+func (m *ProxyMutation) AddedTrafficDownloadBytes() (r int64, exists bool) {
+	v := m.addtraffic_download_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTrafficDownloadBytes resets all changes to the "traffic_download_bytes" field.
+func (m *ProxyMutation) ResetTrafficDownloadBytes() {
+	m.traffic_download_bytes = nil
+	m.addtraffic_download_bytes = nil
+}
+
+// SetTrafficTodayUploadBytes sets the "traffic_today_upload_bytes" field.
+func (m *ProxyMutation) SetTrafficTodayUploadBytes(i int64) {
+	m.traffic_today_upload_bytes = &i
+	m.addtraffic_today_upload_bytes = nil
+}
+
+// TrafficTodayUploadBytes returns the value of the "traffic_today_upload_bytes" field in the mutation.
+func (m *ProxyMutation) TrafficTodayUploadBytes() (r int64, exists bool) {
+	v := m.traffic_today_upload_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficTodayUploadBytes returns the old "traffic_today_upload_bytes" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldTrafficTodayUploadBytes(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficTodayUploadBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficTodayUploadBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficTodayUploadBytes: %w", err)
+	}
+	return oldValue.TrafficTodayUploadBytes, nil
+}
+
+// AddTrafficTodayUploadBytes adds i to the "traffic_today_upload_bytes" field.
+func (m *ProxyMutation) AddTrafficTodayUploadBytes(i int64) {
+	if m.addtraffic_today_upload_bytes != nil {
+		*m.addtraffic_today_upload_bytes += i
+	} else {
+		m.addtraffic_today_upload_bytes = &i
+	}
+}
+
+// AddedTrafficTodayUploadBytes returns the value that was added to the "traffic_today_upload_bytes" field in this mutation.
+func (m *ProxyMutation) AddedTrafficTodayUploadBytes() (r int64, exists bool) {
+	v := m.addtraffic_today_upload_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTrafficTodayUploadBytes resets all changes to the "traffic_today_upload_bytes" field.
+func (m *ProxyMutation) ResetTrafficTodayUploadBytes() {
+	m.traffic_today_upload_bytes = nil
+	m.addtraffic_today_upload_bytes = nil
+}
+
+// SetTrafficTodayDownloadBytes sets the "traffic_today_download_bytes" field.
+func (m *ProxyMutation) SetTrafficTodayDownloadBytes(i int64) {
+	m.traffic_today_download_bytes = &i
+	m.addtraffic_today_download_bytes = nil
+}
+
+// TrafficTodayDownloadBytes returns the value of the "traffic_today_download_bytes" field in the mutation.
+func (m *ProxyMutation) TrafficTodayDownloadBytes() (r int64, exists bool) {
+	v := m.traffic_today_download_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficTodayDownloadBytes returns the old "traffic_today_download_bytes" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldTrafficTodayDownloadBytes(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficTodayDownloadBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficTodayDownloadBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficTodayDownloadBytes: %w", err)
+	}
+	return oldValue.TrafficTodayDownloadBytes, nil
+}
+
+// AddTrafficTodayDownloadBytes adds i to the "traffic_today_download_bytes" field.
+func (m *ProxyMutation) AddTrafficTodayDownloadBytes(i int64) {
+	if m.addtraffic_today_download_bytes != nil {
+		*m.addtraffic_today_download_bytes += i
+	} else {
+		m.addtraffic_today_download_bytes = &i
+	}
+}
+
+// AddedTrafficTodayDownloadBytes returns the value that was added to the "traffic_today_download_bytes" field in this mutation.
+func (m *ProxyMutation) AddedTrafficTodayDownloadBytes() (r int64, exists bool) {
+	v := m.addtraffic_today_download_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTrafficTodayDownloadBytes resets all changes to the "traffic_today_download_bytes" field.
+func (m *ProxyMutation) ResetTrafficTodayDownloadBytes() {
+	m.traffic_today_download_bytes = nil
+	m.addtraffic_today_download_bytes = nil
+}
+
+// SetTrafficTodayDate sets the "traffic_today_date" field.
+func (m *ProxyMutation) SetTrafficTodayDate(t time.Time) {
+	m.traffic_today_date = &t
+}
+
+// TrafficTodayDate returns the value of the "traffic_today_date" field in the mutation.
+func (m *ProxyMutation) TrafficTodayDate() (r time.Time, exists bool) {
+	v := m.traffic_today_date
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficTodayDate returns the old "traffic_today_date" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldTrafficTodayDate(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficTodayDate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficTodayDate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficTodayDate: %w", err)
+	}
+	return oldValue.TrafficTodayDate, nil
+}
+
+// ResetTrafficTodayDate resets all changes to the "traffic_today_date" field.
+func (m *ProxyMutation) ResetTrafficTodayDate() {
+	m.traffic_today_date = nil
+}
+
 // AddAccountIDs adds the "accounts" edge to the Account entity by ids.
 func (m *ProxyMutation) AddAccountIDs(ids ...int64) {
 	if m.accounts == nil {
@@ -37122,7 +37391,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 19)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -37165,6 +37434,21 @@ func (m *ProxyMutation) Fields() []string {
 	if m.expiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
+	if m.traffic_upload_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficUploadBytes)
+	}
+	if m.traffic_download_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficDownloadBytes)
+	}
+	if m.traffic_today_upload_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficTodayUploadBytes)
+	}
+	if m.traffic_today_download_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficTodayDownloadBytes)
+	}
+	if m.traffic_today_date != nil {
+		fields = append(fields, proxy.FieldTrafficTodayDate)
+	}
 	return fields
 }
 
@@ -37201,6 +37485,16 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.BackupProxyID()
 	case proxy.FieldExpiryWarnDays:
 		return m.ExpiryWarnDays()
+	case proxy.FieldTrafficUploadBytes:
+		return m.TrafficUploadBytes()
+	case proxy.FieldTrafficDownloadBytes:
+		return m.TrafficDownloadBytes()
+	case proxy.FieldTrafficTodayUploadBytes:
+		return m.TrafficTodayUploadBytes()
+	case proxy.FieldTrafficTodayDownloadBytes:
+		return m.TrafficTodayDownloadBytes()
+	case proxy.FieldTrafficTodayDate:
+		return m.TrafficTodayDate()
 	}
 	return nil, false
 }
@@ -37238,6 +37532,16 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldBackupProxyID(ctx)
 	case proxy.FieldExpiryWarnDays:
 		return m.OldExpiryWarnDays(ctx)
+	case proxy.FieldTrafficUploadBytes:
+		return m.OldTrafficUploadBytes(ctx)
+	case proxy.FieldTrafficDownloadBytes:
+		return m.OldTrafficDownloadBytes(ctx)
+	case proxy.FieldTrafficTodayUploadBytes:
+		return m.OldTrafficTodayUploadBytes(ctx)
+	case proxy.FieldTrafficTodayDownloadBytes:
+		return m.OldTrafficTodayDownloadBytes(ctx)
+	case proxy.FieldTrafficTodayDate:
+		return m.OldTrafficTodayDate(ctx)
 	}
 	return nil, fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -37345,6 +37649,41 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetExpiryWarnDays(v)
 		return nil
+	case proxy.FieldTrafficUploadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficUploadBytes(v)
+		return nil
+	case proxy.FieldTrafficDownloadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficDownloadBytes(v)
+		return nil
+	case proxy.FieldTrafficTodayUploadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficTodayUploadBytes(v)
+		return nil
+	case proxy.FieldTrafficTodayDownloadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficTodayDownloadBytes(v)
+		return nil
+	case proxy.FieldTrafficTodayDate:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficTodayDate(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)
 }
@@ -37359,6 +37698,18 @@ func (m *ProxyMutation) AddedFields() []string {
 	if m.addexpiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
+	if m.addtraffic_upload_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficUploadBytes)
+	}
+	if m.addtraffic_download_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficDownloadBytes)
+	}
+	if m.addtraffic_today_upload_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficTodayUploadBytes)
+	}
+	if m.addtraffic_today_download_bytes != nil {
+		fields = append(fields, proxy.FieldTrafficTodayDownloadBytes)
+	}
 	return fields
 }
 
@@ -37371,6 +37722,14 @@ func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedPort()
 	case proxy.FieldExpiryWarnDays:
 		return m.AddedExpiryWarnDays()
+	case proxy.FieldTrafficUploadBytes:
+		return m.AddedTrafficUploadBytes()
+	case proxy.FieldTrafficDownloadBytes:
+		return m.AddedTrafficDownloadBytes()
+	case proxy.FieldTrafficTodayUploadBytes:
+		return m.AddedTrafficTodayUploadBytes()
+	case proxy.FieldTrafficTodayDownloadBytes:
+		return m.AddedTrafficTodayDownloadBytes()
 	}
 	return nil, false
 }
@@ -37393,6 +37752,34 @@ func (m *ProxyMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddExpiryWarnDays(v)
+		return nil
+	case proxy.FieldTrafficUploadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficUploadBytes(v)
+		return nil
+	case proxy.FieldTrafficDownloadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficDownloadBytes(v)
+		return nil
+	case proxy.FieldTrafficTodayUploadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficTodayUploadBytes(v)
+		return nil
+	case proxy.FieldTrafficTodayDownloadBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficTodayDownloadBytes(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy numeric field %s", name)
@@ -37495,6 +37882,21 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldExpiryWarnDays:
 		m.ResetExpiryWarnDays()
+		return nil
+	case proxy.FieldTrafficUploadBytes:
+		m.ResetTrafficUploadBytes()
+		return nil
+	case proxy.FieldTrafficDownloadBytes:
+		m.ResetTrafficDownloadBytes()
+		return nil
+	case proxy.FieldTrafficTodayUploadBytes:
+		m.ResetTrafficTodayUploadBytes()
+		return nil
+	case proxy.FieldTrafficTodayDownloadBytes:
+		m.ResetTrafficTodayDownloadBytes()
+		return nil
+	case proxy.FieldTrafficTodayDate:
+		m.ResetTrafficTodayDate()
 		return nil
 	}
 	return fmt.Errorf("unknown Proxy field %s", name)

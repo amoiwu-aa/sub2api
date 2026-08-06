@@ -584,18 +584,23 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		return nil
 	}
 	out := &service.Proxy{
-		ID:             m.ID,
-		Name:           m.Name,
-		Protocol:       m.Protocol,
-		Host:           m.Host,
-		Port:           m.Port,
-		Status:         m.Status,
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
-		ExpiresAt:      m.ExpiresAt,
-		FallbackMode:   m.FallbackMode,
-		BackupProxyID:  m.BackupProxyID,
-		ExpiryWarnDays: m.ExpiryWarnDays,
+		ID:                        m.ID,
+		Name:                      m.Name,
+		Protocol:                  m.Protocol,
+		Host:                      m.Host,
+		Port:                      m.Port,
+		Status:                    m.Status,
+		CreatedAt:                 m.CreatedAt,
+		UpdatedAt:                 m.UpdatedAt,
+		ExpiresAt:                 m.ExpiresAt,
+		FallbackMode:              m.FallbackMode,
+		BackupProxyID:             m.BackupProxyID,
+		ExpiryWarnDays:            m.ExpiryWarnDays,
+		TrafficUploadBytes:        m.TrafficUploadBytes,
+		TrafficDownloadBytes:      m.TrafficDownloadBytes,
+		TrafficTodayUploadBytes:   m.TrafficTodayUploadBytes,
+		TrafficTodayDownloadBytes: m.TrafficTodayDownloadBytes,
+		TrafficTodayDate:          m.TrafficTodayDate,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username
