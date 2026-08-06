@@ -340,6 +340,168 @@ func TestUpstreamBillingProbeSuccessPersistsSanitizedSnapshot(t *testing.T) {
 	require.Equal(t, snapshot.Status, persisted.Status)
 }
 
+func TestUpstreamBillingProbeFallsBackToNewAPIPricing(t *testing.T) {
+	initialRate := 0.25
+	account := &Account{
+		ID:          19,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Concurrency: 2,
+		Credentials: map[string]any{
+			"api_key":  "sk-new-api-sensitive",
+			"base_url": "https://new-api.example/v1",
+		},
+		Extra: map[string]any{
+			UpstreamBillingProbeEnabledExtraKey:    true,
+			UpstreamBillingRateSyncEnabledExtraKey: true,
+		},
+		RateMultiplier: &initialRate,
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"message":"not found"}`)),
+		},
+		{
+			StatusCode: http.StatusForbidden,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"success":false,"message":"disabled"}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{
+				"success": true,
+				"pricing_version": "pricing-v1",
+				"group_ratio": {"default": 1, "vip": 0.8},
+				"data": [
+					{
+						"model_name": "gpt-5.6",
+						"quota_type": 0,
+						"model_ratio": 1.25,
+						"completion_ratio": 8,
+						"model_price": 0,
+						"enable_groups": ["default", "vip"]
+					},
+					{
+						"model_name": "image-fixed",
+						"quota_type": 1,
+						"model_ratio": 0,
+						"completion_ratio": 0,
+						"model_price": 0.04,
+						"enable_groups": ["default"]
+					}
+				],
+				"unexpected_secret": "must-not-persist"
+			}`)),
+		},
+	}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+	fixedNow := time.Date(2026, time.August, 6, 8, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return fixedNow }
+
+	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, UpstreamBillingProbeStatusOK, snapshot.Status)
+	require.Equal(t, "newapi.model_billing", snapshot.Data["object"])
+	require.Equal(t, "model", snapshot.Data["billing_scope"])
+	require.Equal(t, "new_api", snapshot.Data["provider"])
+	require.Equal(t, "/api/pricing", snapshot.Data["source_endpoint"])
+	require.Equal(t, 2, snapshot.Data["model_count"])
+	require.Equal(t, 1, snapshot.Data["ratio_model_count"])
+	require.Equal(t, 1, snapshot.Data["fixed_price_model_count"])
+	require.Equal(t, "pricing-v1", snapshot.Data["pricing_version"])
+	require.NotContains(t, snapshot.Data, "unexpected_secret")
+	require.Nil(t, snapshot.SyncedRateMultiplier)
+	require.NotNil(t, account.RateMultiplier)
+	require.Equal(t, initialRate, *account.RateMultiplier)
+
+	require.Len(t, upstream.requests, 3)
+	require.Equal(t, "https://new-api.example/v1/sub2api/billing", upstream.requests[0].URL.String())
+	require.Equal(t, "https://new-api.example/api/ratio_config", upstream.requests[1].URL.String())
+	require.Equal(t, "https://new-api.example/api/pricing", upstream.requests[2].URL.String())
+	require.Equal(t, "Bearer sk-new-api-sensitive", upstream.requests[0].Header.Get("Authorization"))
+	require.Empty(t, upstream.requests[1].Header.Get("Authorization"))
+	require.Empty(t, upstream.requests[2].Header.Get("Authorization"))
+}
+
+func TestUpstreamBillingProbeAcceptsNewAPIRatioConfig(t *testing.T) {
+	account := &Account{
+		ID:          20,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-new-api-sensitive",
+			"base_url": "https://new-api.example/openai/v1",
+		},
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"message":"not found"}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{
+				"success": true,
+				"data": {
+					"model_ratio": {"gpt-5.6": 1.25},
+					"completion_ratio": {"gpt-5.6": 8},
+					"model_price": {"image-fixed": 0.04},
+					"ignored": {"secret": 123}
+				}
+			}`)),
+		},
+	}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+	fixedNow := time.Date(2026, time.August, 6, 8, 30, 0, 0, time.UTC)
+	svc.now = func() time.Time { return fixedNow }
+
+	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, UpstreamBillingProbeStatusOK, snapshot.Status)
+	require.Equal(t, "/api/ratio_config", snapshot.Data["source_endpoint"])
+	require.Equal(t, 2, snapshot.Data["model_count"])
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "https://new-api.example/openai/api/ratio_config", upstream.requests[1].URL.String())
+	require.Empty(t, upstream.requests[1].Header.Get("Authorization"))
+}
+
+func TestParseNewAPIPricingRejectsUnsafeValues(t *testing.T) {
+	_, err := parseNewAPIPricingResponse([]byte(`{
+		"success": true,
+		"group_ratio": {"default": 1},
+		"data": [{
+			"model_name": "gpt-bad",
+			"quota_type": 0,
+			"model_ratio": -1,
+			"completion_ratio": 1
+		}]
+	}`), time.Now())
+	require.Error(t, err)
+}
+
+func TestBuildUpstreamSiteEndpointURL(t *testing.T) {
+	require.Equal(t,
+		"https://relay.example/api/pricing",
+		buildUpstreamSiteEndpointURL("https://relay.example/v1", "/api/pricing"),
+	)
+	require.Equal(t,
+		"https://relay.example/openai/api/ratio_config",
+		buildUpstreamSiteEndpointURL("https://relay.example/openai/v1?ignored=1", "/api/ratio_config"),
+	)
+}
+
 func TestUpstreamBillingProbeSyncsResolvedRateForAllAPIKeyPlatforms(t *testing.T) {
 	for _, platform := range []string{
 		PlatformOpenAI,

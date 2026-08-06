@@ -39,6 +39,10 @@ const (
 	upstreamBillingProbeCycleInterval          = time.Minute
 	upstreamBillingProbeRequestTimeout         = 10 * time.Second
 	upstreamBillingProbeMaxBodyBytes           = 64 * 1024
+	upstreamBillingProbeNewAPIMaxBodyBytes     = 1024 * 1024
+	upstreamBillingProbeNewAPIMaxModels        = 1000
+	upstreamBillingProbeNewAPIMaxGroups        = 100
+	upstreamBillingProbeNewAPIMaxNameBytes     = 200
 	upstreamBillingProbeMaxPerCycle            = 20
 	upstreamBillingProbeConcurrency            = 4
 	upstreamBillingProbeMaxDelay               = 24 * time.Hour
@@ -143,6 +147,52 @@ type upstreamBillingProbeResponse struct {
 	EffectiveRateMultiplier *float64 `json:"effective_rate_multiplier"`
 	Timezone                *string  `json:"timezone"`
 	ObservedAt              string   `json:"observed_at"`
+}
+
+type newAPIRatioConfigResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		ModelRatio      map[string]float64 `json:"model_ratio"`
+		CompletionRatio map[string]float64 `json:"completion_ratio"`
+		ModelPrice      map[string]float64 `json:"model_price"`
+	} `json:"data"`
+}
+
+type newAPIPricingResponse struct {
+	Success        bool                         `json:"success"`
+	Data           []newAPIPricingModel         `json:"data"`
+	GroupRatio     map[string]float64           `json:"group_ratio"`
+	PricingVersion string                       `json:"pricing_version"`
+	UsableGroup    map[string]newAPIUsableGroup `json:"usable_group"`
+}
+
+type newAPIPricingModel struct {
+	ModelName       string   `json:"model_name"`
+	QuotaType       int      `json:"quota_type"`
+	ModelRatio      float64  `json:"model_ratio"`
+	ModelPrice      float64  `json:"model_price"`
+	CompletionRatio float64  `json:"completion_ratio"`
+	EnableGroups    []string `json:"enable_groups"`
+}
+
+type newAPIUsableGroup struct {
+	Description string  `json:"desc"`
+	Ratio       float64 `json:"ratio"`
+}
+
+type newAPIModelBilling struct {
+	ModelName       string
+	QuotaType       int
+	ModelRatio      *float64
+	ModelPrice      *float64
+	CompletionRatio *float64
+	EnableGroups    []string
+}
+
+type upstreamBillingProbeHTTPResult struct {
+	StatusCode int
+	Header     http.Header
+	Body       []byte
 }
 
 // GetUpstreamBillingProbeSettings returns defaults when the setting is absent.
@@ -660,7 +710,11 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "response_too_large", retryAfter(resp.Header, now))
 	}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
-		return s.persistProbeFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "unsupported", retryAfter(resp.Header, now))
+		if upstreamBillingProbeTargetIsOfficialAPI(normalizedBaseURL) {
+			return s.persistProbeFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "unsupported", retryAfter(resp.Header, now))
+		}
+		_ = resp.Body.Close()
+		return s.probeNewAPIModelBilling(ctx, account, intervalMinutes, now, normalizedBaseURL, proxyURL, tlsProfile)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "http_error", retryAfter(resp.Header, now))
@@ -669,6 +723,17 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	if err != nil {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "invalid_response", retryAfter(resp.Header, now))
 	}
+	return s.persistSuccessfulProbe(ctx, account, intervalMinutes, now, resp.StatusCode, data)
+}
+
+func (s *UpstreamBillingProbeService) persistSuccessfulProbe(
+	ctx context.Context,
+	account *Account,
+	intervalMinutes int,
+	now time.Time,
+	statusCode int,
+	data map[string]any,
+) (*UpstreamBillingProbeSnapshot, error) {
 	snapshot := &UpstreamBillingProbeSnapshot{
 		Status:        UpstreamBillingProbeStatusOK,
 		Data:          data,
@@ -676,14 +741,15 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		FreshUntil:    probeTimePtr(now.Add(2 * time.Duration(intervalMinutes) * time.Minute)),
 		LastAttemptAt: now,
 		NextProbeAt:   now.Add(nextProbeDelay(intervalMinutes, 0)),
-		HTTPStatus:    resp.StatusCode,
+		HTTPStatus:    statusCode,
 	}
 	// 账号级值域与精度只在真要写回时才有影响：只观察上游声明、未开启同步的
 	// 账号不因声明值不适配 accounts.rate_multiplier 而被记成探测失败并进入
 	// 指数退避——探测本身成功了，原始声明照常存进快照供展示。
 	var syncRate *float64
 	previousRate := account.BillingRateMultiplier()
-	if upstreamBillingRateSyncEnabled(account) {
+	scope, _ := data["billing_scope"].(string)
+	if upstreamBillingRateSyncEnabled(account) && scope == "token" {
 		if value, valid := upstreamBillingProbeSyncRate(data); valid {
 			syncRate = &value
 			snapshot.SyncedRateMultiplier = &value
@@ -712,6 +778,99 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		)
 	}
 	return snapshot, nil
+}
+
+func (s *UpstreamBillingProbeService) probeNewAPIModelBilling(
+	ctx context.Context,
+	account *Account,
+	intervalMinutes int,
+	now time.Time,
+	normalizedBaseURL string,
+	proxyURL string,
+	tlsProfile *tlsfingerprint.Profile,
+) (*UpstreamBillingProbeSnapshot, error) {
+	type candidate struct {
+		endpoint string
+		parse    func([]byte, time.Time) (map[string]any, error)
+	}
+	candidates := []candidate{
+		{endpoint: "/api/ratio_config", parse: parseNewAPIRatioConfigResponse},
+		{endpoint: "/api/pricing", parse: parseNewAPIPricingResponse},
+	}
+
+	lastStatus := 0
+	lastReason := "unsupported"
+	var lastRetryAfter time.Duration
+	for _, candidate := range candidates {
+		targetURL := buildUpstreamSiteEndpointURL(normalizedBaseURL, candidate.endpoint)
+		result, reason := s.fetchNewAPIBillingEndpoint(ctx, account, targetURL, proxyURL, tlsProfile)
+		if reason != "" {
+			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, reason, 0)
+		}
+		lastStatus = result.StatusCode
+		lastRetryAfter = retryAfter(result.Header, now)
+		if result.StatusCode >= 200 && result.StatusCode < 300 {
+			data, err := candidate.parse(result.Body, now)
+			if err == nil {
+				return s.persistSuccessfulProbe(ctx, account, intervalMinutes, now, result.StatusCode, data)
+			}
+			lastReason = "invalid_response"
+			continue
+		}
+		if result.StatusCode == http.StatusForbidden ||
+			result.StatusCode == http.StatusNotFound ||
+			result.StatusCode == http.StatusMethodNotAllowed {
+			lastReason = "unsupported"
+			continue
+		}
+		lastReason = "http_error"
+	}
+	return s.persistProbeFailure(ctx, account, intervalMinutes, now, lastStatus, lastReason, lastRetryAfter)
+}
+
+func (s *UpstreamBillingProbeService) fetchNewAPIBillingEndpoint(
+	ctx context.Context,
+	account *Account,
+	targetURL string,
+	proxyURL string,
+	tlsProfile *tlsfingerprint.Profile,
+) (*upstreamBillingProbeHTTPResult, string) {
+	probeCtx, cancel := context.WithTimeout(ctx, upstreamBillingProbeRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, targetURL, bytes.NewReader(nil))
+	if err != nil {
+		return nil, "request_build_failed"
+	}
+	profile := HTTPUpstreamProfileDefault
+	if account.Platform == PlatformOpenAI {
+		profile = HTTPUpstreamProfileOpenAI
+	}
+	reqCtx := WithHTTPUpstreamProfile(req.Context(), profile)
+	req = req.WithContext(WithHTTPUpstreamRedirectsDisabled(reqCtx))
+	req.Header.Set("Accept", "application/json")
+
+	// New API's pricing endpoints are site-level declarations. Do not send the
+	// account API key or account header overrides to these public endpoints.
+	resp, err := s.accountTestService.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
+	if err != nil {
+		return nil, "request_failed"
+	}
+	if resp == nil || resp.Body == nil {
+		return nil, "empty_response"
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, upstreamBillingProbeNewAPIMaxBodyBytes+1))
+	if readErr != nil {
+		return nil, "response_read_failed"
+	}
+	if len(body) > upstreamBillingProbeNewAPIMaxBodyBytes {
+		return nil, "response_too_large"
+	}
+	return &upstreamBillingProbeHTTPResult{
+		StatusCode: resp.StatusCode,
+		Header:     resp.Header,
+		Body:       body,
+	}, ""
 }
 
 func (s *UpstreamBillingProbeService) persistProbeFailure(
@@ -849,6 +1008,250 @@ func parseUpstreamBillingProbeResponse(body []byte) (map[string]any, error) {
 	return data, nil
 }
 
+func parseNewAPIRatioConfigResponse(body []byte, now time.Time) (map[string]any, error) {
+	var response newAPIRatioConfigResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	if !response.Success {
+		return nil, fmt.Errorf("new api ratio config was not successful")
+	}
+
+	models := make(map[string]*newAPIModelBilling)
+	for rawName, value := range response.Data.ModelRatio {
+		name, ok := normalizeNewAPIDeclarationName(rawName)
+		if !ok || !validNewAPIRateValue(value) {
+			return nil, fmt.Errorf("invalid new api model ratio")
+		}
+		rate := value
+		models[name] = &newAPIModelBilling{
+			ModelName:  name,
+			QuotaType:  0,
+			ModelRatio: &rate,
+		}
+	}
+	for rawName, value := range response.Data.ModelPrice {
+		name, ok := normalizeNewAPIDeclarationName(rawName)
+		if !ok || !validNewAPIRateValue(value) {
+			return nil, fmt.Errorf("invalid new api model price")
+		}
+		price := value
+		model := models[name]
+		if model == nil {
+			model = &newAPIModelBilling{ModelName: name}
+			models[name] = model
+		}
+		model.QuotaType = 1
+		model.ModelRatio = nil
+		model.ModelPrice = &price
+	}
+	for rawName, value := range response.Data.CompletionRatio {
+		name, ok := normalizeNewAPIDeclarationName(rawName)
+		if !ok || !validNewAPIRateValue(value) {
+			return nil, fmt.Errorf("invalid new api completion ratio")
+		}
+		if model := models[name]; model != nil {
+			completion := value
+			model.CompletionRatio = &completion
+		}
+	}
+	return buildNewAPIModelBillingData(models, nil, "", "/api/ratio_config", now)
+}
+
+func parseNewAPIPricingResponse(body []byte, now time.Time) (map[string]any, error) {
+	var response newAPIPricingResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	if !response.Success {
+		return nil, fmt.Errorf("new api pricing response was not successful")
+	}
+
+	models := make(map[string]*newAPIModelBilling)
+	for _, item := range response.Data {
+		name, ok := normalizeNewAPIDeclarationName(item.ModelName)
+		if !ok || (item.QuotaType != 0 && item.QuotaType != 1) {
+			return nil, fmt.Errorf("invalid new api pricing model")
+		}
+		model := &newAPIModelBilling{
+			ModelName:    name,
+			QuotaType:    item.QuotaType,
+			EnableGroups: sanitizeNewAPIGroupNames(item.EnableGroups),
+		}
+		switch item.QuotaType {
+		case 0:
+			if !validNewAPIRateValue(item.ModelRatio) || !validNewAPIRateValue(item.CompletionRatio) {
+				return nil, fmt.Errorf("invalid new api token pricing")
+			}
+			modelRatio := item.ModelRatio
+			completionRatio := item.CompletionRatio
+			model.ModelRatio = &modelRatio
+			model.CompletionRatio = &completionRatio
+		case 1:
+			if !validNewAPIRateValue(item.ModelPrice) {
+				return nil, fmt.Errorf("invalid new api fixed pricing")
+			}
+			modelPrice := item.ModelPrice
+			model.ModelPrice = &modelPrice
+		}
+		models[name] = model
+	}
+
+	groupRatios := make(map[string]float64, len(response.GroupRatio))
+	for rawName, value := range response.GroupRatio {
+		name, ok := normalizeNewAPIDeclarationName(rawName)
+		if !ok || !validNewAPIRateValue(value) {
+			return nil, fmt.Errorf("invalid new api group ratio")
+		}
+		if len(groupRatios) >= upstreamBillingProbeNewAPIMaxGroups {
+			return nil, fmt.Errorf("too many new api groups")
+		}
+		groupRatios[name] = value
+	}
+	return buildNewAPIModelBillingData(models, groupRatios, response.PricingVersion, "/api/pricing", now)
+}
+
+func buildNewAPIModelBillingData(
+	models map[string]*newAPIModelBilling,
+	groupRatios map[string]float64,
+	pricingVersion string,
+	sourceEndpoint string,
+	now time.Time,
+) (map[string]any, error) {
+	if len(models) == 0 || len(models) > upstreamBillingProbeNewAPIMaxModels {
+		return nil, fmt.Errorf("invalid new api model count")
+	}
+
+	names := make([]string, 0, len(models))
+	for name := range models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	declaredModels := make([]map[string]any, 0, len(names))
+	ratioModelCount := 0
+	fixedPriceModelCount := 0
+	var minModelRatio, maxModelRatio float64
+	var minModelPrice, maxModelPrice float64
+	for _, name := range names {
+		model := models[name]
+		if model == nil {
+			return nil, fmt.Errorf("invalid new api model declaration")
+		}
+		item := map[string]any{
+			"model_name": name,
+			"quota_type": model.QuotaType,
+		}
+		switch model.QuotaType {
+		case 0:
+			if model.ModelRatio == nil || !validNewAPIRateValue(*model.ModelRatio) {
+				return nil, fmt.Errorf("incomplete new api model ratio")
+			}
+			item["model_ratio"] = *model.ModelRatio
+			if model.CompletionRatio != nil {
+				if !validNewAPIRateValue(*model.CompletionRatio) {
+					return nil, fmt.Errorf("invalid new api completion ratio")
+				}
+				item["completion_ratio"] = *model.CompletionRatio
+			}
+			if ratioModelCount == 0 || *model.ModelRatio < minModelRatio {
+				minModelRatio = *model.ModelRatio
+			}
+			if ratioModelCount == 0 || *model.ModelRatio > maxModelRatio {
+				maxModelRatio = *model.ModelRatio
+			}
+			ratioModelCount++
+		case 1:
+			if model.ModelPrice == nil || !validNewAPIRateValue(*model.ModelPrice) {
+				return nil, fmt.Errorf("incomplete new api model price")
+			}
+			item["model_price"] = *model.ModelPrice
+			if fixedPriceModelCount == 0 || *model.ModelPrice < minModelPrice {
+				minModelPrice = *model.ModelPrice
+			}
+			if fixedPriceModelCount == 0 || *model.ModelPrice > maxModelPrice {
+				maxModelPrice = *model.ModelPrice
+			}
+			fixedPriceModelCount++
+		default:
+			return nil, fmt.Errorf("unsupported new api quota type")
+		}
+		if len(model.EnableGroups) > 0 {
+			item["enable_groups"] = model.EnableGroups
+		}
+		declaredModels = append(declaredModels, item)
+	}
+
+	data := map[string]any{
+		"object":                  "newapi.model_billing",
+		"schema_version":          1,
+		"billing_scope":           "model",
+		"provider":                "new_api",
+		"source_endpoint":         sourceEndpoint,
+		"model_count":             len(declaredModels),
+		"ratio_model_count":       ratioModelCount,
+		"fixed_price_model_count": fixedPriceModelCount,
+		"models":                  declaredModels,
+		"observed_at":             now.UTC().Format(time.RFC3339Nano),
+	}
+	if ratioModelCount > 0 {
+		data["min_model_ratio"] = minModelRatio
+		data["max_model_ratio"] = maxModelRatio
+	}
+	if fixedPriceModelCount > 0 {
+		data["min_model_price"] = minModelPrice
+		data["max_model_price"] = maxModelPrice
+	}
+	if len(groupRatios) > 0 {
+		data["group_ratio"] = groupRatios
+	}
+	if value := strings.TrimSpace(pricingVersion); value != "" && len(value) <= upstreamBillingProbeNewAPIMaxNameBytes {
+		data["pricing_version"] = value
+	}
+	return data, nil
+}
+
+func normalizeNewAPIDeclarationName(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(trimmed) > upstreamBillingProbeNewAPIMaxNameBytes {
+		return "", false
+	}
+	for _, r := range trimmed {
+		if r < 0x20 || r == 0x7f {
+			return "", false
+		}
+	}
+	return trimmed, true
+}
+
+func sanitizeNewAPIGroupNames(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, min(len(values), upstreamBillingProbeNewAPIMaxGroups))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		name, ok := normalizeNewAPIDeclarationName(value)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+		if len(result) >= upstreamBillingProbeNewAPIMaxGroups {
+			break
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func validNewAPIRateValue(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
 func upstreamBillingRateAt(data map[string]any, now time.Time) (float64, bool) {
 	if scope, _ := data["billing_scope"].(string); scope != "token" {
 		return 0, false
@@ -963,10 +1366,30 @@ func decodeUpstreamBillingProbeSnapshot(extra map[string]any) *UpstreamBillingPr
 	return &snapshot
 }
 
+func buildUpstreamSiteEndpointURL(baseURL, endpoint string) string {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/" + strings.TrimLeft(endpoint, "/")
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if openAIBaseURLHasVersionSuffix(path) {
+		if slash := strings.LastIndex(path, "/"); slash >= 0 {
+			path = path[:slash]
+		} else {
+			path = ""
+		}
+	}
+	parsed.Path = strings.TrimRight(path, "/") + "/" + strings.TrimLeft(strings.TrimSpace(endpoint), "/")
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
 // IsUpstreamBillingProbeIdentity reports whether an account identity may opt
-// in to the upstream billing probe. `/v1/sub2api/billing` is a key-scoped
-// sub2api convention shared by the five supported API-key platforms.
-// Non-sub2api upstreams return 404 and the snapshot records "unsupported".
+// in to the upstream billing probe. The probe first tries the key-scoped
+// `/v1/sub2api/billing` convention, then falls back to New API's public
+// model-pricing declarations when the private endpoint is absent.
 // Only AccountTypeAPIKey is in scope. OAuth/Bedrock hold no static API key to
 // present at all; AccountTypeUpstream (antigravity relay accounts) does carry
 // a base_url plus a static api_key, but it is deliberately left out of the

@@ -1047,7 +1047,7 @@ export interface TempUnschedulableStatus {
   state?: TempUnschedulableState
 }
 
-export interface UpstreamBillingData {
+export interface TokenScopedUpstreamBillingData {
   object: 'sub2api.key_billing'
   schema_version: 1
   billing_scope: 'token'
@@ -1063,6 +1063,38 @@ export interface UpstreamBillingData {
   timezone?: string
   observed_at: string
 }
+
+export interface NewAPIModelBillingDeclaration {
+  model_name: string
+  quota_type: 0 | 1
+  model_ratio?: number
+  completion_ratio?: number
+  model_price?: number
+  enable_groups?: string[]
+}
+
+export interface ModelScopedUpstreamBillingData {
+  object: 'newapi.model_billing'
+  schema_version: 1
+  billing_scope: 'model'
+  provider: 'new_api'
+  source_endpoint: '/api/ratio_config' | '/api/pricing'
+  model_count: number
+  ratio_model_count: number
+  fixed_price_model_count: number
+  min_model_ratio?: number
+  max_model_ratio?: number
+  min_model_price?: number
+  max_model_price?: number
+  group_ratio?: Record<string, number>
+  pricing_version?: string
+  models: NewAPIModelBillingDeclaration[]
+  observed_at: string
+}
+
+export type UpstreamBillingData =
+  | TokenScopedUpstreamBillingData
+  | ModelScopedUpstreamBillingData
 
 export type UpstreamBillingProbeStatus = 'ok' | 'unsupported' | 'failed'
 

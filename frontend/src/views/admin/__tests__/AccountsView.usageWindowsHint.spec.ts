@@ -205,7 +205,22 @@ describe('admin AccountsView usage windows hint', () => {
         rate_multiplier: 0.065,
         extra: {
           upstream_billing_probe_enabled: true,
-          upstream_billing_rate_sync_enabled: true
+          upstream_billing_rate_sync_enabled: true,
+          upstream_billing_probe: {
+            status: 'ok',
+            data: {
+              object: 'sub2api.key_billing',
+              schema_version: 1,
+              billing_scope: 'token',
+              group_rate_multiplier: 0.065,
+              resolved_rate_multiplier: 0.065,
+              peak_rate_enabled: false,
+              effective_rate_multiplier: 0.065,
+              observed_at: '2026-07-13T00:00:00Z'
+            },
+            last_attempt_at: '2026-07-13T00:00:00Z',
+            next_probe_at: '2026-07-13T00:30:00Z'
+          }
         },
         created_at: '2026-07-13T00:00:00Z',
         updated_at: '2026-07-13T00:00:00Z'

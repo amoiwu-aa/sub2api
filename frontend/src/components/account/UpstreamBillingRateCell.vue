@@ -11,19 +11,71 @@
         </span>
       </template>
       <div class="space-y-1">
-        <template v-if="hasEffectiveRate && data">
-          <p>{{ t('admin.accounts.upstreamBilling.groupRate', { value: data.group_rate_multiplier }) }}</p>
-          <p v-if="data.user_rate_multiplier != null">
-            {{ t('admin.accounts.upstreamBilling.userRate', { value: data.user_rate_multiplier }) }}
+        <template v-if="hasModelRates && modelBillingData">
+          <p class="font-medium">
+            {{ t('admin.accounts.upstreamBilling.modelPricingTitle') }}
           </p>
           <p>
             {{
-              data.peak_rate_enabled
+              t('admin.accounts.upstreamBilling.modelCounts', {
+                ratio: modelBillingData.ratio_model_count,
+                fixed: modelBillingData.fixed_price_model_count
+              })
+            }}
+          </p>
+          <p v-if="modelRatioRange">
+            {{ t('admin.accounts.upstreamBilling.modelRatioRange', { value: modelRatioRange }) }}
+          </p>
+          <p v-if="modelPriceRange">
+            {{ t('admin.accounts.upstreamBilling.modelPriceRange', { value: modelPriceRange }) }}
+          </p>
+          <p v-if="groupRatioSummary">
+            {{ t('admin.accounts.upstreamBilling.groupRatios', { value: groupRatioSummary }) }}
+          </p>
+          <div v-if="sampleModels.length" class="mt-1 border-t border-white/15 pt-1">
+            <p class="mb-0.5 font-medium">{{ t('admin.accounts.upstreamBilling.modelExamples') }}</p>
+            <p v-for="model in sampleModels" :key="model.model_name" class="font-mono text-[11px]">
+              {{
+                model.quota_type === 1
+                  ? t('admin.accounts.upstreamBilling.fixedModelLine', {
+                      model: model.model_name,
+                      price: formatDeclaredValue(model.model_price)
+                    })
+                  : t('admin.accounts.upstreamBilling.ratioModelLine', {
+                      model: model.model_name,
+                      input: formatDeclaredValue(model.model_ratio),
+                      output: formatDeclaredValue(model.completion_ratio)
+                    })
+              }}
+            </p>
+          </div>
+          <p>{{ t('admin.accounts.upstreamBilling.sourceEndpoint', { value: modelBillingData.source_endpoint }) }}</p>
+          <p>{{ t('admin.accounts.upstreamBilling.updatedAt', { value: formatDate(snapshot?.received_at) }) }}</p>
+          <p class="text-amber-300">{{ t('admin.accounts.upstreamBilling.modelScopeNoSync') }}</p>
+        </template>
+        <template v-else-if="hasEffectiveRate && tokenBillingData">
+          <p>
+            {{
+              t('admin.accounts.upstreamBilling.groupRate', {
+                value: tokenBillingData.group_rate_multiplier
+              })
+            }}
+          </p>
+          <p v-if="tokenBillingData.user_rate_multiplier != null">
+            {{
+              t('admin.accounts.upstreamBilling.userRate', {
+                value: tokenBillingData.user_rate_multiplier
+              })
+            }}
+          </p>
+          <p>
+            {{
+              tokenBillingData.peak_rate_enabled
                 ? t('admin.accounts.upstreamBilling.peakRate', {
-                    start: data.peak_start,
-                    end: data.peak_end,
-                    value: data.peak_rate_multiplier,
-                    timezone: data.timezone
+                    start: tokenBillingData.peak_start,
+                    end: tokenBillingData.peak_end,
+                    value: tokenBillingData.peak_rate_multiplier,
+                    timezone: tokenBillingData.timezone
                   })
                 : t('admin.accounts.upstreamBilling.noPeakRate')
             }}
@@ -65,7 +117,7 @@
         </p>
       </div>
     </HelpTooltip>
-    <span v-if="hasEffectiveRate && statusLabel" :class="statusClass" class="whitespace-nowrap text-[10px] font-medium">
+    <span v-if="hasDisplayData && statusLabel" :class="statusClass" class="whitespace-nowrap text-[10px] font-medium">
       {{ statusLabel }}
     </span>
     <button
@@ -89,7 +141,13 @@ import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatMultiplier } from '@/utils/formatters'
-import type { Account, UpstreamBillingProbeSnapshot } from '@/types'
+import type {
+  Account,
+  ModelScopedUpstreamBillingData,
+  NewAPIModelBillingDeclaration,
+  TokenScopedUpstreamBillingData,
+  UpstreamBillingProbeSnapshot
+} from '@/types'
 
 const props = withDefaults(defineProps<{
   account: Account
@@ -110,6 +168,12 @@ const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000
 const eligible = computed(() => props.account.type === 'apikey')
 const snapshot = computed<UpstreamBillingProbeSnapshot | undefined>(() => props.account.extra?.upstream_billing_probe)
 const data = computed(() => snapshot.value?.data)
+const tokenBillingData = computed<TokenScopedUpstreamBillingData | null>(() =>
+  data.value?.billing_scope === 'token' ? data.value : null
+)
+const modelBillingData = computed<ModelScopedUpstreamBillingData | null>(() =>
+  data.value?.billing_scope === 'model' ? data.value : null
+)
 const probeEnabled = computed(() => props.account.extra?.upstream_billing_probe_enabled === true)
 const nextProbeAt = computed(() => {
   const value = snapshot.value?.next_probe_at
@@ -159,9 +223,8 @@ const minuteInTimeZone = (timestamp: number, timeZone?: string) => {
   }
 }
 const currentEffectiveRate = computed(() => {
-  const billing = data.value
+  const billing = tokenBillingData.value
   if (!billing) return null
-  if (billing.billing_scope !== 'token') return null
   const base = billing.resolved_rate_multiplier
   if (typeof base !== 'number' || !Number.isFinite(base) || base < 0) return null
   if (typeof billing.peak_rate_enabled !== 'boolean') return null
@@ -175,7 +238,7 @@ const currentEffectiveRate = computed(() => {
   return Number.isFinite(value) ? value : null
 })
 const lastDetectedRate = computed(() => {
-  const value = data.value?.effective_rate_multiplier
+  const value = tokenBillingData.value?.effective_rate_multiplier
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? Number(value.toPrecision(12))
     : null
@@ -194,6 +257,60 @@ const effectiveRate = computed(() => {
   const value = currentEffectiveRate.value
   return value == null ? '-' : `${formatMultiplier(value)}x`
 })
+const hasModelRates = computed(() => {
+  const billing = modelBillingData.value
+  return Boolean(
+    billing &&
+      snapshot.value?.status === 'ok' &&
+      validTimestamps.value &&
+      !stale.value &&
+      Number.isInteger(billing.model_count) &&
+      billing.model_count > 0
+  )
+})
+const formatDeclaredValue = (value?: number) =>
+  typeof value === 'number' && Number.isFinite(value) ? formatMultiplier(value) : '-'
+const formatRange = (minValue?: number, maxValue?: number, suffix = 'x') => {
+  if (
+    typeof minValue !== 'number' ||
+    !Number.isFinite(minValue) ||
+    typeof maxValue !== 'number' ||
+    !Number.isFinite(maxValue)
+  ) {
+    return ''
+  }
+  const minText = formatMultiplier(minValue)
+  const maxText = formatMultiplier(maxValue)
+  return minText === maxText ? `${minText}${suffix}` : `${minText}${suffix} - ${maxText}${suffix}`
+}
+const modelRatioRange = computed(() =>
+  formatRange(modelBillingData.value?.min_model_ratio, modelBillingData.value?.max_model_ratio)
+)
+const modelPriceRange = computed(() =>
+  formatRange(modelBillingData.value?.min_model_price, modelBillingData.value?.max_model_price, '')
+)
+const groupRatioSummary = computed(() => {
+  const entries = Object.entries(modelBillingData.value?.group_ratio ?? {})
+    .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, 6)
+  return entries.map(([name, value]) => `${name} ${formatMultiplier(value)}x`).join(', ')
+})
+const modelPriority = (model: NewAPIModelBillingDeclaration) => {
+  const name = model.model_name.toLowerCase()
+  const prefixes = ['gpt', 'claude', 'gemini', 'deepseek', 'grok']
+  const index = prefixes.findIndex(prefix => name.includes(prefix))
+  return index < 0 ? prefixes.length : index
+}
+const sampleModels = computed(() =>
+  [...(modelBillingData.value?.models ?? [])]
+    .filter(model => typeof model.model_name === 'string' && model.model_name.length > 0)
+    .sort((left, right) => {
+      const priority = modelPriority(left) - modelPriority(right)
+      return priority !== 0 ? priority : left.model_name.localeCompare(right.model_name)
+    })
+    .slice(0, 6)
+)
 const statusLabel = computed(() => {
   if (!snapshot.value) return t('admin.accounts.upstreamBilling.notProbed')
   if (snapshot.value.status === 'unsupported') return t('admin.accounts.upstreamBilling.unsupported')
@@ -209,7 +326,15 @@ const statusClass = computed(() => {
   return ''
 })
 const hasEffectiveRate = computed(() => effectiveRate.value !== '-')
-const primaryValue = computed(() => hasEffectiveRate.value ? effectiveRate.value : statusLabel.value || '-')
+const hasDisplayData = computed(() => hasEffectiveRate.value || hasModelRates.value)
+const primaryValue = computed(() => {
+  if (hasModelRates.value && modelBillingData.value) {
+    return t('admin.accounts.upstreamBilling.modelScoped', {
+      count: modelBillingData.value.model_count
+    })
+  }
+  return hasEffectiveRate.value ? effectiveRate.value : statusLabel.value || '-'
+})
 const formatDate = (value?: string) => value
   ? new Date(value).toLocaleString(undefined, {
       month: '2-digit',

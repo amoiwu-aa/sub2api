@@ -58,6 +58,42 @@ const billingData = {
   observed_at: '2026-07-13T00:00:00Z'
 }
 
+const modelBillingData = {
+  object: 'newapi.model_billing' as const,
+  schema_version: 1 as const,
+  billing_scope: 'model' as const,
+  provider: 'new_api' as const,
+  source_endpoint: '/api/pricing' as const,
+  model_count: 2,
+  ratio_model_count: 1,
+  fixed_price_model_count: 1,
+  min_model_ratio: 1.25,
+  max_model_ratio: 1.25,
+  min_model_price: 0.04,
+  max_model_price: 0.04,
+  group_ratio: {
+    default: 1,
+    vip: 0.8
+  },
+  pricing_version: 'pricing-v1',
+  models: [
+    {
+      model_name: 'gpt-5.6',
+      quota_type: 0 as const,
+      model_ratio: 1.25,
+      completion_ratio: 8,
+      enable_groups: ['default', 'vip']
+    },
+    {
+      model_name: 'image-fixed',
+      quota_type: 1 as const,
+      model_price: 0.04,
+      enable_groups: ['default']
+    }
+  ],
+  observed_at: '2026-07-13T00:00:00Z'
+}
+
 describe('UpstreamBillingRateCell', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -98,6 +134,47 @@ describe('UpstreamBillingRateCell', () => {
     expect(wrapper.get('[data-testid="upstream-billing-probe"]').attributes('aria-label')).toBe(
       'admin.accounts.upstreamBilling.manualProbe'
     )
+  })
+
+  it('renders New API declarations as per-model pricing without a fake account rate', async () => {
+    const wrapper = mount(UpstreamBillingRateCell, {
+      attachTo: document.body,
+      props: {
+        account: makeAccount({
+          extra: {
+            upstream_billing_probe_enabled: true,
+            upstream_billing_rate_sync_enabled: true,
+            upstream_billing_probe: {
+              status: 'ok',
+              data: modelBillingData,
+              received_at: '2026-07-13T00:00:00Z',
+              fresh_until: '2026-07-14T00:00:00Z',
+              last_attempt_at: '2026-07-13T00:00:00Z',
+              next_probe_at: '2026-07-13T00:30:00Z'
+            }
+          }
+        }),
+        now: Date.now()
+      }
+    })
+
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe(
+      'admin.accounts.upstreamBilling.modelScoped:2'
+    )
+    expect(wrapper.text()).not.toContain('admin.accounts.upstreamBilling.unsupported')
+
+    await wrapper.get('[data-testid="upstream-billing-details"]').trigger('mouseenter')
+    await flushPromises()
+
+    const tooltips = document.body.querySelectorAll('[role="tooltip"]')
+    const tooltip = tooltips[tooltips.length - 1] as HTMLElement
+    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.modelPricingTitle')
+    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.modelCounts:1,1')
+    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.groupRatios:default 1.00x, vip 0.80x')
+    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.ratioModelLine:gpt-5.6,1.25,8.00')
+    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.fixedModelLine:image-fixed,0.04')
+    expect(tooltip.textContent).toContain('admin.accounts.upstreamBilling.modelScopeNoSync')
+    wrapper.unmount()
   })
 
   it('uses retained failed data only while it is still fresh', async () => {
