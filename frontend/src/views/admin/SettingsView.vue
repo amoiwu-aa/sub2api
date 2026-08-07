@@ -7884,6 +7884,72 @@
                     ></textarea>
                   </div>
                 </div>
+                <!-- External redemption-code purchase link -->
+                <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-700">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <label class="input-label mb-1">{{
+                        t("admin.settings.payment.externalRedeemPurchase")
+                      }}</label>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">{{
+                        t("admin.settings.payment.externalRedeemPurchaseHint")
+                      }}</p>
+                    </div>
+                    <button
+                      type="button"
+                      :class="[
+                        'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                        form.payment_external_redeem_purchase_enabled
+                          ? 'bg-primary-500'
+                          : 'bg-gray-300 dark:bg-dark-600',
+                      ]"
+                      @click="
+                        form.payment_external_redeem_purchase_enabled =
+                          !form.payment_external_redeem_purchase_enabled
+                      "
+                    >
+                      <span
+                        :class="[
+                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                          form.payment_external_redeem_purchase_enabled
+                            ? 'translate-x-5'
+                            : 'translate-x-0',
+                        ]"
+                      />
+                    </button>
+                  </div>
+                  <div
+                    v-if="form.payment_external_redeem_purchase_enabled"
+                    class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2"
+                  >
+                    <div>
+                      <label class="input-label">{{
+                        t("admin.settings.payment.externalRedeemPurchaseURL")
+                      }}</label>
+                      <input
+                        v-model="form.payment_external_redeem_purchase_url"
+                        type="url"
+                        class="input"
+                        :placeholder="
+                          t('admin.settings.payment.externalRedeemPurchaseURLPlaceholder')
+                        "
+                      />
+                    </div>
+                    <div>
+                      <label class="input-label">{{
+                        t("admin.settings.payment.externalRedeemPurchaseLabel")
+                      }}</label>
+                      <input
+                        v-model="form.payment_external_redeem_purchase_label"
+                        type="text"
+                        class="input"
+                        :placeholder="
+                          t('admin.settings.payment.externalRedeemPurchaseLabelPlaceholder')
+                        "
+                      />
+                    </div>
+                  </div>
+                </div>
               </template>
             </div>
           </div>
@@ -9218,6 +9284,9 @@ const form = reactive<SettingsForm>({
   payment_enabled_types: [],
   payment_help_image_url: "",
   payment_help_text: "",
+  payment_external_redeem_purchase_enabled: false,
+  payment_external_redeem_purchase_url: "",
+  payment_external_redeem_purchase_label: "",
   payment_product_name_prefix: "",
   payment_product_name_suffix: "",
   payment_load_balance_strategy: "round-robin",
@@ -10983,6 +11052,12 @@ async function saveSettings() {
       payment_product_name_suffix: form.payment_product_name_suffix,
       payment_help_image_url: form.payment_help_image_url,
       payment_help_text: form.payment_help_text,
+      payment_external_redeem_purchase_enabled:
+        form.payment_external_redeem_purchase_enabled,
+      payment_external_redeem_purchase_url:
+        form.payment_external_redeem_purchase_url,
+      payment_external_redeem_purchase_label:
+        form.payment_external_redeem_purchase_label,
       payment_cancel_rate_limit_enabled: form.payment_cancel_rate_limit_enabled,
       payment_cancel_rate_limit_max:
         Number(form.payment_cancel_rate_limit_max) || 10,

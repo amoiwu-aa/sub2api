@@ -41,10 +41,29 @@
               <p class="mt-1 text-base font-semibold text-gray-900 dark:text-white">{{ user?.username || '' }}</p>
               <p class="mt-0.5 text-sm font-medium text-green-600 dark:text-green-400">{{ t('payment.currentBalance') }}: {{ user?.balance?.toFixed(2) || '0.00' }}</p>
             </div>
-            <div v-if="enabledMethods.length === 0" class="card py-16 text-center">
+            <div v-if="hasExternalRedeemPurchase" class="card border-primary-100 bg-primary-50/40 p-5 dark:border-primary-900/50 dark:bg-primary-950/20">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('payment.externalRedeemPurchaseTitle') }}</h3>
+                  <p class="mt-1 text-sm leading-relaxed text-gray-500 dark:text-gray-400">{{ t('payment.externalRedeemPurchaseHint') }}</p>
+                </div>
+                <a
+                  :href="externalRedeemPurchaseURL"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn shrink-0 px-4 py-2.5 text-sm font-medium"
+                >
+                  <span>{{ externalRedeemPurchaseLabel }}</span>
+                  <svg class="ml-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14M5 5v14a2 2 0 002 2h14" />
+                  </svg>
+                </a>
+              </div>
+            </div>
+            <div v-if="enabledMethods.length === 0 && !hasExternalRedeemPurchase" class="card py-16 text-center">
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
             </div>
-            <template v-else>
+            <template v-if="enabledMethods.length > 0">
             <div class="card p-6">
               <AmountInput
                 v-model="amount"
@@ -502,7 +521,7 @@ function onPaymentSettled() {
 // All checkout data from single API call
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
-  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
+  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', external_redeem_purchase_enabled: false, external_redeem_purchase_url: '', external_redeem_purchase_label: '', stripe_publishable_key: '',
 })
 
 const tabs = computed(() => {
@@ -514,6 +533,22 @@ const tabs = computed(() => {
 
 const visibleMethods = computed(() => getVisibleMethods(checkout.value.methods))
 const enabledMethods = computed(() => Object.keys(visibleMethods.value))
+const externalRedeemPurchaseURL = computed(() => {
+  const raw = checkout.value.external_redeem_purchase_url?.trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    return parsed.protocol === 'https:' ? parsed.toString() : ''
+  } catch {
+    return ''
+  }
+})
+const hasExternalRedeemPurchase = computed(() =>
+  checkout.value.external_redeem_purchase_enabled && externalRedeemPurchaseURL.value !== '',
+)
+const externalRedeemPurchaseLabel = computed(() =>
+  checkout.value.external_redeem_purchase_label?.trim() || t('payment.externalRedeemPurchaseButton'),
+)
 const validAmount = computed(() => amount.value ?? 0)
 const balanceRechargeMultiplier = computed(() => {
   const multiplier = checkout.value.balance_recharge_multiplier

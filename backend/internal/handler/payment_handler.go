@@ -151,6 +151,9 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 		RechargeFeeRate:               cfg.RechargeFeeRate,
 		HelpText:                      cfg.HelpText,
 		HelpImageURL:                  cfg.HelpImageURL,
+		ExternalRedeemPurchaseEnabled: cfg.ExternalRedeemPurchaseEnabled,
+		ExternalRedeemPurchaseURL:     cfg.ExternalRedeemPurchaseURL,
+		ExternalRedeemPurchaseLabel:   cfg.ExternalRedeemPurchaseLabel,
 		StripePublishableKey:          cfg.StripePublishableKey,
 		AlipayForceQRCode:             cfg.AlipayForceQRCode,
 		AlipayMobilePrecreateDeepLink: alipayMobilePrecreateDeepLink,
@@ -168,6 +171,9 @@ type checkoutInfoResponse struct {
 	RechargeFeeRate               float64                         `json:"recharge_fee_rate"`
 	HelpText                      string                          `json:"help_text"`
 	HelpImageURL                  string                          `json:"help_image_url"`
+	ExternalRedeemPurchaseEnabled bool                            `json:"external_redeem_purchase_enabled"`
+	ExternalRedeemPurchaseURL     string                          `json:"external_redeem_purchase_url"`
+	ExternalRedeemPurchaseLabel   string                          `json:"external_redeem_purchase_label"`
 	StripePublishableKey          string                          `json:"stripe_publishable_key"`
 	AlipayForceQRCode             bool                            `json:"alipay_force_qrcode"`
 	AlipayMobilePrecreateDeepLink bool                            `json:"alipay_mobile_precreate_deep_link"`

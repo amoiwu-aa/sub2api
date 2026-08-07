@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -33,6 +34,9 @@ const (
 	SettingProductNameSuffix             = "PRODUCT_NAME_SUFFIX"
 	SettingHelpImageURL                  = "PAYMENT_HELP_IMAGE_URL"
 	SettingHelpText                      = "PAYMENT_HELP_TEXT"
+	SettingExternalRedeemPurchaseEnabled = "EXTERNAL_REDEEM_PURCHASE_ENABLED"
+	SettingExternalRedeemPurchaseURL     = "EXTERNAL_REDEEM_PURCHASE_URL"
+	SettingExternalRedeemPurchaseLabel   = "EXTERNAL_REDEEM_PURCHASE_LABEL"
 	SettingCancelRateLimitOn             = "CANCEL_RATE_LIMIT_ENABLED"
 	SettingCancelRateLimitMax            = "CANCEL_RATE_LIMIT_MAX"
 	SettingCancelWindowSize              = "CANCEL_RATE_LIMIT_WINDOW"
@@ -67,6 +71,9 @@ type PaymentConfig struct {
 	ProductNameSuffix        string  `json:"product_name_suffix"`
 	HelpImageURL             string  `json:"help_image_url"`
 	HelpText                 string  `json:"help_text"`
+	ExternalRedeemPurchaseEnabled bool   `json:"external_redeem_purchase_enabled"`
+	ExternalRedeemPurchaseURL     string `json:"external_redeem_purchase_url"`
+	ExternalRedeemPurchaseLabel   string `json:"external_redeem_purchase_label"`
 	StripePublishableKey     string  `json:"stripe_publishable_key,omitempty"`
 
 	// Cancel rate limit settings
@@ -100,6 +107,9 @@ type UpdatePaymentConfigRequest struct {
 	ProductNameSuffix         *string  `json:"product_name_suffix"`
 	HelpImageURL              *string  `json:"help_image_url"`
 	HelpText                  *string  `json:"help_text"`
+	ExternalRedeemPurchaseEnabled *bool   `json:"external_redeem_purchase_enabled"`
+	ExternalRedeemPurchaseURL     *string `json:"external_redeem_purchase_url"`
+	ExternalRedeemPurchaseLabel   *string `json:"external_redeem_purchase_label"`
 
 	// Cancel rate limit settings
 	CancelRateLimitEnabled *bool   `json:"cancel_rate_limit_enabled"`
@@ -222,6 +232,7 @@ func (s *PaymentConfigService) GetPaymentConfig(ctx context.Context) (*PaymentCo
 		SettingEnabledPaymentTypes, SettingBalancePayDisabled, SettingBalanceRechargeMult, SettingSubscriptionUSDToCNYRate, SettingRechargeFeeRate, SettingLoadBalanceStrategy,
 		SettingProductNamePrefix, SettingProductNameSuffix,
 		SettingHelpImageURL, SettingHelpText,
+		SettingExternalRedeemPurchaseEnabled, SettingExternalRedeemPurchaseURL, SettingExternalRedeemPurchaseLabel,
 		SettingCancelRateLimitOn, SettingCancelRateLimitMax,
 		SettingCancelWindowSize, SettingCancelWindowUnit, SettingCancelWindowMode,
 		SettingAlipayForceQRCode, SettingAlipayMobilePrecreateDeepLink,
@@ -255,6 +266,9 @@ func (s *PaymentConfigService) parsePaymentConfig(vals map[string]string) *Payme
 		ProductNameSuffix:         vals[SettingProductNameSuffix],
 		HelpImageURL:              vals[SettingHelpImageURL],
 		HelpText:                  vals[SettingHelpText],
+		ExternalRedeemPurchaseEnabled: vals[SettingExternalRedeemPurchaseEnabled] == "true",
+		ExternalRedeemPurchaseURL:     vals[SettingExternalRedeemPurchaseURL],
+		ExternalRedeemPurchaseLabel:   vals[SettingExternalRedeemPurchaseLabel],
 
 		CancelRateLimitEnabled: vals[SettingCancelRateLimitOn] == "true",
 		CancelRateLimitMax:     pcParseInt(vals[SettingCancelRateLimitMax], 10),
@@ -343,6 +357,13 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 			return infraerrors.BadRequest("INVALID_RECHARGE_FEE_RATE", "recharge fee rate allows at most 2 decimal places")
 		}
 	}
+	if req.ExternalRedeemPurchaseURL != nil {
+		normalizedURL, err := normalizeExternalRedeemPurchaseURL(*req.ExternalRedeemPurchaseURL)
+		if err != nil {
+			return err
+		}
+		*req.ExternalRedeemPurchaseURL = normalizedURL
+	}
 	m := make(map[string]string)
 	if req.Enabled != nil {
 		m[SettingPaymentEnabled] = formatBoolOrEmpty(req.Enabled)
@@ -392,6 +413,15 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 	if req.HelpText != nil {
 		m[SettingHelpText] = derefStr(req.HelpText)
 	}
+	if req.ExternalRedeemPurchaseEnabled != nil {
+		m[SettingExternalRedeemPurchaseEnabled] = formatBoolOrEmpty(req.ExternalRedeemPurchaseEnabled)
+	}
+	if req.ExternalRedeemPurchaseURL != nil {
+		m[SettingExternalRedeemPurchaseURL] = derefStr(req.ExternalRedeemPurchaseURL)
+	}
+	if req.ExternalRedeemPurchaseLabel != nil {
+		m[SettingExternalRedeemPurchaseLabel] = strings.TrimSpace(derefStr(req.ExternalRedeemPurchaseLabel))
+	}
 	if req.CancelRateLimitEnabled != nil {
 		m[SettingCancelRateLimitOn] = formatBoolOrEmpty(req.CancelRateLimitEnabled)
 	}
@@ -426,6 +456,21 @@ func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda
 		m[SettingPaymentVisibleMethodWxpayEnabled] = formatBoolOrEmpty(req.VisibleMethodWxpayEnabled)
 	}
 	return s.settingRepo.SetMultiple(ctx, m)
+}
+
+func normalizeExternalRedeemPurchaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", infraerrors.BadRequest(
+			"INVALID_EXTERNAL_REDEEM_PURCHASE_URL",
+			"external redeem purchase URL must be a valid HTTPS URL",
+		)
+	}
+	return parsed.String(), nil
 }
 
 func formatBoolOrEmpty(v *bool) string {

@@ -135,6 +135,9 @@ func TestParsePaymentConfig(t *testing.T) {
 			SettingLoadBalanceStrategy:           "least_amount",
 			SettingProductNamePrefix:             "PRE",
 			SettingProductNameSuffix:             "SUF",
+			SettingExternalRedeemPurchaseEnabled: "true",
+			SettingExternalRedeemPurchaseURL:     "https://pay.ldxp.cn/item/gieeut",
+			SettingExternalRedeemPurchaseLabel:   "购买充值码",
 			SettingAlipayMobilePrecreateDeepLink: "true",
 		}
 		cfg := svc.parsePaymentConfig(vals)
@@ -174,6 +177,15 @@ func TestParsePaymentConfig(t *testing.T) {
 		}
 		if cfg.ProductNameSuffix != "SUF" {
 			t.Fatalf("ProductNameSuffix = %q, want %q", cfg.ProductNameSuffix, "SUF")
+		}
+		if !cfg.ExternalRedeemPurchaseEnabled {
+			t.Fatal("expected ExternalRedeemPurchaseEnabled=true")
+		}
+		if cfg.ExternalRedeemPurchaseURL != "https://pay.ldxp.cn/item/gieeut" {
+			t.Fatalf("ExternalRedeemPurchaseURL = %q", cfg.ExternalRedeemPurchaseURL)
+		}
+		if cfg.ExternalRedeemPurchaseLabel != "购买充值码" {
+			t.Fatalf("ExternalRedeemPurchaseLabel = %q", cfg.ExternalRedeemPurchaseLabel)
 		}
 		if !cfg.AlipayMobilePrecreateDeepLink {
 			t.Fatal("expected AlipayMobilePrecreateDeepLink=true")
@@ -548,6 +560,46 @@ func TestUpdatePaymentConfig_PersistsExplicitEmptyAndFalseValues(t *testing.T) {
 		if repo.values[key] != value {
 			t.Fatalf("stored %q = %q, want %q", key, repo.values[key], value)
 		}
+	}
+}
+
+func TestUpdatePaymentConfig_PersistsExternalRedeemPurchase(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
+	svc := &PaymentConfigService{settingRepo: repo}
+
+	enabled := true
+	url := "  https://pay.ldxp.cn/item/gieeut  "
+	label := "  购买充值码  "
+	err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+		ExternalRedeemPurchaseEnabled: &enabled,
+		ExternalRedeemPurchaseURL:     &url,
+		ExternalRedeemPurchaseLabel:   &label,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePaymentConfig returned error: %v", err)
+	}
+
+	want := map[string]string{
+		SettingExternalRedeemPurchaseEnabled: "true",
+		SettingExternalRedeemPurchaseURL:     "https://pay.ldxp.cn/item/gieeut",
+		SettingExternalRedeemPurchaseLabel:   "购买充值码",
+	}
+	for key, value := range want {
+		if repo.updates[key] != value {
+			t.Fatalf("update %q = %q, want %q", key, repo.updates[key], value)
+		}
+	}
+}
+
+func TestUpdatePaymentConfig_RejectsNonHTTPSExternalRedeemPurchaseURL(t *testing.T) {
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{}}
+	svc := &PaymentConfigService{settingRepo: repo}
+	url := "javascript:alert(1)"
+
+	if err := svc.UpdatePaymentConfig(context.Background(), UpdatePaymentConfigRequest{
+		ExternalRedeemPurchaseURL: &url,
+	}); err == nil {
+		t.Fatal("expected invalid external redeem purchase URL error")
 	}
 }
 

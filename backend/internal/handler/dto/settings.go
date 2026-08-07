@@ -277,6 +277,9 @@ type SystemSettings struct {
 	PaymentProductNameSuffix         string   `json:"payment_product_name_suffix"`
 	PaymentHelpImageURL              string   `json:"payment_help_image_url"`
 	PaymentHelpText                  string   `json:"payment_help_text"`
+	PaymentExternalRedeemPurchaseEnabled bool   `json:"payment_external_redeem_purchase_enabled"`
+	PaymentExternalRedeemPurchaseURL     string `json:"payment_external_redeem_purchase_url"`
+	PaymentExternalRedeemPurchaseLabel   string `json:"payment_external_redeem_purchase_label"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled bool   `json:"payment_cancel_rate_limit_enabled"`

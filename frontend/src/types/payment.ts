@@ -38,6 +38,9 @@ export interface PaymentConfig {
   enabled_payment_types: PaymentType[]
   help_image_url: string
   help_text: string
+  external_redeem_purchase_enabled: boolean
+  external_redeem_purchase_url: string
+  external_redeem_purchase_label: string
   stripe_publishable_key: string
 }
 
@@ -73,6 +76,9 @@ export interface CheckoutInfoResponse {
   recharge_fee_rate: number
   help_text: string
   help_image_url: string
+  external_redeem_purchase_enabled: boolean
+  external_redeem_purchase_url: string
+  external_redeem_purchase_label: string
   stripe_publishable_key: string
   /** When true, Alipay payments on mobile always show the QR code instead of redirecting */
   alipay_force_qrcode?: boolean
