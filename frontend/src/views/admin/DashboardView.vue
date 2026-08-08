@@ -128,7 +128,7 @@
           </StatCard>
         </div>
 
-        <CacheHitRateChart :stats="stats" />
+        <CacheHitRateChart :stats="stats" :model-stats="modelStats" />
 
         <!-- Charts Section -->
         <div class="space-y-6">

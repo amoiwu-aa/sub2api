@@ -5,22 +5,39 @@
         {{ t('admin.dashboard.cacheHitChartTitle') }}
       </h3>
 
-      <div class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800">
-        <button
-          v-for="option in periodOptions"
-          :key="option.value"
-          type="button"
-          :data-period="option.value"
-          class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
-          :class="
-            period === option.value
-              ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white'
-              : 'text-gray-500 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
-          "
-          @click="period = option.value"
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <Select
+          v-model="selectedModel"
+          class="w-56"
+          :options="modelOptions"
+          searchable
+          :aria-label="t('admin.dashboard.modelFilter')"
+        />
+
+        <div v-if="!selectedModel" class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800">
+          <button
+            v-for="option in periodOptions"
+            :key="option.value"
+            type="button"
+            :data-period="option.value"
+            class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+            :class="
+              period === option.value
+                ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white'
+                : 'text-gray-500 hover:text-gray-900 dark:text-dark-300 dark:hover:text-white'
+            "
+            @click="period = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+
+        <span
+          v-else
+          class="rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 dark:bg-dark-800 dark:text-dark-300"
         >
-          {{ option.label }}
-        </button>
+          {{ t('admin.dashboard.currentRange') }}
+        </span>
       </div>
     </div>
 
@@ -79,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArcElement,
@@ -89,16 +106,19 @@ import {
   type ChartOptions
 } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
-import type { DashboardStats } from '@/types'
+import Select from '@/components/common/Select.vue'
+import type { DashboardStats, ModelStat } from '@/types'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
 const props = defineProps<{
   stats: DashboardStats
+  modelStats?: ModelStat[]
 }>()
 
 const { t } = useI18n()
 const period = ref<'today' | 'total'>('today')
+const selectedModel = ref('')
 
 const colors = {
   hit: '#06b6d4',
@@ -111,12 +131,48 @@ const periodOptions = computed(() => [
   { value: 'total' as const, label: t('admin.dashboard.totalPeriod') }
 ])
 
+const modelOptions = computed(() => [
+  { value: '', label: t('admin.dashboard.allModels') },
+  ...[...(props.modelStats || [])]
+    .sort((a, b) => a.model.localeCompare(b.model))
+    .map((item) => ({ value: item.model, label: item.model }))
+])
+
+const selectedModelStats = computed(
+  () => props.modelStats?.find((item) => item.model === selectedModel.value) || null
+)
+
+watch(
+  () => props.modelStats,
+  () => {
+    if (selectedModel.value && !selectedModelStats.value) {
+      selectedModel.value = ''
+    }
+  },
+  { deep: true }
+)
+
 const toTokenCount = (value: unknown): number => {
   const numberValue = Number(value)
   return Number.isFinite(numberValue) ? Math.max(numberValue, 0) : 0
 }
 
 const metrics = computed(() => {
+  if (selectedModelStats.value) {
+    const input = toTokenCount(selectedModelStats.value.input_tokens)
+    const creation = toTokenCount(selectedModelStats.value.cache_creation_tokens)
+    const hit = toTokenCount(selectedModelStats.value.cache_read_tokens)
+    const total = input + creation + hit
+
+    return {
+      input,
+      creation,
+      hit,
+      total,
+      hitRate: total > 0 ? (hit / total) * 100 : 0
+    }
+  }
+
   const isToday = period.value === 'today'
   const input = toTokenCount(
     isToday ? props.stats.today_input_tokens : props.stats.total_input_tokens

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
+import Select from '@/components/common/Select.vue'
 import type { DashboardStats } from '@/types'
 import CacheHitRateChart from '../CacheHitRateChart.vue'
 
@@ -8,6 +9,9 @@ const messages: Record<string, string> = {
   'admin.dashboard.cacheHitChartTitle': '缓存命中率统计',
   'admin.dashboard.todayPeriod': '今日',
   'admin.dashboard.totalPeriod': '累计',
+  'admin.dashboard.currentRange': '当前范围',
+  'admin.dashboard.allModels': '全部模型',
+  'admin.dashboard.modelFilter': '按模型筛选缓存统计',
   'admin.dashboard.cacheHitRate': '缓存命中率',
   'admin.dashboard.cacheHitTokens': '缓存命中',
   'admin.dashboard.cacheCreationTokens': '缓存创建',
@@ -86,5 +90,47 @@ describe('CacheHitRateChart', () => {
     expect(wrapper.text()).toContain('60.0%')
     chartData = JSON.parse(wrapper.find('.chart-data').text())
     expect(chartData.datasets[0].data).toEqual([600, 200, 200])
+  })
+
+  it('filters cache composition by an individual model', async () => {
+    const wrapper = mount(CacheHitRateChart, {
+      props: {
+        stats,
+        modelStats: [
+          {
+            model: 'gpt-5.6',
+            requests: 10,
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 100,
+            cache_read_tokens: 800,
+            total_tokens: 1050,
+            cost: 0.1,
+            actual_cost: 0.05
+          },
+          {
+            model: 'gpt-5.4',
+            requests: 5,
+            input_tokens: 600,
+            output_tokens: 50,
+            cache_creation_tokens: 200,
+            cache_read_tokens: 200,
+            total_tokens: 1050,
+            cost: 0.1,
+            actual_cost: 0.05
+          }
+        ]
+      }
+    })
+
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'gpt-5.6')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('80.0%')
+    expect(wrapper.text()).toContain('当前范围')
+    expect(wrapper.find('[data-period="today"]').exists()).toBe(false)
+
+    const chartData = JSON.parse(wrapper.find('.chart-data').text())
+    expect(chartData.datasets[0].data).toEqual([800, 100, 100])
   })
 })
