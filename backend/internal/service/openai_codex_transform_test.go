@@ -1952,3 +1952,22 @@ func TestFilterCodexInput_PreservesReasoningInMixedInput(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterCodexInput_DropsCompactionWithoutEncryptedContent(t *testing.T) {
+	input := []any{
+		map[string]any{"type": "message", "role": "user", "content": "before"},
+		map[string]any{"id": "cmp_missing", "type": "compaction", "status": "in_progress"},
+		map[string]any{"id": "cmp_nil", "type": "compaction_summary", "encrypted_content": nil},
+		map[string]any{"id": "cmp_blank", "type": "compaction", "encrypted_content": "   "},
+		map[string]any{"id": "cmp_valid", "type": "compaction", "encrypted_content": "gAAA"},
+		map[string]any{"type": "message", "role": "user", "content": "after"},
+	}
+
+	filtered := filterCodexInput(input, false)
+	require.Len(t, filtered, 3)
+	require.Equal(t, "message", filtered[0].(map[string]any)["type"])
+	require.Equal(t, "compaction", filtered[1].(map[string]any)["type"])
+	require.NotContains(t, filtered[1].(map[string]any), "id")
+	require.Equal(t, "gAAA", filtered[1].(map[string]any)["encrypted_content"])
+	require.Equal(t, "message", filtered[2].(map[string]any)["type"])
+}

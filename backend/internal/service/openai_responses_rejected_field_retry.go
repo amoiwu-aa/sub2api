@@ -15,8 +15,12 @@ import (
 const maxOpenAIResponsesRejectedFieldRetries = 6
 
 var (
-	openAIResponsesRejectedNamespaceParamPattern = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
-	openAIResponsesRejectedMessageParamPattern   = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|input\[\d+\]\.namespace)(?:["']|\b)`)
+	openAIResponsesRejectedNamespaceParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
+	openAIResponsesRejectedMessageParamPattern    = regexp.MustCompile(`(?i)(?:unknown|unsupported)[ _-]+parameter\s*(?::|=|is)?\s*["']?(max_output_tokens|input\[\d+\]\.namespace)(?:["']|\b)`)
+	openAIResponsesMissingEncryptedParamPattern   = regexp.MustCompile(`(?i)^input\[(\d+)\]\.encrypted_content$`)
+	openAIResponsesMissingEncryptedMessagePattern = regexp.MustCompile(
+		`(?i)missing required parameter\s*(?::|=|is)?\s*["']?(input\[\d+\]\.encrypted_content)(?:["']|\b)`,
+	)
 )
 
 type openAIResponsesRejectedFieldRetryState struct {
@@ -62,11 +66,15 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
+	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
+	if index, ok := openAIResponsesMissingEncryptedContentIndex(code, param, message); ok {
+		return removeOpenAIMalformedCompactionAtIndex(body, index)
+	}
+
 	if !isExplicitOpenAIResponsesFieldRejection(code, message) {
 		return nil, "", false, nil
 	}
 
-	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
 	if param == "" {
 		param = openAIResponsesRejectedParamFromMessage(message)
 	}
@@ -81,6 +89,51 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 		return retryBody, "max_output_tokens parameter rejection", true, nil
 	}
 	return nil, "", false, nil
+}
+
+func openAIResponsesMissingEncryptedContentIndex(code, param, message string) (int, bool) {
+	if strings.TrimSpace(code) != "missing_required_parameter" &&
+		!strings.Contains(strings.ToLower(message), "missing required parameter") {
+		return 0, false
+	}
+
+	path := strings.TrimSpace(param)
+	if path == "" {
+		match := openAIResponsesMissingEncryptedMessagePattern.FindStringSubmatch(message)
+		if len(match) != 2 {
+			return 0, false
+		}
+		path = match[1]
+	}
+
+	match := openAIResponsesMissingEncryptedParamPattern.FindStringSubmatch(path)
+	if len(match) != 2 {
+		return 0, false
+	}
+	index, err := strconv.Atoi(match[1])
+	if err != nil || index < 0 {
+		return 0, false
+	}
+	return index, true
+}
+
+func removeOpenAIMalformedCompactionAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+	itemPath := fmt.Sprintf("input.%d", index)
+	itemType := strings.TrimSpace(gjson.GetBytes(body, itemPath+".type").String())
+	if !isResponsesCompactionItemType(itemType) {
+		return nil, "", false, nil
+	}
+
+	encryptedContent := gjson.GetBytes(body, itemPath+".encrypted_content")
+	if encryptedContent.Exists() && strings.TrimSpace(encryptedContent.String()) != "" {
+		return nil, "", false, nil
+	}
+
+	retryBody, err := sjson.DeleteBytes(body, itemPath)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("delete malformed compaction at input[%d]: %w", index, err)
+	}
+	return retryBody, "missing encrypted compaction content", true, nil
 }
 
 func isExplicitOpenAIResponsesFieldRejection(code, message string) bool {

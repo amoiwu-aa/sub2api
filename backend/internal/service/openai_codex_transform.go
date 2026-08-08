@@ -1367,6 +1367,22 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		}
 		typ, _ := m["type"].(string)
 
+		// A partial/disconnected compact stream can leave the client with an
+		// output placeholder such as {"type":"compaction","status":"in_progress"}
+		// but no encrypted_content. Replaying that placeholder makes the Codex
+		// upstream reject the entire request with:
+		// "Missing required parameter: input[N].encrypted_content".
+		//
+		// Such an item carries no reusable context, so dropping it is safer than
+		// poisoning every later turn in the conversation. Valid compact state is
+		// preserved verbatim.
+		if isResponsesCompactionItemType(typ) {
+			encryptedContent, ok := m["encrypted_content"].(string)
+			if !ok || strings.TrimSpace(encryptedContent) == "" {
+				continue
+			}
+		}
+
 		// chatgpt.com codex (OAuth path) runs with store=false (forced by
 		// applyCodexOAuthTransform). Replaying a reasoning item with its rs_*
 		// id but no encrypted_content 404s upstream ("Item with id 'rs_...'

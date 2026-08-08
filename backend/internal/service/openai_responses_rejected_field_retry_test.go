@@ -114,6 +114,59 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyBindsMaxOutputTokensToRej
 	require.False(t, gjson.GetBytes(retryBody, "max_output_tokens").Exists())
 }
 
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDropsMalformedCompaction(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","input":[` +
+		`{"type":"message","role":"user","content":"before"},` +
+		`{"id":"cmp_partial","type":"compaction","status":"in_progress"},` +
+		`{"type":"message","role":"user","content":"after"}` +
+		`]}`)
+	responseBody := []byte(`{"error":{"code":"missing_required_parameter","message":"Missing required parameter: 'input[1].encrypted_content'.","param":"input[1].encrypted_content","type":"invalid_request_error"}}`)
+
+	retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(
+		http.StatusBadRequest,
+		body,
+		responseBody,
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "missing encrypted compaction content", reason)
+	require.Equal(t, int64(2), gjson.GetBytes(retryBody, "input.#").Int())
+	require.Equal(t, "before", gjson.GetBytes(retryBody, "input.0.content").String())
+	require.Equal(t, "after", gjson.GetBytes(retryBody, "input.1.content").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyFindsMissingEncryptedPathInMessage(t *testing.T) {
+	body := []byte(`{"input":[{"type":"compaction_summary"},{"type":"message","content":"keep"}]}`)
+	responseBody := []byte(`{"error":{"code":null,"message":"[ObjectParam] [input[0].encrypted_content] [missing_required_parameter] Missing required parameter: 'input[0].encrypted_content'."}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(
+		http.StatusBadRequest,
+		body,
+		responseBody,
+	)
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, int64(1), gjson.GetBytes(retryBody, "input.#").Int())
+	require.Equal(t, "message", gjson.GetBytes(retryBody, "input.0.type").String())
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyKeepsNonCompactionMissingField(t *testing.T) {
+	body := []byte(`{"input":[{"type":"message","content":"keep"}]}`)
+	responseBody := []byte(`{"error":{"code":"missing_required_parameter","message":"Missing required parameter: 'input[0].encrypted_content'.","param":"input[0].encrypted_content"}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(
+		http.StatusBadRequest,
+		body,
+		responseBody,
+	)
+
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Nil(t, retryBody)
+}
+
 func TestOpenAIGatewayService_APIKeyStripsAllIndexedNamespacesBeforeFirstForward(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"function_call","name":"first","namespace":"remove-first","arguments":"{}"},{"type":"custom_tool_call","name":"second","namespace":"remove-second","input":"{}"}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
@@ -132,6 +185,32 @@ func TestOpenAIGatewayService_APIKeyStripsAllIndexedNamespacesBeforeFirstForward
 	require.Len(t, upstream.bodies, 1)
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.0.namespace").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.1.namespace").Exists())
+}
+
+func TestOpenAIGatewayService_RetriesMissingEncryptedCompaction(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":[` +
+		`{"type":"message","role":"user","content":"before"},` +
+		`{"id":"cmp_partial","type":"compaction","status":"in_progress"},` +
+		`{"type":"message","role":"user","content":"after"}` +
+		`]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"missing_required_parameter","message":"Missing required parameter: 'input[1].encrypted_content'.","param":"input[1].encrypted_content","type":"invalid_request_error"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"id":"resp_recovered","output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, int64(3), gjson.GetBytes(upstream.bodies[0], "input.#").Int())
+	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[1], "input.#").Int())
+	require.Equal(t, "after", gjson.GetBytes(upstream.bodies[1], "input.1.content").String())
 }
 
 func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(t *testing.T) {
