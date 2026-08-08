@@ -55,10 +55,7 @@ func (r *contentModerationRuntimeSettingRepo) Set(_ context.Context, key, value 
 func (r *contentModerationRuntimeSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
 	r.mu.Lock()
 	r.getMultipleCalls++
-	if err := r.getMultipleErr; err != nil {
-		r.mu.Unlock()
-		return nil, err
-	}
+	err := r.getMultipleErr
 	out := make(map[string]string, len(keys))
 	for _, key := range keys {
 		if value, ok := r.values[key]; ok {
@@ -75,6 +72,9 @@ func (r *contentModerationRuntimeSettingRepo) GetMultiple(_ context.Context, key
 	}
 	if wait != nil {
 		<-wait
+	}
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -265,21 +265,30 @@ func TestContentModerationRuntimeSnapshotRefreshFailureKeepsStaleConfig(t *testi
 		SettingKeyRiskControlEnabled:      "true",
 		SettingKeyContentModerationConfig: runtimeCacheTestConfig(t, "blocked"),
 	}}
-	svc := runtimeCacheTestService(repo, time.Nanosecond)
+	svc := runtimeCacheTestService(repo, time.Hour)
 	input := runtimeCacheTestInput("blocked")
 
 	decision, err := svc.Check(context.Background(), input)
 	require.NoError(t, err)
 	require.True(t, decision.Blocked)
 
+	current := svc.runtimeSnapshot.Load()
+	require.NotNil(t, current)
+	expired := *current
+	expired.loadedAt = time.Now().Add(-2 * time.Hour)
+	svc.runtimeSnapshot.Store(&expired)
+
+	refreshStarted := make(chan struct{}, 1)
+	repo.blockNextMultiple(refreshStarted, nil)
 	repo.failMultiple(errors.New("database unavailable"))
 	decision, err = svc.Check(context.Background(), input)
 	require.NoError(t, err)
 	require.True(t, decision.Blocked)
-	require.Eventually(t, func() bool {
-		_, calls := repo.calls()
-		return calls >= 2
-	}, time.Second, time.Millisecond)
+	select {
+	case <-refreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("stale runtime snapshot did not trigger a refresh")
+	}
 }
 
 func TestContentModerationRuntimeSnapshotRefreshFailureBacksOff(t *testing.T) {

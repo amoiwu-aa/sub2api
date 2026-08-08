@@ -576,12 +576,16 @@ type ForwardResult struct {
 	Model     string
 	// UpstreamModel is the actual upstream model after mapping.
 	// Prefer empty when it is identical to Model; persistence normalizes equal values away as no-op mappings.
-	UpstreamModel    string
-	Stream           bool
-	Duration         time.Duration
-	FirstTokenMs     *int // 首字时间（流式请求）
-	ClientDisconnect bool // 客户端是否在流式传输过程中断开
-	ReasoningEffort  *string
+	UpstreamModel string
+	// UpstreamResponseModel is captured from the raw successful upstream
+	// response before any client-facing rewrite or protocol conversion.
+	UpstreamResponseModel         string
+	UpstreamResponseModelConflict bool
+	Stream                        bool
+	Duration                      time.Duration
+	FirstTokenMs                  *int // 首字时间（流式请求）
+	ClientDisconnect              bool // 客户端是否在流式传输过程中断开
+	ReasoningEffort               *string
 
 	// UpstreamCredits 是上游对本次请求自报的计费量（目前只有 Kiro 的 meteringEvent）。
 	// 与 Usage 里的 token 不同量纲，不参与计费，只落库供对账与额度归因。
