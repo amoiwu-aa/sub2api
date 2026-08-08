@@ -102,8 +102,14 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		anthropicBody = s.applyClaudeCodeOAuthMimicryToBody(ctx, c, account, anthropicBody, anthropicReq.System, mappedModel)
 	}
 
-	// 7. Enforce cache_control block limit
-	anthropicBody = enforceCacheControlLimit(anthropicBody)
+	// 7. Apply protocol-native cache anchors after the composite route has
+	// resolved to Anthropic. Stable system/tools may use 1h, while rolling
+	// message anchors stay at 5m.
+	stableCacheTTL := claude.DefaultCacheControlTTL
+	if s.shouldInjectAnthropicCacheTTL1h(ctx, account) {
+		stableCacheTTL = cacheTTLTarget1h
+	}
+	anthropicBody = applyConvertedAnthropicCachePolicy(anthropicBody, stableCacheTTL)
 
 	// 8. Get access token
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -319,6 +325,11 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	// Chain: Anthropic → Responses → Chat Completions
 	responsesResp := apicompat.AnthropicToResponsesResponse(finalResp)
 	ccResp := apicompat.ResponsesToChatCompletions(responsesResp, originalModel)
+	applyAnthropicCacheBreakdownToChatUsage(ccResp.Usage, usage)
+	ccResp.UpstreamModel = mappedModel
+	if strings.TrimSpace(finalResp.Model) != "" {
+		ccResp.UpstreamModel = strings.TrimSpace(finalResp.Model)
+	}
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -381,6 +392,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	responseModel := mappedModel
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -403,6 +415,8 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	writeChunk := func(chunk apicompat.ChatCompletionsChunk) bool {
+		chunk.UpstreamModel = responseModel
+		applyAnthropicCacheBreakdownToChatUsage(chunk.Usage, usage)
 		sse, err := apicompat.ChatChunkToSSE(chunk)
 		if err != nil {
 			return false
@@ -430,6 +444,9 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 		// Also capture usage from message_start (carries cache fields)
 		if event.Type == "message_start" && event.Message != nil {
 			mergeAnthropicUsage(&usage, event.Message.Usage)
+			if strings.TrimSpace(event.Message.Model) != "" {
+				responseModel = strings.TrimSpace(event.Message.Model)
+			}
 		}
 
 		// Chain: Anthropic event → Responses events → CC chunks

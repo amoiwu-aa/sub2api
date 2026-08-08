@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -188,6 +189,59 @@ func TestAddMessageCacheBreakpoints_StringContentPromoted(t *testing.T) {
 	require.Equal(t, "text", gjson.GetBytes(out, "messages.0.content.0.type").String())
 	require.Equal(t, "hi", gjson.GetBytes(out, "messages.0.content.0.text").String())
 	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
+}
+
+func TestAddMessageCacheBreakpoints_SkipsThinkingTail(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","content":[
+		{"type":"text","text":"visible"},
+		{"type":"thinking","thinking":"hidden","signature":"sig"}
+	]}]}`)
+	out := addMessageCacheBreakpoints(body)
+
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
+	require.False(t, gjson.GetBytes(out, "messages.0.content.1.cache_control").Exists())
+}
+
+func TestApplyConvertedAnthropicCachePolicy_StablePrefixesAndRollingTail(t *testing.T) {
+	body := []byte(`{
+		"model":"claude-sonnet-4-5",
+		"system":"stable system",
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"q1","cache_control":{"type":"ephemeral","ttl":"1h"}}]},
+			{"role":"assistant","content":[{"type":"text","text":"a1"}]},
+			{"role":"user","content":[{"type":"text","text":"q2"}]},
+			{"role":"assistant","content":[{"type":"text","text":"a2"},{"type":"thinking","thinking":"hidden","signature":"sig"}]}
+		],
+		"tools":[{"name":"search","input_schema":{"type":"object"}}]
+	}`)
+	out := applyConvertedAnthropicCachePolicy(body, "1h")
+
+	require.True(t, gjson.GetBytes(out, "system").IsArray())
+	require.Equal(t, "stable system", gjson.GetBytes(out, "system.0.text").String())
+	require.Equal(t, "1h", gjson.GetBytes(out, "system.0.cache_control.ttl").String())
+	require.Equal(t, "1h", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.0.content.0.cache_control.ttl").String())
+	require.Equal(t, "5m", gjson.GetBytes(out, "messages.3.content.0.cache_control.ttl").String())
+	require.False(t, gjson.GetBytes(out, "messages.3.content.1.cache_control").Exists())
+	require.Equal(t, 4, strings.Count(string(out), `"cache_control"`))
+}
+
+func TestApplyAnthropicCacheBreakdownToChatUsage(t *testing.T) {
+	chatUsage := &apicompat.ChatUsage{
+		PromptTokens: 10_000,
+		PromptTokensDetails: &apicompat.ChatTokenDetails{
+			CachedTokens:        6_000,
+			CacheCreationTokens: 3_000,
+		},
+	}
+
+	applyAnthropicCacheBreakdownToChatUsage(chatUsage, ClaudeUsage{
+		CacheCreation5mTokens: 1_000,
+		CacheCreation1hTokens: 2_000,
+	})
+
+	require.Equal(t, 1_000, chatUsage.PromptTokensDetails.CacheCreation5mTokens)
+	require.Equal(t, 2_000, chatUsage.PromptTokensDetails.CacheCreation1hTokens)
 }
 
 func TestRewriteMessageCacheControlIfEnabled_DefaultKeepsClientAnchors(t *testing.T) {

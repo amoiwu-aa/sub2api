@@ -107,8 +107,14 @@ func (s *GatewayService) ForwardAsResponses(
 		anthropicBody = s.applyClaudeCodeOAuthMimicryToBody(ctx, c, account, anthropicBody, anthropicReq.System, mappedModel)
 	}
 
-	// 7. Enforce cache_control block limit
-	anthropicBody = enforceCacheControlLimit(anthropicBody)
+	// 7. Apply protocol-native cache anchors after the composite route has
+	// resolved to Anthropic. Stable system/tools may use 1h, while rolling
+	// message anchors stay at 5m.
+	stableCacheTTL := claude.DefaultCacheControlTTL
+	if s.shouldInjectAnthropicCacheTTL1h(ctx, account) {
+		stableCacheTTL = cacheTTLTarget1h
+	}
+	anthropicBody = applyConvertedAnthropicCachePolicy(anthropicBody, stableCacheTTL)
 
 	// 8. Get access token
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -282,6 +288,17 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 	}
 	if src.CacheCreationInputTokens > 0 {
 		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+	}
+	if src.CacheCreation != nil {
+		if src.CacheCreation.Ephemeral5mInputTokens > 0 {
+			dst.CacheCreation5mTokens = src.CacheCreation.Ephemeral5mInputTokens
+		}
+		if src.CacheCreation.Ephemeral1hInputTokens > 0 {
+			dst.CacheCreation1hTokens = src.CacheCreation.Ephemeral1hInputTokens
+		}
+		if dst.CacheCreationInputTokens == 0 {
+			dst.CacheCreationInputTokens = dst.CacheCreation5mTokens + dst.CacheCreation1hTokens
+		}
 	}
 }
 

@@ -132,8 +132,19 @@ func injectCacheControlOnLastContentBlock(body []byte, idx int, msg *gjson.Resul
 	if len(contentArr) == 0 {
 		return body
 	}
-	lastBlockIdx := len(contentArr) - 1
-	lastBlock := contentArr[lastBlockIdx]
+	lastBlockIdx := -1
+	var lastBlock gjson.Result
+	for i := len(contentArr) - 1; i >= 0; i-- {
+		if contentArr[i].Get("type").String() == "thinking" {
+			continue
+		}
+		lastBlockIdx = i
+		lastBlock = contentArr[i]
+		break
+	}
+	if lastBlockIdx < 0 {
+		return body
+	}
 
 	if cc := lastBlock.Get("cache_control"); cc.Exists() && cc.Get("ttl").String() != "" {
 		return body

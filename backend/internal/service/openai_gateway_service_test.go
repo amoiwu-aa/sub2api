@@ -3347,6 +3347,12 @@ func TestExtractOpenAIUsageFromJSONBytes_AcceptsResponseAndChatUsageShapes(t *te
 	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"input_tokens":20,"output_tokens":2,"cache_read_input_tokens":19,"input_tokens_details":{"cached_tokens":0}}}`))
 	require.True(t, ok)
 	require.Zero(t, usage.CacheReadInputTokens, "官方嵌套缓存读取字段显式为零时仍应优先于兼容顶层别名")
+
+	usage, ok = extractOpenAIUsageFromJSONBytes([]byte(`{"usage":{"prompt_tokens":20,"completion_tokens":2,"prompt_cache_hit_tokens":17,"prompt_cache_miss_tokens":3}}`))
+	require.True(t, ok)
+	require.Equal(t, 20, usage.InputTokens)
+	require.Equal(t, 2, usage.OutputTokens)
+	require.Equal(t, 17, usage.CacheReadInputTokens, "DeepSeek 原生缓存命中字段应参与中转侧计费")
 }
 
 func TestExtractCodexFinalResponse_SampleReplay(t *testing.T) {

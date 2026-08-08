@@ -7,10 +7,8 @@
       </div>
 
       <template v-else-if="stats">
-        <!-- 统计概览：单一 8 列栅格，同一套 StatCard。
-             原先是两行各 4 张、共 8 段近乎相同的内联 markup（约 200 行），
-             每张还各自硬编码一个色相。 -->
-        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <!-- 统计概览：统一使用 StatCard；宽屏下 10 项排成两行。 -->
+        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">
           <StatCard icon="key" :label="t('admin.dashboard.apiKeys')" :value="stats.total_api_keys">
             <template #footnote>
               <span :class="stats.active_api_keys > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''">
@@ -65,6 +63,48 @@
                 :account="formatCost(stats.total_account_cost)"
                 :standard="formatCost(stats.total_cost)"
               />
+            </template>
+          </StatCard>
+
+          <StatCard
+            icon="sync"
+            :label="t('admin.dashboard.todayCacheHitRate')"
+            :value="formatCacheHitRate(
+              stats.today_cache_read_tokens,
+              stats.today_input_tokens,
+              stats.today_cache_creation_tokens
+            )"
+          >
+            <template #footnote>
+              <span class="text-sky-600 dark:text-sky-400">
+                {{ t('admin.dashboard.cacheReadShort') }}
+                {{ formatTokens(stats.today_cache_read_tokens) }}
+              </span>
+              <span class="ml-1.5">
+                {{ t('admin.dashboard.cacheCreateShort') }}
+                {{ formatTokens(stats.today_cache_creation_tokens) }}
+              </span>
+            </template>
+          </StatCard>
+
+          <StatCard
+            icon="sync"
+            :label="t('admin.dashboard.totalCacheHitRate')"
+            :value="formatCacheHitRate(
+              stats.total_cache_read_tokens,
+              stats.total_input_tokens,
+              stats.total_cache_creation_tokens
+            )"
+          >
+            <template #footnote>
+              <span class="text-sky-600 dark:text-sky-400">
+                {{ t('admin.dashboard.cacheReadShort') }}
+                {{ formatTokens(stats.total_cache_read_tokens) }}
+              </span>
+              <span class="ml-1.5">
+                {{ t('admin.dashboard.cacheCreateShort') }}
+                {{ formatTokens(stats.total_cache_creation_tokens) }}
+              </span>
             </template>
           </StatCard>
 
@@ -465,6 +505,20 @@ const toFiniteNumber = (value: unknown): number => {
 
 const formatNumber = (value: number | null | undefined): string => {
   return toFiniteNumber(value).toLocaleString()
+}
+
+const formatCacheHitRate = (
+  cacheReadTokens: number | null | undefined,
+  inputTokens: number | null | undefined,
+  cacheCreationTokens: number | null | undefined
+): string => {
+  const cacheRead = Math.max(toFiniteNumber(cacheReadTokens), 0)
+  const promptTokens =
+    Math.max(toFiniteNumber(inputTokens), 0) +
+    Math.max(toFiniteNumber(cacheCreationTokens), 0) +
+    cacheRead
+
+  return promptTokens > 0 ? `${((cacheRead / promptTokens) * 100).toFixed(1)}%` : '0.0%'
 }
 
 const formatCost = (value: number | null | undefined): string => {

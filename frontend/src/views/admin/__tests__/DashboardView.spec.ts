@@ -50,7 +50,7 @@ const formatLocalDate = (date: Date): string => {
   return `${year}-${month}-${day}`
 }
 
-const createDashboardStats = (): DashboardStats => ({
+const createDashboardStats = (overrides: Partial<DashboardStats> = {}): DashboardStats => ({
   total_users: 0,
   today_new_users: 0,
   active_users: 0,
@@ -72,6 +72,7 @@ const createDashboardStats = (): DashboardStats => ({
   total_tokens: 0,
   total_cost: 0,
   total_actual_cost: 0,
+  total_account_cost: 0,
   today_requests: 0,
   today_input_tokens: 0,
   today_output_tokens: 0,
@@ -80,10 +81,12 @@ const createDashboardStats = (): DashboardStats => ({
   today_tokens: 0,
   today_cost: 0,
   today_actual_cost: 0,
+  today_account_cost: 0,
   average_duration_ms: 0,
   uptime: 0,
   rpm: 0,
-  tpm: 0
+  tpm: 0,
+  ...overrides
 })
 
 describe('admin DashboardView', () => {
@@ -142,5 +145,42 @@ describe('admin DashboardView', () => {
       end_date: formatLocalDate(now),
       granularity: 'hour'
     }))
+  })
+
+  it('shows today and total cache hit rates from dashboard token stats', async () => {
+    getSnapshotV2.mockResolvedValue({
+      stats: createDashboardStats({
+        today_input_tokens: 600,
+        today_cache_creation_tokens: 200,
+        today_cache_read_tokens: 200,
+        total_input_tokens: 5000,
+        total_cache_creation_tokens: 1000,
+        total_cache_read_tokens: 4000
+      }),
+      trend: [],
+      models: []
+    })
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.dashboard.todayCacheHitRate')
+    expect(wrapper.text()).toContain('20.0%')
+    expect(wrapper.text()).toContain('admin.dashboard.totalCacheHitRate')
+    expect(wrapper.text()).toContain('40.0%')
   })
 })

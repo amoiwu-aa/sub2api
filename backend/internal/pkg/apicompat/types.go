@@ -157,10 +157,16 @@ func AnthropicStopReasonString(p *string) string {
 
 // AnthropicUsage holds token counts in Anthropic format.
 type AnthropicUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	InputTokens              int                          `json:"input_tokens"`
+	OutputTokens             int                          `json:"output_tokens"`
+	CacheCreationInputTokens int                          `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                          `json:"cache_read_input_tokens"`
+	CacheCreation            *AnthropicCacheCreationUsage `json:"cache_creation,omitempty"`
+}
+
+type AnthropicCacheCreationUsage struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +713,7 @@ type ChatCompletionsResponse struct {
 	Object            string       `json:"object"` // "chat.completion"
 	Created           int64        `json:"created"`
 	Model             string       `json:"model"`
+	UpstreamModel     string       `json:"upstream_model,omitempty"`
 	Choices           []ChatChoice `json:"choices"`
 	Usage             *ChatUsage   `json:"usage,omitempty"`
 	SystemFingerprint string       `json:"system_fingerprint,omitempty"`
@@ -742,6 +749,8 @@ type ChatTokenDetails struct {
 	AudioTokens              int `json:"audio_tokens,omitempty"`
 	CacheCreationTokens      int `json:"cache_creation_tokens,omitempty"`
 	CacheWriteTokens         int `json:"cache_write_tokens,omitempty"`
+	CacheCreation5mTokens    int `json:"cache_creation_5m_tokens,omitempty"`
+	CacheCreation1hTokens    int `json:"cache_creation_1h_tokens,omitempty"`
 	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
 	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
 	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
@@ -753,6 +762,7 @@ type ChatCompletionsChunk struct {
 	Object            string            `json:"object"` // "chat.completion.chunk"
 	Created           int64             `json:"created"`
 	Model             string            `json:"model"`
+	UpstreamModel     string            `json:"upstream_model,omitempty"`
 	Choices           []ChatChunkChoice `json:"choices"`
 	Usage             *ChatUsage        `json:"usage,omitempty"`
 	SystemFingerprint string            `json:"system_fingerprint,omitempty"`
