@@ -193,6 +193,7 @@ export interface OpsErrorTrendResponse {
 
 export interface OpsErrorDistributionItem {
   status_code: number
+  error_owner?: string
   total: number
   sla: number
   business_limited: number

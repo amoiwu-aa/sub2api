@@ -144,4 +144,31 @@ describe('Ops SLA-scoped error charts', () => {
     const requestErrorsButton = wrapper.findAll('button')[0]
     expect(requestErrorsButton.attributes('disabled')).toBeDefined()
   })
+
+  it('优先按错误责任方分类，provider 的上游 403 不显示为客户端错误', () => {
+    const wrapper = mount(OpsErrorDistributionChart, {
+      props: {
+        loading: false,
+        data: {
+          total: 62,
+          items: [
+            {
+              status_code: 403,
+              error_owner: 'provider',
+              total: 62,
+              sla: 62,
+              business_limited: 0,
+            },
+          ],
+        },
+      },
+      global: globalStubs,
+    })
+
+    const doughnut = wrapper.findComponent({ name: 'Doughnut' })
+    expect(doughnut.props('data')).toMatchObject({
+      labels: ['admin.ops.upstream'],
+      datasets: [{ data: [62] }],
+    })
+  })
 })

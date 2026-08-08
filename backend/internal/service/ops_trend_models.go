@@ -54,10 +54,11 @@ type OpsErrorTrendResponse struct {
 }
 
 type OpsErrorDistributionItem struct {
-	StatusCode      int   `json:"status_code"`
-	Total           int64 `json:"total"`
-	SLA             int64 `json:"sla"`
-	BusinessLimited int64 `json:"business_limited"`
+	StatusCode      int    `json:"status_code"`
+	ErrorOwner      string `json:"error_owner"`
+	Total           int64  `json:"total"`
+	SLA             int64  `json:"sla"`
+	BusinessLimited int64  `json:"business_limited"`
 }
 
 type OpsErrorDistributionResponse struct {

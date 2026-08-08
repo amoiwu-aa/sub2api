@@ -563,13 +563,14 @@ func (r *opsRepository) GetErrorDistribution(ctx context.Context, filter *servic
 	q := `
 SELECT
   COALESCE(upstream_status_code, status_code, 0) AS status_code,
+  COALESCE(error_owner, '') AS error_owner,
   COUNT(*) AS total,
   COUNT(*) FILTER (WHERE NOT is_business_limited) AS sla,
   COUNT(*) FILTER (WHERE is_business_limited) AS business_limited
 FROM ops_error_logs
 ` + where + `
   AND COALESCE(status_code, 0) >= 400
-GROUP BY 1
+GROUP BY 1, 2
 ORDER BY total DESC
 LIMIT 20`
 
@@ -583,13 +584,15 @@ LIMIT 20`
 	var total int64
 	for rows.Next() {
 		var statusCode int
+		var errorOwner string
 		var cntTotal, cntSLA, cntBiz int64
-		if err := rows.Scan(&statusCode, &cntTotal, &cntSLA, &cntBiz); err != nil {
+		if err := rows.Scan(&statusCode, &errorOwner, &cntTotal, &cntSLA, &cntBiz); err != nil {
 			return nil, err
 		}
 		total += cntTotal
 		items = append(items, &service.OpsErrorDistributionItem{
 			StatusCode:      statusCode,
+			ErrorOwner:      errorOwner,
 			Total:           cntTotal,
 			SLA:             cntSLA,
 			BusinessLimited: cntBiz,

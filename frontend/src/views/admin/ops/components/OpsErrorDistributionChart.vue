@@ -59,9 +59,13 @@ const categories = computed<ErrorCategory[]>(() => {
   for (const item of props.data.items || []) {
     const code = Number(item.status_code || 0)
     const count = Number(item.sla || 0)
+    const owner = String(item.error_owner || '').trim().toLowerCase()
     if (!Number.isFinite(code) || !Number.isFinite(count)) continue
 
-    if ([502, 503, 504].includes(code)) upstream += count
+    if (owner === 'provider') upstream += count
+    else if (owner === 'client') client += count
+    else if (owner === 'platform') system += count
+    else if ([502, 503, 504].includes(code)) upstream += count
     else if (code >= 400 && code < 500) client += count
     else if (code === 500) system += count
     else other += count
