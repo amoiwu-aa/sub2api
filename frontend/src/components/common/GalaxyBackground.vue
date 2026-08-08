@@ -23,6 +23,7 @@ let spiralStars: SpiralStar[] = []
 let dust: Dust[] = []
 let flares: Flare[] = []
 let trails: Trail[] = []
+let constellations: Constellation[] = []
 let t0 = 0
 
 interface Star {
@@ -75,6 +76,44 @@ interface Trail {
   a: number
   w: number
 }
+
+interface ConstellationNode {
+  x: number
+  y: number
+  r: number
+  tw: number
+  ph: number
+}
+
+interface ConstellationEdge {
+  a: number
+  b: number
+}
+
+interface Constellation {
+  cx: number
+  cy: number
+  driftX: number
+  driftY: number
+  ph: number
+  nodes: ConstellationNode[]
+  edges: ConstellationEdge[]
+}
+
+// 神经网络星座：节点随机撒、边按距离连，整体缓慢漂移——银河是"自然"，
+// 星座是"AI"，两者叠在同一片深空里。
+const CONSTELLATION_LAYOUTS: Array<{
+  cx: number
+  cy: number
+  spreadX: number
+  spreadY: number
+  nodes: number
+  linkDist: number
+}> = [
+  { cx: 0.15, cy: 0.24, spreadX: 0.17, spreadY: 0.2, nodes: 9, linkDist: 0.085 },
+  { cx: 0.85, cy: 0.16, spreadX: 0.16, spreadY: 0.19, nodes: 8, linkDist: 0.08 },
+  { cx: 0.9, cy: 0.78, spreadX: 0.15, spreadY: 0.18, nodes: 8, linkDist: 0.075 }
+]
 
 const isAuth = computed(() => props.variant === 'auth')
 
@@ -160,6 +199,41 @@ function seedField() {
       warm: Math.random(),
       jitterR: rand(-18, 18),
       jitterA: rand(-0.08, 0.08)
+    }
+  })
+
+  // 星座只在 auth 变体出现：登录页是品牌门面，值得这层"AI"隐喻；
+  // home 变体内容多，保持安静。
+  if (!isAuth.value) {
+    constellations = []
+    return
+  }
+  constellations = CONSTELLATION_LAYOUTS.map((layout) => {
+    const nodes: ConstellationNode[] = Array.from({ length: layout.nodes }, () => ({
+      x: layout.cx + rand(-layout.spreadX, layout.spreadX),
+      y: layout.cy + rand(-layout.spreadY, layout.spreadY),
+      r: rand(1.1, 2.2),
+      tw: rand(0.4, 1.1),
+      ph: rand(0, Math.PI * 2)
+    }))
+    const edges: ConstellationEdge[] = []
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[i].x - nodes[j].x
+        const dy = nodes[i].y - nodes[j].y
+        if (Math.hypot(dx, dy) < layout.linkDist) {
+          edges.push({ a: i, b: j })
+        }
+      }
+    }
+    return {
+      cx: layout.cx,
+      cy: layout.cy,
+      driftX: rand(0.004, 0.009),
+      driftY: rand(0.003, 0.007),
+      ph: rand(0, Math.PI * 2),
+      nodes,
+      edges
     }
   })
 }
@@ -381,6 +455,48 @@ function drawFrame(time: number) {
     ctx.stroke()
   }
 
+  // 神经网络星座：细线连节点，整体漂移，节点呼吸式明灭。
+  // 透明度刻意压低——它是氛围，不是主角，不能和登录卡片抢视线。
+  for (const c of constellations) {
+    const ox = Math.cos(time * c.driftX * 6 + c.ph) * 14
+    const oy = Math.sin(time * c.driftY * 6 + c.ph) * 10
+    const px = c.nodes.map((n) => n.x * width + ox)
+    const py = c.nodes.map((n) => n.y * height + oy)
+
+    for (const e of c.edges) {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 0.35 + c.ph + (e.a + e.b) * 0.7)
+      const a = 0.09 + 0.18 * pulse
+      const g = ctx.createLinearGradient(px[e.a], py[e.a], px[e.b], py[e.b])
+      g.addColorStop(0, `rgba(125, 211, 252, ${a})`)
+      g.addColorStop(1, `rgba(45, 212, 191, ${a * 0.8})`)
+      ctx.strokeStyle = g
+      ctx.lineWidth = 0.6
+      ctx.beginPath()
+      ctx.moveTo(px[e.a], py[e.a])
+      ctx.lineTo(px[e.b], py[e.b])
+      ctx.stroke()
+    }
+
+    for (let i = 0; i < c.nodes.length; i++) {
+      const n = c.nodes[i]
+      const pulse = 0.55 + 0.45 * Math.sin(time * n.tw + n.ph)
+      const a = 0.38 + 0.55 * pulse
+      const g = ctx.createRadialGradient(px[i], py[i], 0, px[i], py[i], n.r * 4)
+      g.addColorStop(0, `rgba(190, 242, 255, ${a})`)
+      g.addColorStop(0.35, `rgba(103, 232, 249, ${a * 0.35})`)
+      g.addColorStop(1, 'rgba(34, 211, 238, 0)')
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.arc(px[i], py[i], n.r * 4, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = `rgba(240, 253, 255, ${Math.min(1, a + 0.25)})`
+      ctx.beginPath()
+      ctx.arc(px[i], py[i], n.r * 0.55, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
   ctx.globalCompositeOperation = 'source-over'
 }
 
@@ -444,6 +560,7 @@ watch(
     <div class="galaxy__glow galaxy__glow--violet" />
     <div class="galaxy__glow galaxy__glow--warm" />
     <div class="galaxy__dust" />
+    <div v-if="isAuth" class="galaxy__grid" />
     <div class="galaxy__haze" />
     <canvas ref="canvasRef" class="galaxy__canvas" />
     <div
@@ -662,6 +779,25 @@ watch(
   animation: haze-shift 36s ease-in-out infinite alternate;
 }
 
+/* 透视网格：只在 auth 变体渲染（模板里 v-if）。从地平线向上淡出，
+ * 给"科技感"一个地平线参照，也让画面下半部不至于只有渐变。 */
+.galaxy__grid {
+  position: absolute;
+  left: -25%;
+  right: -25%;
+  bottom: -6%;
+  height: 46%;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.17) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.17) 1px, transparent 1px);
+  background-size: 44px 44px;
+  transform: perspective(520px) rotateX(62deg);
+  transform-origin: center bottom;
+  animation: grid-flow 14s linear infinite;
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, transparent 78%);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, transparent 78%);
+}
+
 .galaxy__canvas {
   position: absolute;
   inset: 0;
@@ -785,6 +921,15 @@ watch(
   }
 }
 
+@keyframes grid-flow {
+  from {
+    background-position: 0 0, 0 0;
+  }
+  to {
+    background-position: 0 44px, 0 0;
+  }
+}
+
 @keyframes shoot-across {
   0% {
     opacity: 0;
@@ -828,7 +973,8 @@ watch(
   .galaxy__glow,
   .galaxy__dust,
   .galaxy__haze,
-  .galaxy__shoot {
+  .galaxy__shoot,
+  .galaxy__grid {
     animation: none !important;
   }
 }

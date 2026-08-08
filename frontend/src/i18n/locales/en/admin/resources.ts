@@ -188,6 +188,7 @@ export default {
       proxyDeleted: 'Proxy deleted successfully',
       proxyWorking: 'Proxy is working!',
       proxyWorkingWithLatency: 'Proxy is working! Latency: {latency}ms',
+      proxyWorkingWithIP: 'Proxy is working! Latency: {latency}ms, exit IP: {ip}',
       proxyTestFailed: 'Proxy test failed',
       qualityCheckDone: 'Quality check completed: score {score} ({grade})',
       qualityCheckFailed: 'Failed to run proxy quality check',

@@ -197,6 +197,17 @@
                 </span>
                 <span v-else class="text-sm text-gray-400">-</span>
               </div>
+              <div v-if="row.ip_address" class="flex items-center gap-1">
+                <code class="code text-xs">{{ row.ip_address }}</code>
+                <button
+                  type="button"
+                  class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+                  :title="t('common.copy')"
+                  @click.stop="copyToClipboard(row.ip_address)"
+                >
+                  <Icon name="copy" size="sm" />
+                </button>
+              </div>
               <div v-if="row.ip_type || row.ip_risk_level" class="flex flex-wrap items-center gap-1">
                 <span v-if="row.ip_type" class="badge" :class="ipTypeClass(row.ip_type)">
                   {{ ipTypeLabel(row.ip_type) }}
@@ -1659,9 +1670,15 @@ const runProxyTest = async (proxyId: number, notify: boolean) => {
     applyLatencyResult(proxyId, result)
     if (notify) {
       if (result.success) {
-        const message = result.latency_ms
-          ? t('admin.proxies.proxyWorkingWithLatency', { latency: result.latency_ms })
-          : t('admin.proxies.proxyWorking')
+        let message = t('admin.proxies.proxyWorking')
+        if (result.latency_ms && result.ip_address) {
+          message = t('admin.proxies.proxyWorkingWithIP', {
+            latency: result.latency_ms,
+            ip: result.ip_address
+          })
+        } else if (result.latency_ms) {
+          message = t('admin.proxies.proxyWorkingWithLatency', { latency: result.latency_ms })
+        }
         appStore.showSuccess(message)
       } else {
         appStore.showError(result.message || t('admin.proxies.proxyTestFailed'))

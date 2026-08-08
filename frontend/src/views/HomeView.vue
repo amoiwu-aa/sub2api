@@ -214,6 +214,92 @@
           </div>
         </div>
 
+        <!-- Connect: API endpoints with one-click copy -->
+        <section class="connect-panel mb-12" :aria-label="t('home.connect.title')">
+          <div class="mb-6 text-center">
+            <h2 class="text-xl font-bold text-white md:text-2xl">
+              {{ t('home.connect.title') }}
+            </h2>
+            <p class="mt-1.5 text-sm text-slate-300">
+              {{ t('home.connect.subtitle') }}
+            </p>
+          </div>
+
+          <!-- Primary base URL -->
+          <div class="connect-primary">
+            <span class="connect-primary-label">{{ t('home.connect.primaryLabel') }}</span>
+            <code
+              class="connect-primary-url"
+              role="button"
+              tabindex="0"
+              :title="t('home.connect.copyAria')"
+              @click="copyEndpoint('primary', apiBaseUrl)"
+              @keydown.enter.prevent="copyEndpoint('primary', apiBaseUrl)"
+              @keydown.space.prevent="copyEndpoint('primary', apiBaseUrl)"
+            >{{ apiBaseUrl }}</code>
+            <button
+              type="button"
+              class="connect-copy-btn"
+              :class="{ 'is-copied': copiedKey === 'primary' }"
+              :aria-label="t('home.connect.copyAria')"
+              @click="copyEndpoint('primary', apiBaseUrl)"
+            >
+              <Icon :name="copiedKey === 'primary' ? 'checkCircle' : 'copy'" size="sm" />
+              {{ copiedKey === 'primary' ? t('home.connect.copied') : t('home.connect.copy') }}
+            </button>
+          </div>
+
+          <!-- Backup / accelerated lines configured by admin -->
+          <div v-if="customEndpoints.length > 0" class="mt-3 flex flex-wrap justify-center gap-2">
+            <button
+              v-for="(ep, index) in customEndpoints"
+              :key="ep.endpoint"
+              type="button"
+              class="connect-alt-chip"
+              :class="{ 'is-copied': copiedKey === `custom-${index}` }"
+              :title="ep.description || t('home.connect.copyAria')"
+              @click="copyEndpoint(`custom-${index}`, ep.endpoint)"
+            >
+              <span class="connect-alt-name">{{ ep.name }}</span>
+              <code class="connect-alt-url">{{ ep.endpoint }}</code>
+              <Icon :name="copiedKey === `custom-${index}` ? 'checkCircle' : 'copy'" size="sm" class="shrink-0" />
+            </button>
+          </div>
+
+          <!-- Per-client setup -->
+          <p class="connect-clients-title">{{ t('home.connect.clientsTitle') }}</p>
+          <div class="grid gap-3 md:grid-cols-2">
+            <div v-for="item in clientEndpoints" :key="item.key" class="connect-client-row">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold text-white">
+                  {{ t(`home.connect.clients.${item.key}.name`) }}
+                </div>
+                <div class="mt-0.5 text-xs text-slate-400">
+                  {{ t(`home.connect.clients.${item.key}.hint`) }}
+                </div>
+                <code
+                  class="connect-client-url"
+                  role="button"
+                  tabindex="0"
+                  :title="t('home.connect.copyAria')"
+                  @click="copyEndpoint(item.key, item.url)"
+                  @keydown.enter.prevent="copyEndpoint(item.key, item.url)"
+                  @keydown.space.prevent="copyEndpoint(item.key, item.url)"
+                >{{ item.url }}</code>
+              </div>
+              <button
+                type="button"
+                class="connect-copy-icon"
+                :class="{ 'is-copied': copiedKey === item.key }"
+                :aria-label="t('home.connect.copyAria')"
+                @click="copyEndpoint(item.key, item.url)"
+              >
+                <Icon :name="copiedKey === item.key ? 'checkCircle' : 'copy'" size="sm" />
+              </button>
+            </div>
+          </div>
+        </section>
+
         <!-- Feature Tags -->
         <div class="mb-12 flex flex-wrap items-center justify-center gap-4 md:gap-6">
           <div class="cosmos-chip">
@@ -344,6 +430,27 @@
             <span class="text-sm font-medium text-slate-100">{{ t('home.providers.antigravity') }}</span>
             <span class="provider-tag">{{ t('home.providers.supported') }}</span>
           </div>
+          <div class="provider-chip">
+            <div class="provider-mark provider-mark--black icon-spin-soft delay-4">
+              <span class="text-xs font-bold text-white">X</span>
+            </div>
+            <span class="text-sm font-medium text-slate-100">{{ t('home.providers.grok') }}</span>
+            <span class="provider-tag">{{ t('home.providers.supported') }}</span>
+          </div>
+          <div class="provider-chip">
+            <div class="provider-mark provider-mark--violet icon-spin-soft delay-0">
+              <span class="text-xs font-bold text-white">C</span>
+            </div>
+            <span class="text-sm font-medium text-slate-100">{{ t('home.providers.cursor') }}</span>
+            <span class="provider-tag">{{ t('home.providers.supported') }}</span>
+          </div>
+          <div class="provider-chip">
+            <div class="provider-mark provider-mark--purple icon-spin-soft delay-1">
+              <span class="text-xs font-bold text-white">K</span>
+            </div>
+            <span class="text-sm font-medium text-slate-100">{{ t('home.providers.kiro') }}</span>
+            <span class="provider-tag">{{ t('home.providers.supported') }}</span>
+          </div>
           <div class="provider-chip provider-chip--muted">
             <div class="provider-mark provider-mark--gray icon-spin-soft delay-4">
               <span class="text-xs font-bold text-white">+</span>
@@ -387,18 +494,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import GalaxyBackground from '@/components/common/GalaxyBackground.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useClipboard } from '@/composables/useClipboard'
 import { sanitizeUrl } from '@/utils/url'
 
 const { t } = useI18n()
 
 const authStore = useAuthStore()
 const appStore = useAppStore()
+const { copyToClipboard } = useClipboard()
 
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'RingStar')
 const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
@@ -426,6 +535,51 @@ const userInitial = computed(() => {
 })
 
 const currentYear = computed(() => new Date().getFullYear())
+
+// ── 接入地址区块 ──
+// 主地址优先用管理员配置的 api_base_url（对外域名可能与当前访问域名不同），
+// 未配置时退回当前站点 origin。
+const apiBaseUrl = computed(() => {
+  const configured = (appStore.cachedPublicSettings?.api_base_url || '').trim()
+  return (configured || window.location.origin).replace(/\/+$/, '')
+})
+
+const customEndpoints = computed(() => appStore.cachedPublicSettings?.custom_endpoints || [])
+
+// 各客户端要填的地址由网关路由结构决定：
+// Claude Code / Gemini CLI 自己会拼 /v1/messages、/v1beta/...，填根地址即可；
+// Codex 与 OpenAI 兼容客户端填到 /v1；Cursor IDE 与 Antigravity 有专用前缀。
+const clientEndpoints = computed(() => [
+  { key: 'claudeCode', url: apiBaseUrl.value },
+  { key: 'codex', url: `${apiBaseUrl.value}/v1` },
+  { key: 'geminiCli', url: apiBaseUrl.value },
+  { key: 'openaiCompat', url: `${apiBaseUrl.value}/v1` },
+  { key: 'cursorIde', url: `${apiBaseUrl.value}/cursor-ide/v1` },
+  { key: 'antigravity', url: `${apiBaseUrl.value}/antigravity` }
+])
+
+const copiedKey = ref<string | null>(null)
+let copiedResetTimer: number | undefined
+
+async function copyEndpoint(key: string, url: string) {
+  const success = await copyToClipboard(url)
+  if (!success) return
+  copiedKey.value = key
+  if (copiedResetTimer !== undefined) {
+    window.clearTimeout(copiedResetTimer)
+  }
+  copiedResetTimer = window.setTimeout(() => {
+    if (copiedKey.value === key) {
+      copiedKey.value = null
+    }
+  }, 1800)
+}
+
+onUnmounted(() => {
+  if (copiedResetTimer !== undefined) {
+    window.clearTimeout(copiedResetTimer)
+  }
+})
 
 function toggleTheme() {
   isDark.value = !isDark.value
@@ -487,6 +641,196 @@ onMounted(() => {
   padding: 1.5rem;
   backdrop-filter: blur(12px);
   transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+/* ── Connect panel ── */
+.connect-panel {
+  border-radius: 1.25rem;
+  border: 1px solid rgba(165, 243, 252, 0.16);
+  background: rgba(15, 23, 42, 0.5);
+  padding: 1.75rem;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 48px rgba(2, 8, 18, 0.35);
+}
+
+.connect-primary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  background: linear-gradient(120deg, rgba(8, 51, 68, 0.55), rgba(15, 23, 42, 0.65));
+  padding: 0.9rem 1.1rem;
+  box-shadow:
+    0 0 24px rgba(34, 211, 238, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.connect-primary-label {
+  flex-shrink: 0;
+  border-radius: 0.375rem;
+  background: rgba(34, 211, 238, 0.16);
+  padding: 0.25rem 0.5rem;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a5f3fc;
+}
+
+.connect-primary-url {
+  flex: 1;
+  min-width: 200px;
+  cursor: pointer;
+  font-family: ui-monospace, 'Fira Code', monospace;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #fff;
+  word-break: break-all;
+  text-decoration-line: none;
+  text-underline-offset: 4px;
+}
+
+.connect-primary-url:hover,
+.connect-primary-url:focus-visible {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-color: rgba(165, 243, 252, 0.6);
+  outline: none;
+}
+
+@media (min-width: 768px) {
+  .connect-primary-url {
+    font-size: 1.125rem;
+  }
+}
+
+.connect-copy-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  background: rgba(34, 211, 238, 0.14);
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #a5f3fc;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.connect-copy-btn:hover {
+  background: rgba(34, 211, 238, 0.24);
+  border-color: rgba(34, 211, 238, 0.6);
+  color: #cffafe;
+}
+
+.connect-copy-btn.is-copied {
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(52, 211, 153, 0.16);
+  color: #6ee7b7;
+}
+
+.connect-alt-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(165, 243, 252, 0.18);
+  background: rgba(15, 23, 42, 0.45);
+  padding: 0.4rem 0.75rem;
+  color: #94a3b8;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.connect-alt-chip:hover {
+  border-color: rgba(34, 211, 238, 0.45);
+  color: #cffafe;
+}
+
+.connect-alt-chip.is-copied {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #6ee7b7;
+}
+
+.connect-alt-name {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.connect-alt-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, 'Fira Code', monospace;
+  font-size: 0.75rem;
+}
+
+.connect-clients-title {
+  margin: 1.5rem 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+
+.connect-client-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(165, 243, 252, 0.12);
+  background: rgba(15, 23, 42, 0.4);
+  padding: 0.8rem 1rem;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.connect-client-row:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.connect-client-url {
+  display: block;
+  margin-top: 0.35rem;
+  cursor: pointer;
+  font-family: ui-monospace, 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: #67e8f9;
+  word-break: break-all;
+}
+
+.connect-client-url:hover,
+.connect-client-url:focus-visible {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+  outline: none;
+}
+
+.connect-copy-icon {
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  padding: 0.45rem;
+  color: #64748b;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.connect-copy-icon:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(34, 211, 238, 0.12);
+  color: #a5f3fc;
+}
+
+.connect-copy-icon.is-copied {
+  color: #6ee7b7;
 }
 
 .cosmos-card:hover {
@@ -553,6 +897,15 @@ onMounted(() => {
 }
 .provider-mark--rose {
   background: linear-gradient(135deg, #fb7185, #db2777);
+}
+.provider-mark--black {
+  background: linear-gradient(135deg, #475569, #0f172a);
+}
+.provider-mark--violet {
+  background: linear-gradient(135deg, #818cf8, #4f46e5);
+}
+.provider-mark--purple {
+  background: linear-gradient(135deg, #c084fc, #7c3aed);
 }
 .provider-mark--gray {
   background: linear-gradient(135deg, #64748b, #475569);

@@ -101,7 +101,46 @@ export default {
       claude: 'Claude',
       gemini: 'Gemini',
       antigravity: 'Antigravity',
+      grok: 'Grok',
+      cursor: 'Cursor',
+      kiro: 'Kiro',
       more: 'More'
+    },
+    // API endpoints section
+    connect: {
+      title: 'API Endpoints',
+      subtitle: 'Copy the address into your client, create an API key in the dashboard, and go',
+      primaryLabel: 'Base URL',
+      copy: 'Copy',
+      copied: 'Copied',
+      copyAria: 'Copy endpoint URL',
+      clientsTitle: 'Client setup',
+      clients: {
+        claudeCode: {
+          name: 'Claude Code',
+          hint: 'ANTHROPIC_BASE_URL environment variable'
+        },
+        codex: {
+          name: 'Codex CLI',
+          hint: 'base_url of the model provider in config.toml'
+        },
+        geminiCli: {
+          name: 'Gemini CLI',
+          hint: 'GOOGLE_GEMINI_BASE_URL environment variable'
+        },
+        openaiCompat: {
+          name: 'OpenAI-compatible clients',
+          hint: 'base_url in your SDK or client'
+        },
+        cursorIde: {
+          name: 'Cursor IDE',
+          hint: 'Override the OpenAI Base URL in settings'
+        },
+        antigravity: {
+          name: 'Antigravity',
+          hint: 'ANTHROPIC_BASE_URL environment variable (Antigravity group keys only)'
+        }
+      }
     },
     // CTA section
     cta: {

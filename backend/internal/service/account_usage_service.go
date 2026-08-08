@@ -458,10 +458,10 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		return usage, err
 	}
 
-	// Cursor Agent 没有上游账号级配额接口；用本地 usage_logs 拼 5h / 7d 窗口，
-	// 让用量列至少能看到本网关侧的消耗（与 Grok 本地窗口同思路）。
+	// Cursor 的订阅额度来自 dashboard 的 usage-summary 接口（见 getCursorUsage）；
+	// force 时绕过 3 分钟缓存直接打上游，供前端"主动查询"按钮使用。
 	if account.Platform == PlatformCursor {
-		return s.getCursorUsage(ctx, account)
+		return s.getCursorUsage(ctx, account, forceProbe)
 	}
 
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
@@ -1086,7 +1086,7 @@ func (s *AccountUsageService) getKiroUsage(ctx context.Context, account *Account
 // 早先这里拼的是 5h / 7d 本地窗口，那是照搬 Claude 的窗口模型套上来的，
 // Cursor 根本没有这两个窗口；真实维度是 Auto 用量、包含的 API 用量和
 // on-demand 按量消费，全部由 dashboard 的 usage-summary 接口下发。
-func (s *AccountUsageService) getCursorUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
+func (s *AccountUsageService) getCursorUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
 	now := time.Now()
 	if account == nil {
 		return &UsageInfo{UpdatedAt: &now}, nil
@@ -1106,14 +1106,18 @@ func (s *AccountUsageService) getCursorUsage(ctx context.Context, account *Accou
 		}, nil
 	}
 
-	if usage, ok := s.loadCursorCache(account.ID); ok {
-		return usage, nil
+	if !force {
+		if usage, ok := s.loadCursorCache(account.ID); ok {
+			return usage, nil
+		}
 	}
 
 	key := fmt.Sprintf("cursor-usage:%d", account.ID)
 	result, flightErr, _ := s.cache.cursorFlight.Do(key, func() (any, error) {
-		if usage, ok := s.loadCursorCache(account.ID); ok {
-			return usage, nil
+		if !force {
+			if usage, ok := s.loadCursorCache(account.ID); ok {
+				return usage, nil
+			}
 		}
 
 		fetchCtx, cancel := context.WithTimeout(ctx, cursorQuotaFetchDeadline)

@@ -188,6 +188,7 @@ export default {
       proxyDeleted: '代理删除成功',
       proxyWorking: '代理连接正常',
       proxyWorkingWithLatency: '代理连接正常，延迟 {latency}ms',
+      proxyWorkingWithIP: '代理连接正常，延迟 {latency}ms，出口 IP：{ip}',
       proxyTestFailed: '代理测试失败',
       qualityCheckDone: '质量检测完成：评分 {score}（{grade}）',
       qualityCheckFailed: '代理质量检测失败',

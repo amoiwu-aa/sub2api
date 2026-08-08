@@ -101,7 +101,46 @@ export default {
       claude: 'Claude',
       gemini: 'Gemini',
       antigravity: 'Antigravity',
+      grok: 'Grok',
+      cursor: 'Cursor',
+      kiro: 'Kiro',
       more: '更多'
+    },
+    // 接入地址区块
+    connect: {
+      title: '接入地址',
+      subtitle: '复制地址填入你的客户端，再到控制台创建 API Key 即可使用',
+      primaryLabel: 'API 主地址',
+      copy: '复制',
+      copied: '已复制',
+      copyAria: '复制接入地址',
+      clientsTitle: '常用客户端怎么填',
+      clients: {
+        claudeCode: {
+          name: 'Claude Code',
+          hint: '环境变量 ANTHROPIC_BASE_URL'
+        },
+        codex: {
+          name: 'Codex CLI',
+          hint: 'config.toml 中 model provider 的 base_url'
+        },
+        geminiCli: {
+          name: 'Gemini CLI',
+          hint: '环境变量 GOOGLE_GEMINI_BASE_URL'
+        },
+        openaiCompat: {
+          name: 'OpenAI 兼容客户端',
+          hint: 'SDK / 客户端里的 base_url'
+        },
+        cursorIde: {
+          name: 'Cursor IDE',
+          hint: '设置中覆盖 OpenAI Base URL'
+        },
+        antigravity: {
+          name: 'Antigravity 专用',
+          hint: '环境变量 ANTHROPIC_BASE_URL（仅限 Antigravity 分组的 Key）'
+        }
+      }
     },
     // CTA 区块
     cta: {

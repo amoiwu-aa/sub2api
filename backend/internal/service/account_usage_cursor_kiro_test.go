@@ -18,7 +18,7 @@ func TestGetCursorUsageReportsIncompleteCredentials(t *testing.T) {
 		},
 	}
 
-	usage, err := svc.getCursorUsage(context.Background(), account)
+	usage, err := svc.getCursorUsage(context.Background(), account, false)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Contains(t, usage.Error, "user_id")
@@ -36,7 +36,7 @@ func TestGetCursorUsageDoesNotBuildRollingWindows(t *testing.T) {
 		Credentials: map[string]any{},
 	}
 
-	usage, err := svc.getCursorUsage(context.Background(), account)
+	usage, err := svc.getCursorUsage(context.Background(), account, false)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Nil(t, usage.FiveHour)
@@ -47,7 +47,7 @@ func TestGetCursorUsageWithoutFetcher(t *testing.T) {
 	svc := &AccountUsageService{cache: NewUsageCache()}
 	account := &Account{ID: 10, Platform: PlatformCursor, Type: AccountTypeOAuth}
 
-	usage, err := svc.getCursorUsage(context.Background(), account)
+	usage, err := svc.getCursorUsage(context.Background(), account, false)
 	require.NoError(t, err)
 	require.NotNil(t, usage)
 	require.Equal(t, "unavailable", usage.ErrorCode)
