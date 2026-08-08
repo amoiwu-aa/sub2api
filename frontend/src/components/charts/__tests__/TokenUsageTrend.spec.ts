@@ -6,6 +6,13 @@ import TokenUsageTrend from '../TokenUsageTrend.vue'
 const messages: Record<string, string> = {
   'admin.dashboard.tokenUsageTrend': 'Token Usage Trend',
   'admin.dashboard.noDataAvailable': 'No data available',
+  'admin.dashboard.input': '输入',
+  'admin.dashboard.output': '输出',
+  'admin.dashboard.cacheCreateShort': '创建',
+  'admin.dashboard.cacheReadShort': '读取',
+  'admin.dashboard.cacheHitRate': '缓存命中率',
+  'admin.dashboard.actual': '实际',
+  'admin.dashboard.standard': '标准',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -51,8 +58,15 @@ describe('TokenUsageTrend', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === '缓存命中率'
     )
+    expect(chartData.datasets.map((ds: any) => ds.label)).toEqual([
+      '输入',
+      '输出',
+      '创建',
+      '读取',
+      '缓存命中率',
+    ])
     // Hit rate = 1500 / (500 + 1500 + 0) * 100 = 75%
     expect(hitRateDataset.data[0]).toBe(75)
   })
@@ -82,7 +96,7 @@ describe('TokenUsageTrend', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === '缓存命中率'
     )
     expect(hitRateDataset.data[0]).toBe(0)
   })
@@ -112,7 +126,7 @@ describe('TokenUsageTrend', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     const hitRateDataset = chartData.datasets.find(
-      (ds: any) => ds.label === 'Cache Hit Rate'
+      (ds: any) => ds.label === '缓存命中率'
     )
     // Hit rate = 500 / (200 + 500 + 300) * 100 = 50%
     expect(hitRateDataset.data[0]).toBe(50)

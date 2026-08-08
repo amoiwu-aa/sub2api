@@ -127,6 +127,7 @@ describe('admin DashboardView', () => {
           Icon: true,
           DateRangePicker: true,
           Select: true,
+          CacheHitRateChart: true,
           ModelDistributionChart: true,
           TokenUsageTrend: true,
           Line: true
@@ -169,6 +170,7 @@ describe('admin DashboardView', () => {
           Icon: true,
           DateRangePicker: true,
           Select: true,
+          CacheHitRateChart: true,
           ModelDistributionChart: true,
           TokenUsageTrend: true,
           Line: true
