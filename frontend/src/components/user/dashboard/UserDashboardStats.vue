@@ -132,7 +132,48 @@
     </div>
   </div>
 
-  <!-- Row 3: Per-platform breakdown -->
+  <!-- Row 3: Cache hit rates -->
+  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div class="card p-4">
+      <div class="flex items-center gap-3">
+        <div class="rounded-lg bg-cyan-100 p-2 dark:bg-cyan-900/30">
+          <Icon name="sync" size="md" class="text-cyan-600 dark:text-cyan-400" :stroke-width="2" />
+        </div>
+        <div>
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
+            {{ t('dashboard.todayCacheHitRate') }}
+          </p>
+          <p class="text-xl font-bold text-gray-900 dark:text-white">
+            {{ formatCacheHitRate(stats?.today_cache_read_tokens, stats?.today_input_tokens, stats?.today_cache_creation_tokens) }}
+          </p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('dashboard.cacheReadShort') }}: {{ formatTokens(stats?.today_cache_read_tokens || 0) }}
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card p-4">
+      <div class="flex items-center gap-3">
+        <div class="rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30">
+          <Icon name="sync" size="md" class="text-sky-600 dark:text-sky-400" :stroke-width="2" />
+        </div>
+        <div>
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
+            {{ t('dashboard.totalCacheHitRate') }}
+          </p>
+          <p class="text-xl font-bold text-gray-900 dark:text-white">
+            {{ formatCacheHitRate(stats?.total_cache_read_tokens, stats?.total_input_tokens, stats?.total_cache_creation_tokens) }}
+          </p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('dashboard.cacheReadShort') }}: {{ formatTokens(stats?.total_cache_read_tokens || 0) }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 4: Per-platform breakdown -->
   <div v-if="!isSimple && platformCards.length > 0" class="card p-4">
     <div class="mb-3 flex items-center justify-between">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.platformBreakdown') }}</h3>
@@ -382,6 +423,19 @@ const formatBalance = (b: number) =>
 
 const formatNumber = (n: number) => n.toLocaleString()
 const formatCost = (c: number) => c.toFixed(4)
+const toTokenCount = (value: number | null | undefined): number => {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? Math.max(numberValue, 0) : 0
+}
+const formatCacheHitRate = (
+  cacheReadTokens: number | null | undefined,
+  inputTokens: number | null | undefined,
+  cacheCreationTokens: number | null | undefined
+): string => {
+  const cacheRead = toTokenCount(cacheReadTokens)
+  const total = cacheRead + toTokenCount(inputTokens) + toTokenCount(cacheCreationTokens)
+  return total > 0 ? `${((cacheRead / total) * 100).toFixed(1)}%` : '0.0%'
+}
 const formatTokens = (t: number) => {
   if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`
   if (t >= 1000) return `${(t / 1000).toFixed(1)}K`
