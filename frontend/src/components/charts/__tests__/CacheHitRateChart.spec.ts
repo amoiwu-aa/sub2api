@@ -5,6 +5,10 @@ import Select from '@/components/common/Select.vue'
 import type { DashboardStats } from '@/types'
 import CacheHitRateChart from '../CacheHitRateChart.vue'
 
+const { searchUsers } = vi.hoisted(() => ({
+  searchUsers: vi.fn()
+}))
+
 const messages: Record<string, string> = {
   'admin.dashboard.cacheHitChartTitle': '缓存命中率统计',
   'admin.dashboard.todayPeriod': '今日',
@@ -12,6 +16,9 @@ const messages: Record<string, string> = {
   'admin.dashboard.currentRange': '当前范围',
   'admin.dashboard.allModels': '全部模型',
   'admin.dashboard.modelFilter': '按模型筛选缓存统计',
+  'admin.dashboard.cacheUserFilter': '按用户查看缓存统计',
+  'admin.dashboard.cacheUserSearchPlaceholder': '搜索用户邮箱或 ID',
+  'admin.dashboard.clearCacheUserFilter': '清除用户筛选',
   'admin.dashboard.cacheHitRate': '缓存命中率',
   'admin.dashboard.cacheHitTokens': '缓存命中',
   'admin.dashboard.cacheCreationTokens': '缓存创建',
@@ -33,6 +40,14 @@ vi.mock('vue-chartjs', () => ({
   Doughnut: {
     props: ['data', 'options'],
     template: '<div class="chart-data">{{ JSON.stringify(data) }}</div>'
+  }
+}))
+
+vi.mock('@/api/admin', () => ({
+  adminAPI: {
+    usage: {
+      searchUsers
+    }
   }
 }))
 
@@ -132,5 +147,52 @@ describe('CacheHitRateChart', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     expect(chartData.datasets[0].data).toEqual([800, 100, 100])
+  })
+
+  it('uses the selected user model statistics for the current dashboard range', async () => {
+    const wrapper = mount(CacheHitRateChart, {
+      props: {
+        stats,
+        selectedUser: {
+          id: 12,
+          email: 'alice@example.com',
+          deleted: false
+        },
+        userModelStats: [
+          {
+            model: 'gpt-5.6',
+            requests: 10,
+            input_tokens: 100,
+            output_tokens: 0,
+            cache_creation_tokens: 100,
+            cache_read_tokens: 300,
+            total_tokens: 500,
+            cost: 0,
+            actual_cost: 0
+          },
+          {
+            model: 'gpt-5.4',
+            requests: 5,
+            input_tokens: 300,
+            output_tokens: 0,
+            cache_creation_tokens: 100,
+            cache_read_tokens: 200,
+            total_tokens: 600,
+            cost: 0,
+            actual_cost: 0
+          }
+        ]
+      }
+    })
+
+    expect(wrapper.get<HTMLInputElement>('[data-testid="cache-user-search"]').element.value).toBe(
+      'alice@example.com'
+    )
+    expect(wrapper.text()).toContain('45.5%')
+    expect(wrapper.text()).toContain('当前范围')
+    expect(wrapper.find('[data-period="today"]').exists()).toBe(false)
+
+    const chartData = JSON.parse(wrapper.find('.chart-data').text())
+    expect(chartData.datasets[0].data).toEqual([500, 200, 400])
   })
 })

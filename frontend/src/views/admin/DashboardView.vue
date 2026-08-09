@@ -128,7 +128,14 @@
           </StatCard>
         </div>
 
-        <CacheHitRateChart :stats="stats" :model-stats="modelStats" />
+        <CacheHitRateChart
+          :stats="stats"
+          :model-stats="modelStats"
+          :selected-user="cacheHitRateUser"
+          :user-model-stats="cacheHitRateUserModelStats"
+          :user-loading="cacheHitRateUserLoading"
+          @user-change="onCacheHitRateUserChange"
+        />
 
         <!-- Charts Section -->
         <div class="space-y-6">
@@ -214,6 +221,7 @@ import { useAppStore } from '@/stores/app'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
+import type { SimpleUser } from '@/api/admin/usage'
 import type {
   DashboardStats,
   TrendDataPoint,
@@ -267,6 +275,9 @@ const rankingError = ref(false)
 // Chart data
 const trendData = ref<TrendDataPoint[]>([])
 const modelStats = ref<ModelStat[]>([])
+const cacheHitRateUser = ref<SimpleUser | null>(null)
+const cacheHitRateUserModelStats = ref<ModelStat[]>([])
+const cacheHitRateUserLoading = ref(false)
 const userTrend = ref<UserUsageTrendPoint[]>([])
 const rankingItems = ref<UserSpendingRankingItem[]>([])
 const rankingTotalActualCost = ref(0)
@@ -275,6 +286,7 @@ const rankingTotalTokens = ref(0)
 let chartLoadSeq = 0
 let usersTrendLoadSeq = 0
 let rankingLoadSeq = 0
+let cacheHitRateUserLoadSeq = 0
 const rankingLimit = 12
 
 // Helper function to format date in local timezone
@@ -560,6 +572,49 @@ const loadDashboardSnapshot = async (includeStats: boolean) => {
   }
 }
 
+const loadCacheHitRateUserModelStats = async () => {
+  const user = cacheHitRateUser.value
+  const currentSeq = ++cacheHitRateUserLoadSeq
+
+  if (!user) {
+    cacheHitRateUserModelStats.value = []
+    cacheHitRateUserLoading.value = false
+    return
+  }
+
+  cacheHitRateUserModelStats.value = []
+  cacheHitRateUserLoading.value = true
+  try {
+    const response = await adminAPI.dashboard.getSnapshotV2({
+      start_date: startDate.value,
+      end_date: endDate.value,
+      granularity: granularity.value,
+      user_id: user.id,
+      include_stats: false,
+      include_trend: false,
+      include_model_stats: true,
+      include_group_stats: false,
+      include_users_trend: false
+    })
+    if (currentSeq !== cacheHitRateUserLoadSeq) return
+    cacheHitRateUserModelStats.value = response.models || []
+  } catch (error) {
+    if (currentSeq !== cacheHitRateUserLoadSeq) return
+    cacheHitRateUserModelStats.value = []
+    appStore.showError(t('admin.dashboard.failedToLoad'))
+    console.error('Error loading selected user cache statistics:', error)
+  } finally {
+    if (currentSeq === cacheHitRateUserLoadSeq) {
+      cacheHitRateUserLoading.value = false
+    }
+  }
+}
+
+const onCacheHitRateUserChange = (user: SimpleUser | null) => {
+  cacheHitRateUser.value = user
+  void loadCacheHitRateUserModelStats()
+}
+
 const loadUsersTrend = async () => {
   const currentSeq = ++usersTrendLoadSeq
   userTrendLoading.value = true
@@ -616,6 +671,7 @@ const loadUserSpendingRanking = async () => {
 const loadDashboardStats = async () => {
   await Promise.all([
     loadDashboardSnapshot(true),
+    loadCacheHitRateUserModelStats(),
     loadUsersTrend(),
     loadUserSpendingRanking()
   ])
@@ -624,6 +680,7 @@ const loadDashboardStats = async () => {
 const loadChartData = async () => {
   await Promise.all([
     loadDashboardSnapshot(false),
+    loadCacheHitRateUserModelStats(),
     loadUsersTrend(),
     loadUserSpendingRanking()
   ])

@@ -6,6 +6,51 @@
       </h3>
 
       <div class="flex flex-wrap items-center justify-end gap-2">
+        <div class="relative w-60">
+          <input
+            v-model="userSearchQuery"
+            data-testid="cache-user-search"
+            type="search"
+            class="input h-9 w-full pr-8 text-sm"
+            :placeholder="t('admin.dashboard.cacheUserSearchPlaceholder')"
+            :aria-label="t('admin.dashboard.cacheUserFilter')"
+            @focus="showUserResults = userSearchQuery.trim() !== selectedUser?.email"
+          />
+          <button
+            v-if="selectedUser"
+            type="button"
+            class="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-white"
+            :aria-label="t('admin.dashboard.clearCacheUserFilter')"
+            @click="clearSelectedUser"
+          >
+            ×
+          </button>
+
+          <div
+            v-if="showUserResults && (userSearchLoading || userSearchResults.length > 0 || userSearchQuery.trim())"
+            class="absolute right-0 z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-700 dark:bg-dark-800"
+          >
+            <div v-if="userSearchLoading" class="px-3 py-2 text-xs text-gray-500 dark:text-dark-400">
+              {{ t('common.loading') }}
+            </div>
+            <template v-else-if="userSearchResults.length">
+              <button
+                v-for="user in userSearchResults"
+                :key="user.id"
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-dark-700"
+                @click="selectUser(user)"
+              >
+                <span class="truncate text-gray-800 dark:text-dark-100">{{ user.email }}</span>
+                <span class="flex-shrink-0 text-xs text-gray-400">#{{ user.id }}</span>
+              </button>
+            </template>
+            <div v-else class="px-3 py-2 text-xs text-gray-500 dark:text-dark-400">
+              {{ t('admin.dashboard.noDataAvailable') }}
+            </div>
+          </div>
+        </div>
+
         <Select
           v-model="selectedModel"
           class="w-56"
@@ -14,7 +59,7 @@
           :aria-label="t('admin.dashboard.modelFilter')"
         />
 
-        <div v-if="!selectedModel" class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800">
+        <div v-if="!showCurrentRange" class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800">
           <button
             v-for="option in periodOptions"
             :key="option.value"
@@ -36,7 +81,7 @@
           v-else
           class="rounded-md bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 dark:bg-dark-800 dark:text-dark-300"
         >
-          {{ t('admin.dashboard.currentRange') }}
+          {{ userLoading ? t('common.loading') : t('admin.dashboard.currentRange') }}
         </span>
       </div>
     </div>
@@ -96,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ArcElement,
@@ -106,7 +151,9 @@ import {
   type ChartOptions
 } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
+import { adminAPI } from '@/api/admin'
 import Select from '@/components/common/Select.vue'
+import type { SimpleUser } from '@/api/admin/usage'
 import type { DashboardStats, ModelStat } from '@/types'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
@@ -114,11 +161,24 @@ ChartJS.register(ArcElement, Tooltip, Legend)
 const props = defineProps<{
   stats: DashboardStats
   modelStats?: ModelStat[]
+  selectedUser?: SimpleUser | null
+  userModelStats?: ModelStat[]
+  userLoading?: boolean
+}>()
+
+const emit = defineEmits<{
+  'user-change': [user: SimpleUser | null]
 }>()
 
 const { t } = useI18n()
 const period = ref<'today' | 'total'>('today')
 const selectedModel = ref('')
+const userSearchQuery = ref('')
+const userSearchResults = ref<SimpleUser[]>([])
+const userSearchLoading = ref(false)
+const showUserResults = ref(false)
+let userSearchTimer: ReturnType<typeof setTimeout> | undefined
+let userSearchSequence = 0
 
 const colors = {
   hit: '#06b6d4',
@@ -131,19 +191,23 @@ const periodOptions = computed(() => [
   { value: 'total' as const, label: t('admin.dashboard.totalPeriod') }
 ])
 
+const scopedModelStats = computed(() =>
+  props.selectedUser ? props.userModelStats || [] : props.modelStats || []
+)
+
 const modelOptions = computed(() => [
   { value: '', label: t('admin.dashboard.allModels') },
-  ...[...(props.modelStats || [])]
+  ...[...scopedModelStats.value]
     .sort((a, b) => a.model.localeCompare(b.model))
     .map((item) => ({ value: item.model, label: item.model }))
 ])
 
 const selectedModelStats = computed(
-  () => props.modelStats?.find((item) => item.model === selectedModel.value) || null
+  () => scopedModelStats.value.find((item) => item.model === selectedModel.value) || null
 )
 
 watch(
-  () => props.modelStats,
+  scopedModelStats,
   () => {
     if (selectedModel.value && !selectedModelStats.value) {
       selectedModel.value = ''
@@ -151,6 +215,54 @@ watch(
   },
   { deep: true }
 )
+
+watch(
+  () => props.selectedUser,
+  (user) => {
+    userSearchQuery.value = user?.email || ''
+    showUserResults.value = false
+  },
+  { immediate: true }
+)
+
+watch(userSearchQuery, (query) => {
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer)
+  }
+
+  const keyword = query.trim()
+  if (!keyword || keyword === props.selectedUser?.email) {
+    userSearchResults.value = []
+    userSearchLoading.value = false
+    return
+  }
+
+  userSearchTimer = setTimeout(async () => {
+    const currentSequence = ++userSearchSequence
+    userSearchLoading.value = true
+    try {
+      const users = await adminAPI.usage.searchUsers(keyword)
+      if (currentSequence === userSearchSequence) {
+        userSearchResults.value = users
+      }
+    } catch (error) {
+      if (currentSequence === userSearchSequence) {
+        userSearchResults.value = []
+        console.error('Failed to search dashboard cache user:', error)
+      }
+    } finally {
+      if (currentSequence === userSearchSequence) {
+        userSearchLoading.value = false
+      }
+    }
+  }, 250)
+})
+
+onBeforeUnmount(() => {
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer)
+  }
+})
 
 const toTokenCount = (value: unknown): number => {
   const numberValue = Number(value)
@@ -170,6 +282,24 @@ const metrics = computed(() => {
       hit,
       total,
       hitRate: total > 0 ? (hit / total) * 100 : 0
+    }
+  }
+
+  if (props.selectedUser) {
+    const totals = scopedModelStats.value.reduce(
+      (result, item) => ({
+        input: result.input + toTokenCount(item.input_tokens),
+        creation: result.creation + toTokenCount(item.cache_creation_tokens),
+        hit: result.hit + toTokenCount(item.cache_read_tokens)
+      }),
+      { input: 0, creation: 0, hit: 0 }
+    )
+    const total = totals.input + totals.creation + totals.hit
+
+    return {
+      ...totals,
+      total,
+      hitRate: total > 0 ? (totals.hit / total) * 100 : 0
     }
   }
 
@@ -195,6 +325,25 @@ const metrics = computed(() => {
     hitRate: total > 0 ? (hit / total) * 100 : 0
   }
 })
+
+const showCurrentRange = computed(() => Boolean(selectedModel.value || props.selectedUser))
+
+const selectUser = (user: SimpleUser) => {
+  emit('user-change', user)
+  userSearchResults.value = []
+  showUserResults.value = false
+}
+
+const clearSelectedUser = () => {
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer)
+  }
+  userSearchSequence += 1
+  userSearchQuery.value = ''
+  userSearchResults.value = []
+  showUserResults.value = false
+  emit('user-change', null)
+}
 
 const chartData = computed(() => ({
   labels: [

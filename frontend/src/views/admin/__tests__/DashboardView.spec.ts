@@ -185,4 +185,41 @@ describe('admin DashboardView', () => {
     expect(wrapper.text()).toContain('admin.dashboard.totalCacheHitRate')
     expect(wrapper.text()).toContain('40.0%')
   })
+
+  it('loads cache statistics for a selected user without changing global dashboard stats', async () => {
+    const CacheHitRateChartStub = {
+      emits: ['user-change'],
+      template:
+        '<button data-testid="select-cache-user" @click="$emit(\'user-change\', { id: 42, email: \'alice@example.com\', deleted: false })">select</button>'
+    }
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          CacheHitRateChart: CacheHitRateChartStub,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    await flushPromises()
+    getSnapshotV2.mockClear()
+
+    await wrapper.get('[data-testid="select-cache-user"]').trigger('click')
+    await flushPromises()
+
+    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: 42,
+      include_stats: false,
+      include_trend: false,
+      include_model_stats: true
+    }))
+  })
 })
