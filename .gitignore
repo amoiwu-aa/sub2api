@@ -151,3 +151,5 @@ output/
 .deploy-tmp/
 # Cursor MCP 配置写死了本机绝对路径，换机器就失效
 .cursor/
+# Vitest / Vite cache at repo root
+.vite/

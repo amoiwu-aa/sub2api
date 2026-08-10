@@ -9,9 +9,6 @@ export default {
     todayTokens: '今日 Token',
     totalTokens: '累计 Token',
     cacheToday: '今日缓存',
-    todayCacheHitRate: '今日缓存命中率',
-    totalCacheHitRate: '累计缓存命中率',
-    cacheReadShort: '读取',
     performance: '性能指标',
     avgResponse: '平均响应',
     averageTime: '平均时间',
@@ -135,13 +132,6 @@ export default {
       description: '将以下环境变量添加到您的终端配置文件或直接在终端中运行。',
       copy: '复制',
       copied: '已复制',
-      copyAll: '全部复制',
-      copiedAll: '已全部复制',
-      copyLine: '复制这一行',
-      modelPicker: {
-        label: '模型',
-        hint: '列表来自这把密钥实际可用的模型。切换后下面的配置会同步更新。'
-      },
       note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。',
       claudeSettingsHint: '用户级持久配置。此文件包含 API 密钥，请勿提交到项目仓库。',
       noGroupTitle: '请先分配分组',
@@ -165,41 +155,7 @@ export default {
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
-        openaiCompatible: 'OpenAI 兼容',
-        cursorIde: 'Cursor IDE',
         opencode: 'OpenCode'
-      },
-      cursor: {
-        description:
-          'Cursor 分组提供 OpenAI 兼容的 /v1/chat/completions 接口。请将以下环境变量配置到支持 OpenAI 兼容端点的客户端中。',
-        claudeDescription:
-          '配置 Claude Code，让 Messages API 请求通过当前 Cursor 分组发送。所有模型档位都会锁定到上面选中的模型。',
-        codexDescription:
-          '配置 Codex CLI，请求走 Responses API 通过当前 Cursor 分组发送。',
-        modelComment: '模型 id 必须带 cursor/ 前缀，cursor/default 即 Auto 档',
-        codexConfigTomlHint: '写入 Codex 的 config.toml；API 密钥单独放环境变量，不要写进这个文件。',
-        note: '这些环境变量将在当前终端会话中生效。请确保模型名带 cursor/ 前缀，否则会被回退成 Auto 档。',
-        claudeNote:
-          '二选一即可：终端命令仅在当前会话生效；保存 settings.json 可作为用户级持久配置。Cursor 的模型 id 带 cursor/ 前缀，因此必须锁定各档位模型。',
-        codexNote:
-          'Codex 走 Responses API。模型名必须带 cursor/ 前缀，且要选一个当前账号真正可用的模型，否则上游会返回 429。',
-        ideDescription:
-          '在官方 Cursor IDE 里把本网关当作「自定义 OpenAI 服务」使用。这一档走 /cursor-ide/v1，会摘掉请求里的工具声明——IDE 用自己的工具链路，不接受网关中转的 tool_calls。',
-        ideSettingsPath: 'Cursor 设置 → Models → OpenAI API Key',
-        ideSettingsHint:
-          '勾选 Override OpenAI Base URL 后填入上面的地址，注意结尾是 /cursor-ide/v1 而不是 /v1。模型要在下方 Add model 里手动添加，Cursor 的内置模型名不会走到这里。',
-        ideNote:
-          '填完点 Verify 验证。官方 IDE 对自定义模型有限制，多数版本只开放 Ask/Chat，Agent 模式用不了自定义 provider。'
-      },
-      kiro: {
-        description:
-          'Kiro 分组同时提供 OpenAI 兼容的 /v1/chat/completions 接口。请将以下环境变量配置到支持 OpenAI 兼容端点的客户端中。',
-        claudeDescription:
-          '配置 Claude Code，让 Messages API 请求通过当前 Kiro 分组发送。所有模型档位均已锁定到 kiro/claude-sonnet-4.6。',
-        modelComment: '模型 id 必须带 kiro/ 前缀，kiro/auto 为自动选择',
-        note: '这些环境变量将在当前终端会话中生效。请确保模型名带 kiro/ 前缀，否则上游会判为未知模型。',
-        claudeNote:
-          '二选一即可：终端命令仅在当前会话生效；保存 settings.json 可作为用户级持久配置。Kiro 的模型 id 带 kiro/ 前缀，因此必须锁定各档位模型。'
       },
       antigravity: {
         description: '为 Antigravity 分组配置 API 访问。请根据您使用的客户端选择对应的配置方式。',
@@ -217,16 +173,24 @@ export default {
         note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
       },
       grok: {
-        description: '配置 Grok Build、Claude Code、Codex 或 OpenCode，让请求通过当前 RingStar Grok 分组发送。',
+        description:
+          '配置 Grok CLI、Claude Code、Codex 或 OpenCode，让请求通过当前 RingStar Grok 分组发送。文本模型走 Responses；图片/视频使用 Imagine 模型 ID 与媒体端点。',
         claudeDescription: '配置 Claude Code，让 Messages API 请求通过当前 RingStar Grok 分组发送。',
         codexDescription: '配置 Codex，让 Responses API 请求通过当前 RingStar Grok 分组发送。',
-        configTomlHint: '如已有 config.toml，请先备份再合并此模型配置。保存后运行 grok inspect 验证生效配置。',
-        codexConfigTomlHint: '如已有 config.toml，请先备份再合并此服务商配置。',
-        note: '保存为 ~/.grok/config.toml，然后运行 grok inspect，并在 /model 中选择 grok。',
-        noteWindows: '保存为 %USERPROFILE%\\.grok\\config.toml，然后运行 grok inspect，并在 /model 中选择 grok。',
-        claudeNote: '二选一即可：终端命令仅在当前会话生效；保存 settings.json 可作为用户级持久配置。',
-        codexNote: '将 config.toml 保存到 ~/.codex，并在启动 Codex 前设置 SUB2API_API_KEY。',
-        codexNoteWindows: '将 config.toml 保存到 %USERPROFILE%\\.codex，并在 PowerShell 中设置 SUB2API_API_KEY 后启动 Codex。'
+        configTomlHint:
+          '官方路径：~/.grok/config.toml（或 $GROK_HOME）。请填写 [endpoints]（models_base_url / models_list_url / xai_api_base_url / cli_chat_proxy_base_url）、[auth] preferred_method=api_key、[models]、[session]、[features] 图片/视频覆盖。优先 env_key，勿硬编码 api_key；文本模型必须 api_backend=responses。合并前备份，保存后运行 grok inspect。',
+        codexConfigTomlHint:
+          'Codex 官方：wire_api 仅支持 "responses"；优先 env_key，勿与 experimental_bearer_token 混用；非 OpenAI 网关默认 supports_websockets = false（RingStar 仍可接客户端 WS 并桥接到 HTTP/SSE）。合并前备份 ~/.codex/config.toml。',
+        note:
+          '导出 GROK_MODELS_BASE_URL 与 XAI_API_KEY，将完整 config.toml（endpoints/auth/models/session/features）保存为 ~/.grok/config.toml，运行 grok inspect，再用 /model 选择 grok-4.5（编程场景可用 grok-build-0.1）。',
+        noteWindows:
+          '设置 GROK_MODELS_BASE_URL 与 XAI_API_KEY，将完整 config.toml 保存为 %USERPROFILE%\\.grok\\config.toml，运行 grok inspect，再用 /model 选择 grok-4.5（编程场景可用 grok-build-0.1）。',
+        claudeNote:
+          '二选一：终端环境变量仅当前会话；~/.claude/settings.json 可持久化。请勿把含 API Key 的文件提交到仓库。',
+        codexNote:
+          '导出 SUB2API_API_KEY，将 config.toml 保存到 ~/.codex（可用 mkdir -p ~/.codex）。优先 env_key，勿提交密钥。',
+        codexNoteWindows:
+          '设置 $env:SUB2API_API_KEY，将 config.toml 保存到 %USERPROFILE%\\.codex。优先 env_key，勿提交密钥。'
       },
       opencode: {
         title: 'OpenCode 配置示例',
@@ -248,8 +212,8 @@ export default {
     ipBlacklistPlaceholder: '1.2.3.4\n5.6.0.0/16',
     ipBlacklistHint: '每行一个 IP 或 CIDR，这些 IP 将被禁止使用此密钥',
     ipRestrictionEnabled: '已配置 IP 限制',
-    ccSwitchNoResponse:
-      'CC-Switch 没有响应。请确认已安装并能正常启动，或改用「使用密钥」手动复制配置。',
+    ccSwitchNotInstalled:
+      'CC-Switch 未安装或协议处理程序未注册。请先安装 CC-Switch 或手动复制 API 密钥。',
     ccsClientSelect: {
       title: '选择客户端',
       description: '请选择您要导入到 CC-Switch 的客户端类型：',
@@ -257,10 +221,6 @@ export default {
       claudeCodeDesc: '导入为 Claude Code 配置',
       geminiCli: 'Gemini CLI',
       geminiCliDesc: '导入为 Gemini CLI 配置'
-    },
-    ccsModelSelect: {
-      title: '选择模型',
-      description: '选择导入 CC-Switch 后默认使用的模型，导入后仍可在 CC-Switch 里修改：'
     },
     // 配额和有效期
     quotaLimit: '额度限制',
@@ -370,8 +330,6 @@ export default {
     latency: '延迟',
     latencyFirstToken: '首字',
     latencyDuration: '总耗时',
-    upstreamCredits: '上游 {value} credit',
-    upstreamCreditsHint: '上游按 credit 结算的真实扣费量。左侧金额是本站价目表折算，两者不同量纲，账号额度够不够以 credit 为准。',
     time: '时间',
     ws: 'WS',
     stream: '流式',

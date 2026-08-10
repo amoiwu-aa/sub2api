@@ -25,6 +25,12 @@ vi.mock('@/stores', () => ({
   useAuthStore: () => authStore,
 }))
 
+vi.mock('@/composables/useClipboard', () => ({
+  useClipboard: () => ({
+    copyToClipboard: vi.fn().mockResolvedValue(true),
+  }),
+}))
+
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   return {
@@ -46,6 +52,7 @@ function mountHome(settings: Record<string, unknown> = {}) {
         RouterLink: RouterLinkStub,
         LocaleSwitcher: { template: '<div data-testid="locale-switcher" />' },
         Icon: { template: '<span data-testid="icon" />' },
+        GalaxyBackground: { template: '<div data-testid="galaxy-background" />' },
       },
     },
   })

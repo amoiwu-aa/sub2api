@@ -9,9 +9,6 @@ export default {
     todayTokens: 'Today Tokens',
     totalTokens: 'Total Tokens',
     cacheToday: 'Cache (Today)',
-    todayCacheHitRate: 'Cache Hit Rate (Today)',
-    totalCacheHitRate: 'Cache Hit Rate (Total)',
-    cacheReadShort: 'Read',
     performance: 'Performance',
     avgResponse: 'Avg Response',
     averageTime: 'Average time',
@@ -136,13 +133,6 @@ export default {
         'Add the following environment variables to your terminal profile or run directly in terminal to configure API access.',
       copy: 'Copy',
       copied: 'Copied',
-      copyAll: 'Copy all',
-      copiedAll: 'All copied',
-      copyLine: 'Copy this line',
-      modelPicker: {
-        label: 'Model',
-        hint: 'The list reflects the models this key can actually use. Switching it updates the configuration below.',
-      },
       note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       claudeSettingsHint: 'User-level persistent configuration. Do not commit this file containing your API key to a project repository.',
       noGroupTitle: 'Please assign a group first',
@@ -164,30 +154,7 @@ export default {
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
-        openaiCompatible: 'OpenAI Compatible',
-        cursorIde: 'Cursor IDE',
         opencode: 'OpenCode',
-      },
-      cursor: {
-        description: 'Cursor groups expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',
-        claudeDescription: 'Configure Claude Code to send Messages API traffic through your Cursor group. Every model tier is pinned to the model selected above.',
-        codexDescription: 'Configure Codex CLI to send Responses API traffic through your Cursor group.',
-        modelComment: 'Model ids must carry the cursor/ prefix; cursor/default is the Auto tier',
-        codexConfigTomlHint: 'Goes into Codex config.toml. Keep the API key in an environment variable rather than this file.',
-        note: 'These environment variables will be active in the current terminal session. Keep the cursor/ prefix on model names, otherwise the request falls back to the Auto tier.',
-        claudeNote: 'Choose one method: run the terminal commands for the current session, or save settings.json for user-level persistent configuration. Cursor model ids carry a cursor/ prefix, so every tier must be pinned.',
-        codexNote: 'Codex uses the Responses API. Keep the cursor/ prefix and pick a model the account can actually serve, otherwise the upstream returns 429.',
-        ideDescription: 'Use this gateway as a custom OpenAI provider inside the official Cursor IDE. This tier goes through /cursor-ide/v1, which strips tool declarations from the request — the IDE runs its own tool loop and will not answer tool_calls relayed by the gateway.',
-        ideSettingsPath: 'Cursor Settings → Models → OpenAI API Key',
-        ideSettingsHint: 'Tick "Override OpenAI Base URL" and paste the address above. Note it ends in /cursor-ide/v1, not /v1. Add the model manually under "Add model"; Cursor\'s built-in model names never reach this endpoint.',
-        ideNote: 'Click Verify once the fields are filled. The official IDE limits custom models: most versions only enable Ask/Chat, and Agent mode does not work with custom providers.',
-      },
-      kiro: {
-        description: 'Kiro groups also expose the OpenAI-compatible /v1/chat/completions endpoint. Add the following environment variables to any client that supports an OpenAI-compatible endpoint.',
-        claudeDescription: 'Configure Claude Code to send Messages API traffic through your Kiro group. Every model tier is pinned to kiro/claude-sonnet-4.6.',
-        modelComment: 'Model ids must carry the kiro/ prefix; kiro/auto picks a model automatically',
-        note: 'These environment variables will be active in the current terminal session. Keep the kiro/ prefix on model names, otherwise the upstream rejects them as unknown models.',
-        claudeNote: 'Choose one method: run the terminal commands for the current session, or save settings.json for user-level persistent configuration. Kiro model ids carry a kiro/ prefix, so every tier must be pinned.',
       },
       antigravity: {
         description: 'Configure API access for Antigravity group. Select the configuration method based on your client.',
@@ -202,16 +169,24 @@ export default {
         note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
       },
       grok: {
-        description: 'Configure Grok Build, Claude Code, Codex, or OpenCode to send requests through your RingStar Grok group.',
+        description:
+          'Configure Grok CLI, Claude Code, Codex, or OpenCode to send requests through your RingStar Grok group. Text models use Responses; image/video use Imagine model IDs on media endpoints.',
         claudeDescription: 'Configure Claude Code to send Messages API traffic through your RingStar Grok group.',
         codexDescription: 'Configure Codex to send Responses API traffic through your RingStar Grok group.',
-        configTomlHint: 'Back up an existing config.toml before merging this model entry. Run grok inspect after saving to verify the effective configuration.',
-        codexConfigTomlHint: 'Back up an existing config.toml before merging this provider configuration.',
-        note: 'Save the file as ~/.grok/config.toml, then run grok inspect and select grok from /model.',
-        noteWindows: 'Save the file as %USERPROFILE%\\.grok\\config.toml, then run grok inspect and select grok from /model.',
-        claudeNote: 'Choose one method: run the terminal commands for the current session, or save settings.json for user-level persistent configuration.',
-        codexNote: 'Save config.toml under ~/.codex and set SUB2API_API_KEY before starting Codex.',
-        codexNoteWindows: 'Save config.toml under %USERPROFILE%\\.codex and set SUB2API_API_KEY in PowerShell before starting Codex.',
+        configTomlHint:
+          'Official path: ~/.grok/config.toml (or $GROK_HOME). Fill [endpoints] (models_base_url / models_list_url / xai_api_base_url / cli_chat_proxy_base_url), [auth] preferred_method=api_key, [models], [session], and [features] image/video overrides. Prefer env_key over api_key; every text model needs api_backend=responses. Back up before merge, then run grok inspect.',
+        codexConfigTomlHint:
+          'Official Codex: wire_api = "responses" only; prefer env_key over experimental_bearer_token; supports_websockets = false for non-OpenAI gateways (RingStar can still accept client WS and bridge to HTTP/SSE). Back up ~/.codex/config.toml before merge.',
+        note:
+          'Export GROK_MODELS_BASE_URL and XAI_API_KEY, save the full config.toml (endpoints/auth/models/session/features) as ~/.grok/config.toml, run grok inspect, then /model grok-4.5 (or grok-build-0.1 for coding).',
+        noteWindows:
+          'Set GROK_MODELS_BASE_URL and XAI_API_KEY, save the full config.toml as %USERPROFILE%\\.grok\\config.toml, run grok inspect, then /model grok-4.5 (or grok-build-0.1 for coding).',
+        claudeNote:
+          'Choose one method: terminal env for this session, or ~/.claude/settings.json for persistence. Do not commit files that contain your API key.',
+        codexNote:
+          'Export SUB2API_API_KEY, save config.toml under ~/.codex (mkdir -p ~/.codex). Prefer env_key auth; do not commit secrets.',
+        codexNoteWindows:
+          'Set $env:SUB2API_API_KEY, save config.toml under %USERPROFILE%\\.codex. Prefer env_key auth; do not commit secrets.',
       },
       opencode: {
         title: 'OpenCode Example',
@@ -233,7 +208,7 @@ export default {
     ipBlacklistPlaceholder: '1.2.3.4\n5.6.0.0/16',
     ipBlacklistHint: 'One IP or CIDR per line. These IPs will be blocked from using this key.',
     ipRestrictionEnabled: 'IP restriction enabled',
-    ccSwitchNoResponse: 'CC-Switch did not respond. Make sure it is installed and can launch, or use "Use Key" to copy the configuration manually.',
+    ccSwitchNotInstalled: 'CC-Switch is not installed or the protocol handler is not registered. Please install CC-Switch first or manually copy the API key.',
     ccsClientSelect: {
       title: 'Select Client',
       description: 'Please select the client type to import to CC-Switch:',
@@ -241,11 +216,6 @@ export default {
       claudeCodeDesc: 'Import as Claude Code configuration',
       geminiCli: 'Gemini CLI',
       geminiCliDesc: 'Import as Gemini CLI configuration',
-    },
-    ccsModelSelect: {
-      title: 'Select Model',
-      description:
-        'Pick the model to use after importing into CC-Switch. You can still change it there later:',
     },
     // Quota and expiration
     quotaLimit: 'Quota Limit',
@@ -355,8 +325,6 @@ export default {
     latency: 'Latency',
     latencyFirstToken: 'First',
     latencyDuration: 'Total',
-    upstreamCredits: '{value} credits upstream',
-    upstreamCreditsHint: "The upstream's own metered charge. The amount on the left is our price list applied to tokens; the two are different units, and account quota is governed by credits.",
     time: 'Time',
     ws: 'WS',
     stream: 'Stream',

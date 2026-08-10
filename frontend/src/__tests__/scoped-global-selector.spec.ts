@@ -49,7 +49,7 @@ describe('scoped CSS 不得使用 :global(...) 前导后代选择器', () => {
       const source = readFileSync(file, 'utf8')
       for (const block of scopedStyleBlocks(source)) {
         // 逐行看，便于在报错里指出具体那一行。
-        block.split('\n').forEach((line, i) => {
+        block.split('\n').forEach((line, _i) => {
           const trimmed = line.trim()
           if (trimmed.startsWith('*') || trimmed.startsWith('//')) return
           if (LEADING_GLOBAL_DESCENDANT.test(trimmed)) {
