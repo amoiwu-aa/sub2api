@@ -277,6 +277,11 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 	if dst == nil {
 		return
 	}
+	if src.HasCacheUsageFields() {
+		dst.CacheUsageSource = CacheUsageSourceReported
+	} else if dst.CacheUsageSource == "" {
+		dst.CacheUsageSource = CacheUsageSourceUnavailable
+	}
 	if src.InputTokens > 0 {
 		dst.InputTokens = src.InputTokens
 	}

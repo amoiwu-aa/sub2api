@@ -464,9 +464,30 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if gjson.GetBytes(body, "max_completion_tokens").Exists() && (account.Type == AccountTypeAPIKey || account.Platform != PlatformOpenAI) {
 			markPatchDelete("max_completion_tokens")
 		}
-		for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier", "prompt_cache_options"} {
+		for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier"} {
 			if gjson.GetBytes(body, unsupportedField).Exists() {
 				markPatchDelete(unsupportedField)
+			}
+		}
+	}
+	if !openAIExplicitPromptCacheSupported(account, upstreamModel) {
+		if gjson.GetBytes(body, "prompt_cache_options").Exists() {
+			markPatchDelete("prompt_cache_options")
+		}
+		// cache_control 与 breakpoint 同属显式缓存词汇：不支持的模型一并剥离，
+		// 支持的模型（gpt-5.6+）原样保留。
+		if bytes.Contains(body, []byte(`"prompt_cache_breakpoint"`)) ||
+			bytes.Contains(body, []byte(`"breakpoint"`)) ||
+			bytes.Contains(body, []byte(`"cache_control"`)) {
+			decoded, decodeErr := ensureReqBody()
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			if stripPromptCacheBreakpoints(decoded) {
+				markDecodedModified()
+			}
+			if stripAnthropicCacheControls(decoded) {
+				markDecodedModified()
 			}
 		}
 	}

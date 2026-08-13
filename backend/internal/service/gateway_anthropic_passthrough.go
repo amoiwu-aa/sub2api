@@ -631,6 +631,17 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 	}
 
 	parsed := gjson.Parse(data)
+	usageNode := parsed.Get("usage")
+	if messageUsage := parsed.Get("message.usage"); messageUsage.Exists() {
+		usageNode = messageUsage
+	}
+	if usageNode.Exists() {
+		if claudeUsageNodeHasCacheFields(usageNode) {
+			usage.CacheUsageSource = CacheUsageSourceReported
+		} else if usage.CacheUsageSource == "" {
+			usage.CacheUsageSource = CacheUsageSourceUnavailable
+		}
+	}
 	switch parsed.Get("type").String() {
 	case "message_start":
 		msgUsage := parsed.Get("message.usage")
@@ -674,14 +685,6 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 		}
 	}
 
-	if usage.CacheReadInputTokens == 0 {
-		if cached := parsed.Get("message.usage.cached_tokens").Int(); cached > 0 {
-			usage.CacheReadInputTokens = int(cached)
-		}
-		if cached := parsed.Get("usage.cached_tokens").Int(); usage.CacheReadInputTokens == 0 && cached > 0 {
-			usage.CacheReadInputTokens = int(cached)
-		}
-	}
 	if usage.CacheCreationInputTokens == 0 {
 		cc5m := parsed.Get("message.usage.cache_creation.ephemeral_5m_input_tokens").Int()
 		cc1h := parsed.Get("message.usage.cache_creation.ephemeral_1h_input_tokens").Int()
@@ -694,6 +697,7 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 			usage.CacheCreationInputTokens = int(total)
 		}
 	}
+	applyClaudeUsageCacheAliases(usageNode, usage)
 }
 
 func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
@@ -706,6 +710,10 @@ func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
 	usageNode := parsed.Get("usage")
 	if !usageNode.Exists() {
 		return usage
+	}
+	usage.CacheUsageSource = CacheUsageSourceUnavailable
+	if claudeUsageNodeHasCacheFields(usageNode) {
+		usage.CacheUsageSource = CacheUsageSourceReported
 	}
 
 	usage.InputTokens = int(usageNode.Get("input_tokens").Int())
@@ -722,12 +730,135 @@ func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
 	if usage.CacheCreationInputTokens == 0 && (cc5m > 0 || cc1h > 0) {
 		usage.CacheCreationInputTokens = int(cc5m + cc1h)
 	}
-	if usage.CacheReadInputTokens == 0 {
-		if cached := usageNode.Get("cached_tokens").Int(); cached > 0 {
-			usage.CacheReadInputTokens = int(cached)
+	applyClaudeUsageCacheAliases(usageNode, usage)
+	return usage
+}
+
+func claudeUsageNodeHasCacheFields(usageNode gjson.Result) bool {
+	if !usageNode.Exists() {
+		return false
+	}
+	for _, path := range []string{
+		"cache_creation_input_tokens",
+		"cache_read_input_tokens",
+		"cached_tokens",
+		"cache_write_input_tokens",
+		"cache_write_tokens",
+		"cache_creation",
+		"input_tokens_details.cached_tokens",
+		"input_tokens_details.cache_creation_tokens",
+		"input_tokens_details.cache_write_tokens",
+		"input_tokens_details.cache_creation_5m_tokens",
+		"input_tokens_details.cache_creation_1h_tokens",
+		"prompt_tokens_details.cached_tokens",
+		"prompt_tokens_details.cache_creation_tokens",
+		"prompt_tokens_details.cache_write_tokens",
+		"prompt_tokens_details.cache_creation_5m_tokens",
+		"prompt_tokens_details.cache_creation_1h_tokens",
+	} {
+		if usageNode.Get(path).Exists() {
+			return true
 		}
 	}
-	return usage
+	return false
+}
+
+// applyClaudeUsageCacheAliases fills zero-valued canonical cache counters from
+// the OpenAI-flavored alias fields that claudeUsageNodeHasCacheFields already
+// treats as "reported". Detection and extraction must agree: an upstream that
+// reports cache usage through an alias must not be recorded as zero.
+// Canonical values always win; aliases never overwrite a non-zero counter.
+func applyClaudeUsageCacheAliases(usageNode gjson.Result, usage *ClaudeUsage) {
+	if usage == nil || !usageNode.Exists() {
+		return
+	}
+	if usage.CacheReadInputTokens == 0 {
+		for _, path := range []string{
+			"cached_tokens",
+			"input_tokens_details.cached_tokens",
+			"prompt_tokens_details.cached_tokens",
+		} {
+			if v := usageNode.Get(path).Int(); v > 0 {
+				usage.CacheReadInputTokens = int(v)
+				break
+			}
+		}
+	}
+	if usage.CacheCreation5mTokens == 0 && usage.CacheCreation1hTokens == 0 {
+		for _, prefix := range []string{"input_tokens_details.", "prompt_tokens_details."} {
+			cc5m := usageNode.Get(prefix + "cache_creation_5m_tokens").Int()
+			cc1h := usageNode.Get(prefix + "cache_creation_1h_tokens").Int()
+			if cc5m > 0 || cc1h > 0 {
+				usage.CacheCreation5mTokens = int(cc5m)
+				usage.CacheCreation1hTokens = int(cc1h)
+				break
+			}
+		}
+	}
+	if usage.CacheCreationInputTokens == 0 {
+		for _, path := range []string{
+			"cache_write_input_tokens",
+			"cache_write_tokens",
+			"input_tokens_details.cache_creation_tokens",
+			"input_tokens_details.cache_write_tokens",
+			"prompt_tokens_details.cache_creation_tokens",
+			"prompt_tokens_details.cache_write_tokens",
+		} {
+			if v := usageNode.Get(path).Int(); v > 0 {
+				usage.CacheCreationInputTokens = int(v)
+				break
+			}
+		}
+	}
+	if usage.CacheCreationInputTokens == 0 && (usage.CacheCreation5mTokens > 0 || usage.CacheCreation1hTokens > 0) {
+		usage.CacheCreationInputTokens = usage.CacheCreation5mTokens + usage.CacheCreation1hTokens
+	}
+}
+
+// claudeUsageNodeFromMap re-parses an already-decoded usage object so the
+// gjson-based alias extraction can be shared with the map-based SSE parser.
+func claudeUsageNodeFromMap(usage map[string]any) gjson.Result {
+	if len(usage) == 0 {
+		return gjson.Result{}
+	}
+	raw, err := json.Marshal(usage)
+	if err != nil {
+		return gjson.Result{}
+	}
+	return gjson.ParseBytes(raw)
+}
+
+func claudeUsageMapHasCacheFields(usage map[string]any) bool {
+	if len(usage) == 0 {
+		return false
+	}
+	for _, key := range []string{
+		"cache_creation_input_tokens",
+		"cache_read_input_tokens",
+		"cached_tokens",
+		"cache_write_input_tokens",
+		"cache_write_tokens",
+		"cache_creation",
+	} {
+		if _, exists := usage[key]; exists {
+			return true
+		}
+	}
+	for _, detailsKey := range []string{"input_tokens_details", "prompt_tokens_details"} {
+		details, _ := usage[detailsKey].(map[string]any)
+		for _, key := range []string{
+			"cached_tokens",
+			"cache_creation_tokens",
+			"cache_write_tokens",
+			"cache_creation_5m_tokens",
+			"cache_creation_1h_tokens",
+		} {
+			if _, exists := details[key]; exists {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *GatewayService) invalidNonStreamingJSONFailoverError(

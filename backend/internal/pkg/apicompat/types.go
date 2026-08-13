@@ -56,7 +56,9 @@ type AnthropicMessage struct {
 type AnthropicContentBlock struct {
 	Type string `json:"type"`
 
-	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	CacheControl          *AnthropicCacheControl `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage        `json:"prompt_cache_breakpoint,omitempty"`
+	Breakpoint            json.RawMessage        `json:"breakpoint,omitempty"`
 
 	// type=text
 	Text string `json:"text,omitempty"`
@@ -112,11 +114,13 @@ type AnthropicImageSource struct {
 
 // AnthropicTool describes a tool available to the model.
 type AnthropicTool struct {
-	Type         string                 `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description,omitempty"`
-	InputSchema  json.RawMessage        `json:"input_schema,omitempty"` // JSON Schema object
-	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	Type                  string                 `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
+	Name                  string                 `json:"name"`
+	Description           string                 `json:"description,omitempty"`
+	InputSchema           json.RawMessage        `json:"input_schema,omitempty"` // JSON Schema object
+	CacheControl          *AnthropicCacheControl `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage        `json:"prompt_cache_breakpoint,omitempty"`
+	Breakpoint            json.RawMessage        `json:"breakpoint,omitempty"`
 }
 
 // AnthropicCacheControl 对应 Anthropic API 的 cache_control 字段。
@@ -162,11 +166,116 @@ type AnthropicUsage struct {
 	CacheCreationInputTokens int                          `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int                          `json:"cache_read_input_tokens"`
 	CacheCreation            *AnthropicCacheCreationUsage `json:"cache_creation,omitempty"`
+
+	cacheCreationInputTokensPresent bool
+	cacheReadInputTokensPresent     bool
 }
 
 type AnthropicCacheCreationUsage struct {
 	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
 	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+
+	ephemeral5mInputTokensPresent bool
+	ephemeral1hInputTokensPresent bool
+}
+
+func (u *AnthropicCacheCreationUsage) UnmarshalJSON(data []byte) error {
+	type cacheCreationAlias AnthropicCacheCreationUsage
+	var decoded cacheCreationAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*u = AnthropicCacheCreationUsage(decoded)
+	_, u.ephemeral5mInputTokensPresent = fields["ephemeral_5m_input_tokens"]
+	_, u.ephemeral1hInputTokensPresent = fields["ephemeral_1h_input_tokens"]
+	return nil
+}
+
+func (u AnthropicCacheCreationUsage) MarshalJSON() ([]byte, error) {
+	type cacheCreationWire struct {
+		Ephemeral5mInputTokens *int `json:"ephemeral_5m_input_tokens,omitempty"`
+		Ephemeral1hInputTokens *int `json:"ephemeral_1h_input_tokens,omitempty"`
+	}
+	wire := cacheCreationWire{}
+	if u.hasEphemeral5mInputTokens() {
+		wire.Ephemeral5mInputTokens = intPointer(u.Ephemeral5mInputTokens)
+	}
+	if u.hasEphemeral1hInputTokens() {
+		wire.Ephemeral1hInputTokens = intPointer(u.Ephemeral1hInputTokens)
+	}
+	return json.Marshal(wire)
+}
+
+func (u AnthropicCacheCreationUsage) hasEphemeral5mInputTokens() bool {
+	return u.ephemeral5mInputTokensPresent || u.Ephemeral5mInputTokens != 0
+}
+
+func (u AnthropicCacheCreationUsage) hasEphemeral1hInputTokens() bool {
+	return u.ephemeral1hInputTokensPresent || u.Ephemeral1hInputTokens != 0
+}
+
+func (u *AnthropicCacheCreationUsage) markFieldsPresent(ephemeral5m, ephemeral1h bool) {
+	if u == nil {
+		return
+	}
+	u.ephemeral5mInputTokensPresent = ephemeral5m
+	u.ephemeral1hInputTokensPresent = ephemeral1h
+}
+
+func (u *AnthropicUsage) UnmarshalJSON(data []byte) error {
+	type anthropicUsageAlias AnthropicUsage
+	var decoded anthropicUsageAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*u = AnthropicUsage(decoded)
+	_, u.cacheCreationInputTokensPresent = fields["cache_creation_input_tokens"]
+	_, u.cacheReadInputTokensPresent = fields["cache_read_input_tokens"]
+	return nil
+}
+
+func (u AnthropicUsage) MarshalJSON() ([]byte, error) {
+	type usageWire struct {
+		InputTokens              int                          `json:"input_tokens"`
+		OutputTokens             int                          `json:"output_tokens"`
+		CacheCreationInputTokens *int                         `json:"cache_creation_input_tokens,omitempty"`
+		CacheReadInputTokens     *int                         `json:"cache_read_input_tokens,omitempty"`
+		CacheCreation            *AnthropicCacheCreationUsage `json:"cache_creation,omitempty"`
+	}
+	wire := usageWire{
+		InputTokens:   u.InputTokens,
+		OutputTokens:  u.OutputTokens,
+		CacheCreation: u.CacheCreation,
+	}
+	if u.hasCacheCreationInputTokens() {
+		wire.CacheCreationInputTokens = intPointer(u.CacheCreationInputTokens)
+	}
+	if u.hasCacheReadInputTokens() {
+		wire.CacheReadInputTokens = intPointer(u.CacheReadInputTokens)
+	}
+	return json.Marshal(wire)
+}
+
+func (u AnthropicUsage) hasCacheCreationInputTokens() bool {
+	return u.cacheCreationInputTokensPresent || u.CacheCreationInputTokens != 0
+}
+
+func (u AnthropicUsage) hasCacheReadInputTokens() bool {
+	return u.cacheReadInputTokensPresent || u.CacheReadInputTokens != 0
+}
+
+func (u AnthropicUsage) HasCacheUsageFields() bool {
+	return u.hasCacheCreationInputTokens() ||
+		u.hasCacheReadInputTokens() ||
+		u.CacheCreation != nil
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +327,7 @@ type AnthropicDelta struct {
 
 // ResponsesRequest is the request body for POST /v1/responses.
 type ResponsesRequest struct {
+	ID                 string              `json:"id,omitempty"`
 	Model              string              `json:"model"`
 	Instructions       string              `json:"instructions,omitempty"`
 	Input              json.RawMessage     `json:"input"` // string or []ResponsesInputItem
@@ -225,6 +335,7 @@ type ResponsesRequest struct {
 	Temperature        *float64            `json:"temperature,omitempty"`
 	TopP               *float64            `json:"top_p,omitempty"`
 	Stream             bool                `json:"stream,omitempty"`
+	StreamOptions      *ChatStreamOptions  `json:"stream_options,omitempty"`
 	Tools              []ResponsesTool     `json:"tools,omitempty"`
 	Include            []string            `json:"include,omitempty"`
 	Store              *bool               `json:"store,omitempty"`
@@ -234,6 +345,7 @@ type ResponsesRequest struct {
 	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
 	ServiceTier        string              `json:"service_tier,omitempty"`
 	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions json.RawMessage     `json:"prompt_cache_options,omitempty"`
 	PreviousResponseID string              `json:"previous_response_id,omitempty"`
 }
 
@@ -301,18 +413,24 @@ func (i *ResponsesInputItem) UnmarshalJSON(data []byte) error {
 
 // ResponsesContentPart is a typed content part in a Responses message.
 type ResponsesContentPart struct {
-	Type     string `json:"type"` // "input_text" | "output_text" | "input_image"
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"` // data URI for input_image
+	Type                  string          `json:"type"` // "input_text" | "output_text" | "input_image"
+	Text                  string          `json:"text,omitempty"`
+	ImageURL              string          `json:"image_url,omitempty"` // data URI for input_image
+	CacheControl          json.RawMessage `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
+	Breakpoint            json.RawMessage `json:"breakpoint,omitempty"`
 }
 
 // ResponsesTool describes a tool in the Responses API.
 type ResponsesTool struct {
-	Type        string          `json:"type"` // "function" | "custom" | "web_search" | "local_shell" etc.
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
-	Strict      *bool           `json:"strict,omitempty"`
+	Type                  string          `json:"type"` // "function" | "custom" | "web_search" | "local_shell" etc.
+	Name                  string          `json:"name,omitempty"`
+	Description           string          `json:"description,omitempty"`
+	Parameters            json.RawMessage `json:"parameters,omitempty"`
+	Strict                *bool           `json:"strict,omitempty"`
+	CacheControl          json.RawMessage `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
+	Breakpoint            json.RawMessage `json:"breakpoint,omitempty"`
 
 	// type=namespace 的子工具列表（tools 与 children 二选一，语义相同）。
 	Tools    []ResponsesTool `json:"tools,omitempty"`
@@ -484,6 +602,8 @@ type ResponsesUsage struct {
 	// Optional detailed breakdown
 	InputTokensDetails  *ResponsesInputTokensDetails  `json:"input_tokens_details,omitempty"`
 	OutputTokensDetails *ResponsesOutputTokensDetails `json:"output_tokens_details,omitempty"`
+
+	cacheCreationInputTokensPresent bool
 }
 
 func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
@@ -512,22 +632,21 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &nestedPresence); err != nil {
 		return err
 	}
+	var topLevelPresence struct {
+		CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+		CacheWriteInputTokens    *int `json:"cache_write_input_tokens"`
+		CacheCreationTokens      *int `json:"cache_creation_tokens"`
+		CacheWriteTokens         *int `json:"cache_write_tokens"`
+	}
+	if err := json.Unmarshal(data, &topLevelPresence); err != nil {
+		return err
+	}
 	*u = ResponsesUsage(aux.responsesUsageAlias)
 	if u.InputTokens == 0 && aux.PromptTokens != 0 {
 		u.InputTokens = aux.PromptTokens
 	}
 	if u.OutputTokens == 0 && aux.CompletionTokens != 0 {
 		u.OutputTokens = aux.CompletionTokens
-	}
-	if u.CacheCreationInputTokens == 0 {
-		switch {
-		case aux.CacheWriteInputTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheWriteInputTokens
-		case aux.CacheCreationTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheCreationTokens
-		case aux.CacheWriteTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheWriteTokens
-		}
 	}
 	if u.InputTokensDetails == nil && aux.PromptTokensDetails != nil {
 		u.InputTokensDetails = aux.PromptTokensDetails
@@ -545,9 +664,18 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheCreationTokens
 	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheCreationTokens != nil:
 		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheCreationTokens
+	case topLevelPresence.CacheCreationInputTokens != nil:
+		canonicalCacheCreationTokens = topLevelPresence.CacheCreationInputTokens
+	case topLevelPresence.CacheWriteInputTokens != nil:
+		canonicalCacheCreationTokens = topLevelPresence.CacheWriteInputTokens
+	case topLevelPresence.CacheCreationTokens != nil:
+		canonicalCacheCreationTokens = topLevelPresence.CacheCreationTokens
+	case topLevelPresence.CacheWriteTokens != nil:
+		canonicalCacheCreationTokens = topLevelPresence.CacheWriteTokens
 	}
 	if canonicalCacheCreationTokens != nil {
 		u.CacheCreationInputTokens = max(*canonicalCacheCreationTokens, 0)
+		u.cacheCreationInputTokensPresent = true
 	}
 	if u.TotalTokens == 0 && (u.InputTokens != 0 || u.OutputTokens != 0) {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
@@ -555,12 +683,125 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (u ResponsesUsage) MarshalJSON() ([]byte, error) {
+	type usageWire struct {
+		InputTokens              int                           `json:"input_tokens"`
+		OutputTokens             int                           `json:"output_tokens"`
+		TotalTokens              int                           `json:"total_tokens"`
+		CacheCreationInputTokens *int                          `json:"cache_creation_input_tokens,omitempty"`
+		InputTokensDetails       *ResponsesInputTokensDetails  `json:"input_tokens_details,omitempty"`
+		OutputTokensDetails      *ResponsesOutputTokensDetails `json:"output_tokens_details,omitempty"`
+	}
+	wire := usageWire{
+		InputTokens:         u.InputTokens,
+		OutputTokens:        u.OutputTokens,
+		TotalTokens:         u.TotalTokens,
+		InputTokensDetails:  u.InputTokensDetails,
+		OutputTokensDetails: u.OutputTokensDetails,
+	}
+	if u.cacheCreationInputTokensPresent || u.CacheCreationInputTokens != 0 {
+		wire.CacheCreationInputTokens = intPointer(u.CacheCreationInputTokens)
+	}
+	return json.Marshal(wire)
+}
+
+func (u ResponsesUsage) hasCacheCreationInputTokens() bool {
+	return u.cacheCreationInputTokensPresent || u.CacheCreationInputTokens != 0
+}
+
 // ResponsesInputTokensDetails breaks down input token usage.
 type ResponsesInputTokensDetails struct {
-	CachedTokens        int `json:"cached_tokens,omitempty"`
-	AudioTokens         int `json:"audio_tokens,omitempty"`
-	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
-	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
+	CachedTokens          int `json:"cached_tokens,omitempty"`
+	AudioTokens           int `json:"audio_tokens,omitempty"`
+	CacheCreationTokens   int `json:"cache_creation_tokens,omitempty"`
+	CacheWriteTokens      int `json:"cache_write_tokens,omitempty"`
+	CacheCreation5mTokens int `json:"cache_creation_5m_tokens,omitempty"`
+	CacheCreation1hTokens int `json:"cache_creation_1h_tokens,omitempty"`
+
+	cacheFieldsPresent cacheTokenFieldsPresence
+}
+
+type cacheTokenFieldsPresence struct {
+	cached     bool
+	creation   bool
+	write      bool
+	creation5m bool
+	creation1h bool
+}
+
+func (d *ResponsesInputTokensDetails) UnmarshalJSON(data []byte) error {
+	type detailsAlias ResponsesInputTokensDetails
+	var decoded detailsAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*d = ResponsesInputTokensDetails(decoded)
+	_, d.cacheFieldsPresent.cached = fields["cached_tokens"]
+	_, d.cacheFieldsPresent.creation = fields["cache_creation_tokens"]
+	_, d.cacheFieldsPresent.write = fields["cache_write_tokens"]
+	_, d.cacheFieldsPresent.creation5m = fields["cache_creation_5m_tokens"]
+	_, d.cacheFieldsPresent.creation1h = fields["cache_creation_1h_tokens"]
+	return nil
+}
+
+func (d ResponsesInputTokensDetails) MarshalJSON() ([]byte, error) {
+	type detailsWire struct {
+		CachedTokens          *int `json:"cached_tokens,omitempty"`
+		AudioTokens           int  `json:"audio_tokens,omitempty"`
+		CacheCreationTokens   *int `json:"cache_creation_tokens,omitempty"`
+		CacheWriteTokens      *int `json:"cache_write_tokens,omitempty"`
+		CacheCreation5mTokens *int `json:"cache_creation_5m_tokens,omitempty"`
+		CacheCreation1hTokens *int `json:"cache_creation_1h_tokens,omitempty"`
+	}
+	wire := detailsWire{AudioTokens: d.AudioTokens}
+	if d.cacheFieldsPresent.cached || d.CachedTokens != 0 {
+		wire.CachedTokens = intPointer(d.CachedTokens)
+	}
+	if d.cacheFieldsPresent.creation || d.CacheCreationTokens != 0 {
+		wire.CacheCreationTokens = intPointer(d.CacheCreationTokens)
+	}
+	if d.cacheFieldsPresent.write || d.CacheWriteTokens != 0 {
+		wire.CacheWriteTokens = intPointer(d.CacheWriteTokens)
+	}
+	if d.cacheFieldsPresent.creation5m || d.CacheCreation5mTokens != 0 {
+		wire.CacheCreation5mTokens = intPointer(d.CacheCreation5mTokens)
+	}
+	if d.cacheFieldsPresent.creation1h || d.CacheCreation1hTokens != 0 {
+		wire.CacheCreation1hTokens = intPointer(d.CacheCreation1hTokens)
+	}
+	return json.Marshal(wire)
+}
+
+func (d *ResponsesInputTokensDetails) hasCacheFields() bool {
+	return d != nil && (d.cacheFieldsPresent.cached ||
+		d.cacheFieldsPresent.creation ||
+		d.cacheFieldsPresent.write ||
+		d.cacheFieldsPresent.creation5m ||
+		d.cacheFieldsPresent.creation1h ||
+		d.CachedTokens != 0 ||
+		d.CacheCreationTokens != 0 ||
+		d.CacheWriteTokens != 0 ||
+		d.CacheCreation5mTokens != 0 ||
+		d.CacheCreation1hTokens != 0)
+}
+
+func (d *ResponsesInputTokensDetails) markCacheFieldsPresent(cached, creation, write, creation5m, creation1h bool) {
+	if d == nil {
+		return
+	}
+	d.cacheFieldsPresent.cached = cached
+	d.cacheFieldsPresent.creation = creation
+	d.cacheFieldsPresent.write = write
+	d.cacheFieldsPresent.creation5m = creation5m
+	d.cacheFieldsPresent.creation1h = creation1h
+}
+
+func intPointer(value int) *int {
+	return &value
 }
 
 // ResponsesOutputTokensDetails breaks down output token usage.
@@ -639,6 +880,8 @@ type ChatCompletionsRequest struct {
 	ToolChoice          json.RawMessage    `json:"tool_choice,omitempty"`
 	ReasoningEffort     string             `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
 	ServiceTier         string             `json:"service_tier,omitempty"`
+	PromptCacheKey      string             `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions  json.RawMessage    `json:"prompt_cache_options,omitempty"`
 	Stop                json.RawMessage    `json:"stop,omitempty"` // string or []string
 	ResponseFormat      json.RawMessage    `json:"response_format,omitempty"`
 
@@ -654,12 +897,15 @@ type ChatStreamOptions struct {
 
 // ChatMessage is a single message in the Chat Completions conversation.
 type ChatMessage struct {
-	Role             string          `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
-	Content          json.RawMessage `json:"content,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	ToolCalls        []ChatToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID       string          `json:"tool_call_id,omitempty"`
+	Role                  string          `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
+	Content               json.RawMessage `json:"content,omitempty"`
+	ReasoningContent      string          `json:"reasoning_content,omitempty"`
+	Name                  string          `json:"name,omitempty"`
+	ToolCalls             []ChatToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID            string          `json:"tool_call_id,omitempty"`
+	CacheControl          json.RawMessage `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
+	Breakpoint            json.RawMessage `json:"breakpoint,omitempty"`
 
 	// Legacy function calling
 	FunctionCall *ChatFunctionCall `json:"function_call,omitempty"`
@@ -667,9 +913,12 @@ type ChatMessage struct {
 
 // ChatContentPart is a typed content part in a multi-modal message.
 type ChatContentPart struct {
-	Type     string        `json:"type"` // "text" | "image_url"
-	Text     string        `json:"text,omitempty"`
-	ImageURL *ChatImageURL `json:"image_url,omitempty"`
+	Type                  string          `json:"type"` // "text" | "image_url"
+	Text                  string          `json:"text,omitempty"`
+	ImageURL              *ChatImageURL   `json:"image_url,omitempty"`
+	CacheControl          json.RawMessage `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
+	Breakpoint            json.RawMessage `json:"breakpoint,omitempty"`
 }
 
 // ChatImageURL contains the URL for an image content part.
@@ -680,8 +929,11 @@ type ChatImageURL struct {
 
 // ChatTool describes a tool available to the model.
 type ChatTool struct {
-	Type     string        `json:"type"` // "function"
-	Function *ChatFunction `json:"function,omitempty"`
+	Type                  string          `json:"type"` // "function"
+	Function              *ChatFunction   `json:"function,omitempty"`
+	CacheControl          json.RawMessage `json:"cache_control,omitempty"`
+	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
+	Breakpoint            json.RawMessage `json:"breakpoint,omitempty"`
 }
 
 // ChatFunction describes a function tool definition.
@@ -754,6 +1006,87 @@ type ChatTokenDetails struct {
 	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
 	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
 	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
+
+	cacheFieldsPresent cacheTokenFieldsPresence
+}
+
+func (d *ChatTokenDetails) UnmarshalJSON(data []byte) error {
+	type detailsAlias ChatTokenDetails
+	var decoded detailsAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*d = ChatTokenDetails(decoded)
+	_, d.cacheFieldsPresent.cached = fields["cached_tokens"]
+	_, d.cacheFieldsPresent.creation = fields["cache_creation_tokens"]
+	_, d.cacheFieldsPresent.write = fields["cache_write_tokens"]
+	_, d.cacheFieldsPresent.creation5m = fields["cache_creation_5m_tokens"]
+	_, d.cacheFieldsPresent.creation1h = fields["cache_creation_1h_tokens"]
+	return nil
+}
+
+func (d ChatTokenDetails) MarshalJSON() ([]byte, error) {
+	type detailsWire struct {
+		CachedTokens             *int `json:"cached_tokens,omitempty"`
+		AudioTokens              int  `json:"audio_tokens,omitempty"`
+		CacheCreationTokens      *int `json:"cache_creation_tokens,omitempty"`
+		CacheWriteTokens         *int `json:"cache_write_tokens,omitempty"`
+		CacheCreation5mTokens    *int `json:"cache_creation_5m_tokens,omitempty"`
+		CacheCreation1hTokens    *int `json:"cache_creation_1h_tokens,omitempty"`
+		ReasoningTokens          int  `json:"reasoning_tokens,omitempty"`
+		AcceptedPredictionTokens int  `json:"accepted_prediction_tokens,omitempty"`
+		RejectedPredictionTokens int  `json:"rejected_prediction_tokens,omitempty"`
+	}
+	wire := detailsWire{
+		AudioTokens:              d.AudioTokens,
+		ReasoningTokens:          d.ReasoningTokens,
+		AcceptedPredictionTokens: d.AcceptedPredictionTokens,
+		RejectedPredictionTokens: d.RejectedPredictionTokens,
+	}
+	if d.cacheFieldsPresent.cached || d.CachedTokens != 0 {
+		wire.CachedTokens = intPointer(d.CachedTokens)
+	}
+	if d.cacheFieldsPresent.creation || d.CacheCreationTokens != 0 {
+		wire.CacheCreationTokens = intPointer(d.CacheCreationTokens)
+	}
+	if d.cacheFieldsPresent.write || d.CacheWriteTokens != 0 {
+		wire.CacheWriteTokens = intPointer(d.CacheWriteTokens)
+	}
+	if d.cacheFieldsPresent.creation5m || d.CacheCreation5mTokens != 0 {
+		wire.CacheCreation5mTokens = intPointer(d.CacheCreation5mTokens)
+	}
+	if d.cacheFieldsPresent.creation1h || d.CacheCreation1hTokens != 0 {
+		wire.CacheCreation1hTokens = intPointer(d.CacheCreation1hTokens)
+	}
+	return json.Marshal(wire)
+}
+
+func (d *ChatTokenDetails) hasCacheFields() bool {
+	return d != nil && (d.cacheFieldsPresent.cached ||
+		d.cacheFieldsPresent.creation ||
+		d.cacheFieldsPresent.write ||
+		d.cacheFieldsPresent.creation5m ||
+		d.cacheFieldsPresent.creation1h ||
+		d.CachedTokens != 0 ||
+		d.CacheCreationTokens != 0 ||
+		d.CacheWriteTokens != 0 ||
+		d.CacheCreation5mTokens != 0 ||
+		d.CacheCreation1hTokens != 0)
+}
+
+func (d *ChatTokenDetails) markCacheFieldsPresent(cached, creation, write, creation5m, creation1h bool) {
+	if d == nil {
+		return
+	}
+	d.cacheFieldsPresent.cached = cached
+	d.cacheFieldsPresent.creation = creation
+	d.cacheFieldsPresent.write = write
+	d.cacheFieldsPresent.creation5m = creation5m
+	d.cacheFieldsPresent.creation1h = creation1h
 }
 
 // ChatCompletionsChunk is a single streaming chunk from POST /v1/chat/completions.

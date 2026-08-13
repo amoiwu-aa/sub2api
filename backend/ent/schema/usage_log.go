@@ -84,6 +84,18 @@ func (UsageLog) Fields() []ent.Field {
 			Default(0),
 		field.Int("cache_read_tokens").
 			Default(0),
+		// NULL source is reserved for legacy rows. A reported observation may
+		// legitimately contain zero cache-read tokens.
+		field.String("cache_usage_source").
+			MaxLen(16).
+			Optional().
+			Nillable(),
+		// Nullable in storage so pre-migration rows remain distinguishable;
+		// current writers persist zero when no billing adjustment was applied.
+		field.Int("forced_cache_read_tokens").
+			Optional().
+			Nillable().
+			NonNegative(),
 		field.Int("cache_creation_5m_tokens").
 			Default(0),
 		field.Int("cache_creation_1h_tokens").
@@ -149,6 +161,11 @@ func (UsageLog) Fields() []ent.Field {
 			MaxLen(45). // 支持 IPv6
 			Optional().
 			Nillable(),
+		field.String("session_id").
+			MaxLen(255).
+			Optional().
+			Nillable().
+			Comment("Explicit client-provided session identifier for scoped usage queries"),
 
 		// 图片生成字段（仅 gemini-3-pro-image 等图片模型使用）
 		field.Int("image_count").
@@ -242,6 +259,9 @@ func (UsageLog) Indexes() []ent.Index {
 		// 复合索引用于时间范围查询
 		index.Fields("user_id", "created_at"),
 		index.Fields("api_key_id", "created_at"),
+		index.Fields("user_id", "api_key_id", "session_id", "created_at").
+			StorageKey("idx_usage_logs_session_usage_v2").
+			Annotations(entsql.IndexWhere("session_id IS NOT NULL")),
 		// 分组维度时间范围查询（线上由 SQL 迁移创建 group_id IS NOT NULL 的部分索引）
 		index.Fields("group_id", "created_at"),
 	}

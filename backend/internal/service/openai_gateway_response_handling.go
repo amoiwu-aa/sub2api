@@ -1080,6 +1080,10 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 	}
 	cacheReadTokens := openAICacheReadTokensFromUsage(value)
 	cacheCreationTokens := openAICacheCreationTokensFromUsage(value)
+	cacheUsageSource := CacheUsageSourceUnavailable
+	if openAIUsageHasCacheFields(value) {
+		cacheUsageSource = CacheUsageSourceReported
+	}
 	imageOutputTokens := value.Get("output_tokens_details.image_tokens").Int()
 	if imageOutputTokens == 0 {
 		imageOutputTokens = value.Get("completion_tokens_details.image_tokens").Int()
@@ -1097,8 +1101,33 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		OutputTokens:             int(outputTokens),
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,
+		CacheUsageSource:         cacheUsageSource,
 		ImageOutputTokens:        int(imageOutputTokens),
 	}, true
+}
+
+func openAIUsageHasCacheFields(value gjson.Result) bool {
+	for _, path := range []string{
+		"input_tokens_details.cached_tokens",
+		"prompt_tokens_details.cached_tokens",
+		"prompt_cache_hit_tokens",
+		"cache_read_input_tokens",
+		"cache_read_tokens",
+		"cached_tokens",
+		"input_tokens_details.cache_write_tokens",
+		"prompt_tokens_details.cache_write_tokens",
+		"input_tokens_details.cache_creation_tokens",
+		"prompt_tokens_details.cache_creation_tokens",
+		"cache_write_tokens",
+		"cache_creation_input_tokens",
+		"cache_write_input_tokens",
+		"cache_creation_tokens",
+	} {
+		if value.Get(path).Exists() {
+			return true
+		}
+	}
+	return false
 }
 
 func openAICacheReadTokensFromUsage(value gjson.Result) int {

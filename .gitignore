@@ -139,6 +139,7 @@ docs/*
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/ASYNC_IMAGE_TASKS.md
 !docs/CURSOR_TOOL_CALLING.md
+!docs/PROMPT_CACHE_BRIDGE_AND_DASHBOARD_CN.md
 !docs/legal/
 !docs/legal/*.md
 .serena/

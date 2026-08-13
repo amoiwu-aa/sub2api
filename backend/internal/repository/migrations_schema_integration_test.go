@@ -78,7 +78,11 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_logs", "video_duration_seconds", "integer", 0, true)
 	requireColumn(t, tx, "usage_logs", "upstream_response_model", "character varying", 200, true)
 	requireColumn(t, tx, "usage_logs", "upstream_model_mismatch", "boolean", 0, true)
+	requireColumn(t, tx, "usage_logs", "cache_usage_source", "character varying", 16, true)
+	requireColumn(t, tx, "usage_logs", "forced_cache_read_tokens", "integer", 0, true)
+	requireColumn(t, tx, "usage_logs", "session_id", "character varying", 255, true)
 	requireIndex(t, tx, "usage_logs", usageLogsUpstreamModelMismatchIndex)
+	requireIndex(t, tx, "usage_logs", "idx_usage_logs_session_usage_v2")
 
 	var mismatchIndexDef string
 	require.NoError(t, tx.QueryRowContext(context.Background(), `
@@ -94,6 +98,20 @@ WHERE ns.nspname = 'public'
 	require.Contains(t, mismatchIndexDef, "created_at DESC")
 	require.Contains(t, mismatchIndexDef, "id DESC")
 	require.Contains(t, mismatchIndexDef, "WHERE (upstream_model_mismatch IS TRUE)")
+
+	var sessionUsageIndexDef string
+	require.NoError(t, tx.QueryRowContext(context.Background(), `
+SELECT pg_get_indexdef(i.indexrelid)
+FROM pg_class idx
+JOIN pg_index i ON i.indexrelid = idx.oid
+JOIN pg_class tbl ON tbl.oid = i.indrelid
+JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+WHERE ns.nspname = 'public'
+  AND tbl.relname = 'usage_logs'
+  AND idx.relname = 'idx_usage_logs_session_usage_v2'
+`).Scan(&sessionUsageIndexDef))
+	require.Contains(t, sessionUsageIndexDef, "(user_id, api_key_id, session_id, created_at)")
+	require.Contains(t, sessionUsageIndexDef, "WHERE (session_id IS NOT NULL)")
 	requireConstraintDefinitionContains(
 		t,
 		tx,

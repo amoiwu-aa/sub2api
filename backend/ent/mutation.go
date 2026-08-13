@@ -44274,6 +44274,9 @@ type UsageLogMutation struct {
 	addcache_creation_tokens     *int
 	cache_read_tokens            *int
 	addcache_read_tokens         *int
+	cache_usage_source           *string
+	forced_cache_read_tokens     *int
+	addforced_cache_read_tokens  *int
 	cache_creation_5m_tokens     *int
 	addcache_creation_5m_tokens  *int
 	cache_creation_1h_tokens     *int
@@ -44306,6 +44309,7 @@ type UsageLogMutation struct {
 	addfirst_token_ms            *int
 	user_agent                   *string
 	ip_address                   *string
+	session_id                   *string
 	image_count                  *int
 	addimage_count               *int
 	image_size                   *string
@@ -45349,6 +45353,125 @@ func (m *UsageLogMutation) ResetCacheReadTokens() {
 	m.addcache_read_tokens = nil
 }
 
+// SetCacheUsageSource sets the "cache_usage_source" field.
+func (m *UsageLogMutation) SetCacheUsageSource(s string) {
+	m.cache_usage_source = &s
+}
+
+// CacheUsageSource returns the value of the "cache_usage_source" field in the mutation.
+func (m *UsageLogMutation) CacheUsageSource() (r string, exists bool) {
+	v := m.cache_usage_source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCacheUsageSource returns the old "cache_usage_source" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldCacheUsageSource(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCacheUsageSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCacheUsageSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCacheUsageSource: %w", err)
+	}
+	return oldValue.CacheUsageSource, nil
+}
+
+// ClearCacheUsageSource clears the value of the "cache_usage_source" field.
+func (m *UsageLogMutation) ClearCacheUsageSource() {
+	m.cache_usage_source = nil
+	m.clearedFields[usagelog.FieldCacheUsageSource] = struct{}{}
+}
+
+// CacheUsageSourceCleared returns if the "cache_usage_source" field was cleared in this mutation.
+func (m *UsageLogMutation) CacheUsageSourceCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldCacheUsageSource]
+	return ok
+}
+
+// ResetCacheUsageSource resets all changes to the "cache_usage_source" field.
+func (m *UsageLogMutation) ResetCacheUsageSource() {
+	m.cache_usage_source = nil
+	delete(m.clearedFields, usagelog.FieldCacheUsageSource)
+}
+
+// SetForcedCacheReadTokens sets the "forced_cache_read_tokens" field.
+func (m *UsageLogMutation) SetForcedCacheReadTokens(i int) {
+	m.forced_cache_read_tokens = &i
+	m.addforced_cache_read_tokens = nil
+}
+
+// ForcedCacheReadTokens returns the value of the "forced_cache_read_tokens" field in the mutation.
+func (m *UsageLogMutation) ForcedCacheReadTokens() (r int, exists bool) {
+	v := m.forced_cache_read_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldForcedCacheReadTokens returns the old "forced_cache_read_tokens" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldForcedCacheReadTokens(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldForcedCacheReadTokens is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldForcedCacheReadTokens requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldForcedCacheReadTokens: %w", err)
+	}
+	return oldValue.ForcedCacheReadTokens, nil
+}
+
+// AddForcedCacheReadTokens adds i to the "forced_cache_read_tokens" field.
+func (m *UsageLogMutation) AddForcedCacheReadTokens(i int) {
+	if m.addforced_cache_read_tokens != nil {
+		*m.addforced_cache_read_tokens += i
+	} else {
+		m.addforced_cache_read_tokens = &i
+	}
+}
+
+// AddedForcedCacheReadTokens returns the value that was added to the "forced_cache_read_tokens" field in this mutation.
+func (m *UsageLogMutation) AddedForcedCacheReadTokens() (r int, exists bool) {
+	v := m.addforced_cache_read_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearForcedCacheReadTokens clears the value of the "forced_cache_read_tokens" field.
+func (m *UsageLogMutation) ClearForcedCacheReadTokens() {
+	m.forced_cache_read_tokens = nil
+	m.addforced_cache_read_tokens = nil
+	m.clearedFields[usagelog.FieldForcedCacheReadTokens] = struct{}{}
+}
+
+// ForcedCacheReadTokensCleared returns if the "forced_cache_read_tokens" field was cleared in this mutation.
+func (m *UsageLogMutation) ForcedCacheReadTokensCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldForcedCacheReadTokens]
+	return ok
+}
+
+// ResetForcedCacheReadTokens resets all changes to the "forced_cache_read_tokens" field.
+func (m *UsageLogMutation) ResetForcedCacheReadTokens() {
+	m.forced_cache_read_tokens = nil
+	m.addforced_cache_read_tokens = nil
+	delete(m.clearedFields, usagelog.FieldForcedCacheReadTokens)
+}
+
 // SetCacheCreation5mTokens sets the "cache_creation_5m_tokens" field.
 func (m *UsageLogMutation) SetCacheCreation5mTokens(i int) {
 	m.cache_creation_5m_tokens = &i
@@ -46345,6 +46468,55 @@ func (m *UsageLogMutation) ResetIPAddress() {
 	delete(m.clearedFields, usagelog.FieldIPAddress)
 }
 
+// SetSessionID sets the "session_id" field.
+func (m *UsageLogMutation) SetSessionID(s string) {
+	m.session_id = &s
+}
+
+// SessionID returns the value of the "session_id" field in the mutation.
+func (m *UsageLogMutation) SessionID() (r string, exists bool) {
+	v := m.session_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSessionID returns the old "session_id" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldSessionID(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSessionID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSessionID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSessionID: %w", err)
+	}
+	return oldValue.SessionID, nil
+}
+
+// ClearSessionID clears the value of the "session_id" field.
+func (m *UsageLogMutation) ClearSessionID() {
+	m.session_id = nil
+	m.clearedFields[usagelog.FieldSessionID] = struct{}{}
+}
+
+// SessionIDCleared returns if the "session_id" field was cleared in this mutation.
+func (m *UsageLogMutation) SessionIDCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldSessionID]
+	return ok
+}
+
+// ResetSessionID resets all changes to the "session_id" field.
+func (m *UsageLogMutation) ResetSessionID() {
+	m.session_id = nil
+	delete(m.clearedFields, usagelog.FieldSessionID)
+}
+
 // SetImageCount sets the "image_count" field.
 func (m *UsageLogMutation) SetImageCount(i int) {
 	m.image_count = &i
@@ -47062,7 +47234,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 48)
+	fields := make([]string, 0, 51)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -47120,6 +47292,12 @@ func (m *UsageLogMutation) Fields() []string {
 	if m.cache_read_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheReadTokens)
 	}
+	if m.cache_usage_source != nil {
+		fields = append(fields, usagelog.FieldCacheUsageSource)
+	}
+	if m.forced_cache_read_tokens != nil {
+		fields = append(fields, usagelog.FieldForcedCacheReadTokens)
+	}
 	if m.cache_creation_5m_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheCreation5mTokens)
 	}
@@ -47173,6 +47351,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.ip_address != nil {
 		fields = append(fields, usagelog.FieldIPAddress)
+	}
+	if m.session_id != nil {
+		fields = append(fields, usagelog.FieldSessionID)
 	}
 	if m.image_count != nil {
 		fields = append(fields, usagelog.FieldImageCount)
@@ -47253,6 +47434,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheCreationTokens()
 	case usagelog.FieldCacheReadTokens:
 		return m.CacheReadTokens()
+	case usagelog.FieldCacheUsageSource:
+		return m.CacheUsageSource()
+	case usagelog.FieldForcedCacheReadTokens:
+		return m.ForcedCacheReadTokens()
 	case usagelog.FieldCacheCreation5mTokens:
 		return m.CacheCreation5mTokens()
 	case usagelog.FieldCacheCreation1hTokens:
@@ -47289,6 +47474,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.UserAgent()
 	case usagelog.FieldIPAddress:
 		return m.IPAddress()
+	case usagelog.FieldSessionID:
+		return m.SessionID()
 	case usagelog.FieldImageCount:
 		return m.ImageCount()
 	case usagelog.FieldImageSize:
@@ -47358,6 +47545,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldCacheCreationTokens(ctx)
 	case usagelog.FieldCacheReadTokens:
 		return m.OldCacheReadTokens(ctx)
+	case usagelog.FieldCacheUsageSource:
+		return m.OldCacheUsageSource(ctx)
+	case usagelog.FieldForcedCacheReadTokens:
+		return m.OldForcedCacheReadTokens(ctx)
 	case usagelog.FieldCacheCreation5mTokens:
 		return m.OldCacheCreation5mTokens(ctx)
 	case usagelog.FieldCacheCreation1hTokens:
@@ -47394,6 +47585,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldUserAgent(ctx)
 	case usagelog.FieldIPAddress:
 		return m.OldIPAddress(ctx)
+	case usagelog.FieldSessionID:
+		return m.OldSessionID(ctx)
 	case usagelog.FieldImageCount:
 		return m.OldImageCount(ctx)
 	case usagelog.FieldImageSize:
@@ -47558,6 +47751,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetCacheReadTokens(v)
 		return nil
+	case usagelog.FieldCacheUsageSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCacheUsageSource(v)
+		return nil
+	case usagelog.FieldForcedCacheReadTokens:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetForcedCacheReadTokens(v)
+		return nil
 	case usagelog.FieldCacheCreation5mTokens:
 		v, ok := value.(int)
 		if !ok {
@@ -47684,6 +47891,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetIPAddress(v)
 		return nil
+	case usagelog.FieldSessionID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSessionID(v)
+		return nil
 	case usagelog.FieldImageCount:
 		v, ok := value.(int)
 		if !ok {
@@ -47784,6 +47998,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addcache_read_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheReadTokens)
 	}
+	if m.addforced_cache_read_tokens != nil {
+		fields = append(fields, usagelog.FieldForcedCacheReadTokens)
+	}
 	if m.addcache_creation_5m_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheCreation5mTokens)
 	}
@@ -47853,6 +48070,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedCacheCreationTokens()
 	case usagelog.FieldCacheReadTokens:
 		return m.AddedCacheReadTokens()
+	case usagelog.FieldForcedCacheReadTokens:
+		return m.AddedForcedCacheReadTokens()
 	case usagelog.FieldCacheCreation5mTokens:
 		return m.AddedCacheCreation5mTokens()
 	case usagelog.FieldCacheCreation1hTokens:
@@ -47930,6 +48149,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddCacheReadTokens(v)
+		return nil
+	case usagelog.FieldForcedCacheReadTokens:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddForcedCacheReadTokens(v)
 		return nil
 	case usagelog.FieldCacheCreation5mTokens:
 		v, ok := value.(int)
@@ -48088,6 +48314,12 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldSubscriptionID) {
 		fields = append(fields, usagelog.FieldSubscriptionID)
 	}
+	if m.FieldCleared(usagelog.FieldCacheUsageSource) {
+		fields = append(fields, usagelog.FieldCacheUsageSource)
+	}
+	if m.FieldCleared(usagelog.FieldForcedCacheReadTokens) {
+		fields = append(fields, usagelog.FieldForcedCacheReadTokens)
+	}
 	if m.FieldCleared(usagelog.FieldAccountRateMultiplier) {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -48102,6 +48334,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(usagelog.FieldIPAddress) {
 		fields = append(fields, usagelog.FieldIPAddress)
+	}
+	if m.FieldCleared(usagelog.FieldSessionID) {
+		fields = append(fields, usagelog.FieldSessionID)
 	}
 	if m.FieldCleared(usagelog.FieldImageSize) {
 		fields = append(fields, usagelog.FieldImageSize)
@@ -48168,6 +48403,12 @@ func (m *UsageLogMutation) ClearField(name string) error {
 	case usagelog.FieldSubscriptionID:
 		m.ClearSubscriptionID()
 		return nil
+	case usagelog.FieldCacheUsageSource:
+		m.ClearCacheUsageSource()
+		return nil
+	case usagelog.FieldForcedCacheReadTokens:
+		m.ClearForcedCacheReadTokens()
+		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ClearAccountRateMultiplier()
 		return nil
@@ -48182,6 +48423,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldIPAddress:
 		m.ClearIPAddress()
+		return nil
+	case usagelog.FieldSessionID:
+		m.ClearSessionID()
 		return nil
 	case usagelog.FieldImageSize:
 		m.ClearImageSize()
@@ -48269,6 +48513,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 	case usagelog.FieldCacheReadTokens:
 		m.ResetCacheReadTokens()
 		return nil
+	case usagelog.FieldCacheUsageSource:
+		m.ResetCacheUsageSource()
+		return nil
+	case usagelog.FieldForcedCacheReadTokens:
+		m.ResetForcedCacheReadTokens()
+		return nil
 	case usagelog.FieldCacheCreation5mTokens:
 		m.ResetCacheCreation5mTokens()
 		return nil
@@ -48322,6 +48572,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldIPAddress:
 		m.ResetIPAddress()
+		return nil
+	case usagelog.FieldSessionID:
+		m.ResetSessionID()
 		return nil
 	case usagelog.FieldImageCount:
 		m.ResetImageCount()

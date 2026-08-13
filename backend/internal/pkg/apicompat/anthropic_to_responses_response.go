@@ -106,12 +106,10 @@ func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {
 		OutputTokens:             resp.Usage.OutputTokens,
 		TotalTokens:              totalInputTokens + resp.Usage.OutputTokens,
 		CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
+
+		cacheCreationInputTokensPresent: resp.Usage.hasCacheCreationInputTokens(),
 	}
-	if resp.Usage.CacheReadInputTokens > 0 {
-		out.Usage.InputTokensDetails = &ResponsesInputTokensDetails{
-			CachedTokens: resp.Usage.CacheReadInputTokens,
-		}
-	}
+	out.Usage.InputTokensDetails = responsesInputDetailsFromAnthropicUsage(resp.Usage)
 
 	return out
 }
@@ -178,6 +176,13 @@ type AnthropicEventToResponsesState struct {
 	OutputTokens             int
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
+	CacheCreation5mTokens    int
+	CacheCreation1hTokens    int
+
+	CacheReadInputTokensPresent     bool
+	CacheCreationInputTokensPresent bool
+	CacheCreation5mTokensPresent    bool
+	CacheCreation1hTokensPresent    bool
 
 	StopReason string
 }
@@ -251,12 +256,7 @@ func anthToResHandleMessageStart(evt *AnthropicStreamEvent, state *AnthropicEven
 		if evt.Message.Usage.InputTokens > 0 {
 			state.InputTokens = evt.Message.Usage.InputTokens
 		}
-		if evt.Message.Usage.CacheReadInputTokens > 0 {
-			state.CacheReadInputTokens = evt.Message.Usage.CacheReadInputTokens
-		}
-		if evt.Message.Usage.CacheCreationInputTokens > 0 {
-			state.CacheCreationInputTokens = evt.Message.Usage.CacheCreationInputTokens
-		}
+		updateAnthropicUsageState(state, evt.Message.Usage)
 	}
 
 	if state.CreatedSent {
@@ -457,12 +457,7 @@ func anthToResHandleMessageDelta(evt *AnthropicStreamEvent, state *AnthropicEven
 		if evt.Usage.InputTokens > 0 {
 			state.InputTokens = evt.Usage.InputTokens
 		}
-		if evt.Usage.CacheReadInputTokens > 0 {
-			state.CacheReadInputTokens = evt.Usage.CacheReadInputTokens
-		}
-		if evt.Usage.CacheCreationInputTokens > 0 {
-			state.CacheCreationInputTokens = evt.Usage.CacheCreationInputTokens
-		}
+		updateAnthropicUsageState(state, *evt.Usage)
 	}
 	if evt.Delta != nil && evt.Delta.StopReason != "" {
 		state.StopReason = evt.Delta.StopReason
@@ -576,11 +571,30 @@ func makeResponsesCompletedEvent(
 		OutputTokens:             state.OutputTokens,
 		TotalTokens:              totalInputTokens + state.OutputTokens,
 		CacheCreationInputTokens: state.CacheCreationInputTokens,
+
+		cacheCreationInputTokensPresent: state.CacheCreationInputTokensPresent,
 	}
-	if state.CacheReadInputTokens > 0 {
+	if state.CacheReadInputTokensPresent ||
+		state.CacheCreationInputTokensPresent ||
+		state.CacheCreation5mTokensPresent ||
+		state.CacheCreation1hTokensPresent ||
+		state.CacheReadInputTokens != 0 ||
+		state.CacheCreationInputTokens != 0 ||
+		state.CacheCreation5mTokens != 0 ||
+		state.CacheCreation1hTokens != 0 {
 		usage.InputTokensDetails = &ResponsesInputTokensDetails{
-			CachedTokens: state.CacheReadInputTokens,
+			CachedTokens:          state.CacheReadInputTokens,
+			CacheWriteTokens:      state.CacheCreationInputTokens,
+			CacheCreation5mTokens: state.CacheCreation5mTokens,
+			CacheCreation1hTokens: state.CacheCreation1hTokens,
 		}
+		usage.InputTokensDetails.markCacheFieldsPresent(
+			state.CacheReadInputTokensPresent,
+			false,
+			state.CacheCreationInputTokensPresent,
+			state.CacheCreation5mTokensPresent,
+			state.CacheCreation1hTokensPresent,
+		)
 	}
 
 	eventType := "response.completed"
@@ -619,6 +633,54 @@ func makeResponsesEvent(state *AnthropicEventToResponsesState, eventType string,
 	evt.Type = eventType
 	evt.SequenceNumber = seq
 	return evt
+}
+
+func responsesInputDetailsFromAnthropicUsage(usage AnthropicUsage) *ResponsesInputTokensDetails {
+	cacheReadPresent := usage.hasCacheReadInputTokens()
+	cacheCreationPresent := usage.hasCacheCreationInputTokens()
+	cacheCreation5mPresent := usage.CacheCreation != nil && usage.CacheCreation.hasEphemeral5mInputTokens()
+	cacheCreation1hPresent := usage.CacheCreation != nil && usage.CacheCreation.hasEphemeral1hInputTokens()
+	if !cacheReadPresent && !cacheCreationPresent && !cacheCreation5mPresent && !cacheCreation1hPresent {
+		return nil
+	}
+
+	details := &ResponsesInputTokensDetails{
+		CachedTokens:     usage.CacheReadInputTokens,
+		CacheWriteTokens: usage.CacheCreationInputTokens,
+	}
+	if usage.CacheCreation != nil {
+		details.CacheCreation5mTokens = usage.CacheCreation.Ephemeral5mInputTokens
+		details.CacheCreation1hTokens = usage.CacheCreation.Ephemeral1hInputTokens
+	}
+	details.markCacheFieldsPresent(
+		cacheReadPresent,
+		false,
+		cacheCreationPresent,
+		cacheCreation5mPresent,
+		cacheCreation1hPresent,
+	)
+	return details
+}
+
+func updateAnthropicUsageState(state *AnthropicEventToResponsesState, usage AnthropicUsage) {
+	if usage.hasCacheReadInputTokens() {
+		state.CacheReadInputTokens = usage.CacheReadInputTokens
+		state.CacheReadInputTokensPresent = true
+	}
+	if usage.hasCacheCreationInputTokens() {
+		state.CacheCreationInputTokens = usage.CacheCreationInputTokens
+		state.CacheCreationInputTokensPresent = true
+	}
+	if usage.CacheCreation != nil {
+		if usage.CacheCreation.hasEphemeral5mInputTokens() {
+			state.CacheCreation5mTokens = usage.CacheCreation.Ephemeral5mInputTokens
+			state.CacheCreation5mTokensPresent = true
+		}
+		if usage.CacheCreation.hasEphemeral1hInputTokens() {
+			state.CacheCreation1hTokens = usage.CacheCreation.Ephemeral1hInputTokens
+			state.CacheCreation1hTokensPresent = true
+		}
+	}
 }
 
 func generateResponsesID() string {

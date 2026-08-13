@@ -38,7 +38,12 @@ func ResponsesToChatCompletionsRequest(req *ResponsesRequest) (*ChatCompletionsR
 		TopP:                req.TopP,
 		Stream:              req.Stream,
 		ServiceTier:         req.ServiceTier,
+		PromptCacheKey:      req.PromptCacheKey,
+		PromptCacheOptions:  cloneRawMessage(req.PromptCacheOptions),
 		ParallelToolCalls:   req.ParallelToolCalls,
+	}
+	if req.StreamOptions != nil {
+		out.StreamOptions = &ChatStreamOptions{IncludeUsage: req.StreamOptions.IncludeUsage}
 	}
 	if req.Reasoning != nil {
 		out.ReasoningEffort = req.Reasoning.Effort
@@ -724,6 +729,7 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 	var textParts []string
 	var chatParts []ChatContentPart
 	hasNonText := false
+	hasCacheControls := false
 
 	for _, rawPart := range rawParts {
 		var part map[string]json.RawMessage
@@ -731,6 +737,12 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 			continue
 		}
 		partType := rawString(part["type"])
+		cacheControl := cloneRawMessage(part["cache_control"])
+		promptCacheBreakpoint := cloneRawMessage(part["prompt_cache_breakpoint"])
+		breakpoint := cloneRawMessage(part["breakpoint"])
+		if len(cacheControl) > 0 || len(promptCacheBreakpoint) > 0 || len(breakpoint) > 0 {
+			hasCacheControls = true
+		}
 		switch partType {
 		case "input_text", "output_text", "text", "":
 			text := rawString(part["text"])
@@ -738,7 +750,13 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 				continue
 			}
 			textParts = append(textParts, text)
-			chatParts = append(chatParts, ChatContentPart{Type: "text", Text: text})
+			chatParts = append(chatParts, ChatContentPart{
+				Type:                  "text",
+				Text:                  text,
+				CacheControl:          cacheControl,
+				PromptCacheBreakpoint: promptCacheBreakpoint,
+				Breakpoint:            breakpoint,
+			})
 		case "input_image", "image_url":
 			imageURL := rawString(part["image_url"])
 			if imageURL == "" {
@@ -749,17 +767,20 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 			}
 			hasNonText = true
 			chatParts = append(chatParts, ChatContentPart{
-				Type:     "image_url",
-				ImageURL: &ChatImageURL{URL: imageURL},
+				Type:                  "image_url",
+				ImageURL:              &ChatImageURL{URL: imageURL},
+				CacheControl:          cacheControl,
+				PromptCacheBreakpoint: promptCacheBreakpoint,
+				Breakpoint:            breakpoint,
 			})
 		}
 	}
 
-	if !hasNonText {
+	if !hasNonText && !hasCacheControls {
 		joined, _ := json.Marshal(strings.Join(textParts, "\n\n"))
 		return joined, nil
 	}
-	if role != "user" {
+	if role != "user" && !hasCacheControls {
 		joined, _ := json.Marshal(strings.Join(textParts, "\n\n"))
 		return joined, nil
 	}
@@ -778,10 +799,22 @@ func chatContentFromSingleResponsesPart(partType string, part map[string]json.Ra
 			imageURL = rawNestedString(part["image_url"], "url")
 		}
 		return json.Marshal([]ChatContentPart{{
-			Type:     "image_url",
-			ImageURL: &ChatImageURL{URL: imageURL},
+			Type:                  "image_url",
+			ImageURL:              &ChatImageURL{URL: imageURL},
+			CacheControl:          cloneRawMessage(part["cache_control"]),
+			PromptCacheBreakpoint: cloneRawMessage(part["prompt_cache_breakpoint"]),
+			Breakpoint:            cloneRawMessage(part["breakpoint"]),
 		}})
 	default:
+		if len(part["cache_control"]) > 0 || len(part["prompt_cache_breakpoint"]) > 0 || len(part["breakpoint"]) > 0 {
+			return json.Marshal([]ChatContentPart{{
+				Type:                  "text",
+				Text:                  rawString(part["text"]),
+				CacheControl:          cloneRawMessage(part["cache_control"]),
+				PromptCacheBreakpoint: cloneRawMessage(part["prompt_cache_breakpoint"]),
+				Breakpoint:            cloneRawMessage(part["breakpoint"]),
+			}})
+		}
 		return json.Marshal(rawString(part["text"]))
 	}
 }
@@ -810,7 +843,10 @@ func responsesToolsToChatTools(tools []ResponsesTool) ([]ChatTool, error) {
 		switch tool.Type {
 		case "function":
 			out = append(out, ChatTool{
-				Type: "function",
+				Type:                  "function",
+				CacheControl:          cloneRawMessage(tool.CacheControl),
+				PromptCacheBreakpoint: cloneRawMessage(tool.PromptCacheBreakpoint),
+				Breakpoint:            cloneRawMessage(tool.Breakpoint),
 				Function: &ChatFunction{
 					Name:        tool.Name,
 					Description: tool.Description,
@@ -822,7 +858,10 @@ func responsesToolsToChatTools(tools []ResponsesTool) ([]ChatTool, error) {
 			// codex 0.14x 的核心执行工具 exec 即为 custom 类型；丢弃它会让模型
 			// 无法执行任何命令，必须降级为 function 工具透传。
 			out = append(out, ChatTool{
-				Type: "function",
+				Type:                  "function",
+				CacheControl:          cloneRawMessage(tool.CacheControl),
+				PromptCacheBreakpoint: cloneRawMessage(tool.PromptCacheBreakpoint),
+				Breakpoint:            cloneRawMessage(tool.Breakpoint),
 				Function: &ChatFunction{
 					Name:        tool.Name,
 					Description: tool.Description,
@@ -901,7 +940,10 @@ func namespaceChildrenToChatTools(tool ResponsesTool, topLevel map[string]bool, 
 		}
 		flatOwner[flat] = entry
 		out = append(out, ChatTool{
-			Type: "function",
+			Type:                  "function",
+			CacheControl:          cloneRawMessage(child.CacheControl),
+			PromptCacheBreakpoint: cloneRawMessage(child.PromptCacheBreakpoint),
+			Breakpoint:            cloneRawMessage(child.Breakpoint),
 			Function: &ChatFunction{
 				Name:        flat,
 				Description: child.Description,
@@ -1193,17 +1235,27 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 	if out.TotalTokens == 0 {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
 	}
-	if usage.PromptTokensDetails != nil && (usage.PromptTokensDetails.CachedTokens > 0 ||
-		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0) {
+	if usage.PromptTokensDetails != nil && usage.PromptTokensDetails.hasCacheFields() {
 		out.InputTokensDetails = &ResponsesInputTokensDetails{
-			CachedTokens:        usage.PromptTokensDetails.CachedTokens,
-			CacheCreationTokens: usage.PromptTokensDetails.CacheCreationTokens,
-			CacheWriteTokens:    usage.PromptTokensDetails.CacheWriteTokens,
+			CachedTokens:          usage.PromptTokensDetails.CachedTokens,
+			CacheCreationTokens:   usage.PromptTokensDetails.CacheCreationTokens,
+			CacheWriteTokens:      usage.PromptTokensDetails.CacheWriteTokens,
+			CacheCreation5mTokens: usage.PromptTokensDetails.CacheCreation5mTokens,
+			CacheCreation1hTokens: usage.PromptTokensDetails.CacheCreation1hTokens,
 		}
-		if usage.PromptTokensDetails.CacheWriteTokens > 0 {
+		out.InputTokensDetails.markCacheFieldsPresent(
+			usage.PromptTokensDetails.cacheFieldsPresent.cached,
+			usage.PromptTokensDetails.cacheFieldsPresent.creation,
+			usage.PromptTokensDetails.cacheFieldsPresent.write,
+			usage.PromptTokensDetails.cacheFieldsPresent.creation5m,
+			usage.PromptTokensDetails.cacheFieldsPresent.creation1h,
+		)
+		if usage.PromptTokensDetails.cacheFieldsPresent.write || usage.PromptTokensDetails.CacheWriteTokens != 0 {
 			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheWriteTokens
-		} else {
+			out.cacheCreationInputTokensPresent = true
+		} else if usage.PromptTokensDetails.cacheFieldsPresent.creation || usage.PromptTokensDetails.CacheCreationTokens != 0 {
 			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
+			out.cacheCreationInputTokensPresent = true
 		}
 	}
 	return out

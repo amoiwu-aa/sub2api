@@ -348,12 +348,16 @@ func chatUsageFromResponsesUsage(u *ResponsesUsage) *ChatUsage {
 		TotalTokens:      u.InputTokens + u.OutputTokens,
 	}
 	usage.PromptTokensDetails = promptDetailsFromResponses(u.InputTokensDetails)
-	if u.CacheCreationInputTokens > 0 {
+	if u.hasCacheCreationInputTokens() {
 		if usage.PromptTokensDetails == nil {
 			usage.PromptTokensDetails = &ChatTokenDetails{}
 		}
-		if usage.PromptTokensDetails.CacheWriteTokens == 0 && usage.PromptTokensDetails.CacheCreationTokens == 0 {
+		if !usage.PromptTokensDetails.cacheFieldsPresent.write &&
+			!usage.PromptTokensDetails.cacheFieldsPresent.creation &&
+			usage.PromptTokensDetails.CacheWriteTokens == 0 &&
+			usage.PromptTokensDetails.CacheCreationTokens == 0 {
 			usage.PromptTokensDetails.CacheCreationTokens = u.CacheCreationInputTokens
+			usage.PromptTokensDetails.cacheFieldsPresent.creation = true
 		}
 	}
 	usage.CompletionTokensDetails = completionDetailsFromResponses(u.OutputTokensDetails)
@@ -367,15 +371,25 @@ func promptDetailsFromResponses(src *ResponsesInputTokensDetails) *ChatTokenDeta
 	if src == nil {
 		return nil
 	}
-	if src.CachedTokens == 0 && src.AudioTokens == 0 && src.CacheCreationTokens == 0 && src.CacheWriteTokens == 0 {
+	if !src.hasCacheFields() && src.AudioTokens == 0 {
 		return nil
 	}
-	return &ChatTokenDetails{
-		CachedTokens:        src.CachedTokens,
-		AudioTokens:         src.AudioTokens,
-		CacheCreationTokens: src.CacheCreationTokens,
-		CacheWriteTokens:    src.CacheWriteTokens,
+	details := &ChatTokenDetails{
+		CachedTokens:          src.CachedTokens,
+		AudioTokens:           src.AudioTokens,
+		CacheCreationTokens:   src.CacheCreationTokens,
+		CacheWriteTokens:      src.CacheWriteTokens,
+		CacheCreation5mTokens: src.CacheCreation5mTokens,
+		CacheCreation1hTokens: src.CacheCreation1hTokens,
 	}
+	details.markCacheFieldsPresent(
+		src.cacheFieldsPresent.cached,
+		src.cacheFieldsPresent.creation,
+		src.cacheFieldsPresent.write,
+		src.cacheFieldsPresent.creation5m,
+		src.cacheFieldsPresent.creation1h,
+	)
+	return details
 }
 
 // completionDetailsFromResponses maps Responses-API output_tokens_details

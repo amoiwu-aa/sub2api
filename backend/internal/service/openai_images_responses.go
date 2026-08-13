@@ -1095,6 +1095,7 @@ func openAIImagesToolUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 	return OpenAIUsage{
 		InputTokens:       inputTokens,
 		OutputTokens:      outputTokens,
+		CacheUsageSource:  CacheUsageSourceUnavailable,
 		ImageOutputTokens: imageOutputTokens,
 	}, true
 }

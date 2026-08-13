@@ -27,6 +27,16 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -46,6 +56,12 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		&stats.TotalCacheTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.CacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.ReportedRequests,
+		&stats.EstimatedRequests,
+		&stats.UnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -66,6 +82,16 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -85,6 +111,12 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 		&stats.TotalCacheTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.CacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.ReportedRequests,
+		&stats.EstimatedRequests,
+		&stats.UnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -115,6 +147,16 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -134,6 +176,12 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 		&stats.TotalCacheTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.CacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.ReportedRequests,
+		&stats.EstimatedRequests,
+		&stats.UnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -155,6 +203,16 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -174,6 +232,12 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 		&stats.TotalCacheTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.CacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.ReportedRequests,
+		&stats.EstimatedRequests,
+		&stats.UnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -549,7 +613,7 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 // BatchAPIKeyUsageStats represents usage stats for a single API key
 type BatchAPIKeyUsageStats = usagestats.BatchAPIKeyUsageStats
 
-// GetBatchAPIKeyUsageStats gets today and total actual_cost for multiple API keys within a time range.
+// GetBatchAPIKeyUsageStats gets today and total actual_cost/token usage for multiple API keys.
 // If startTime is zero, defaults to 30 days ago.
 func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKeyIDs []int64, startTime, endTime time.Time) (map[int64]*BatchAPIKeyUsageStats, error) {
 	result := make(map[int64]*BatchAPIKeyUsageStats)
@@ -574,7 +638,11 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		SELECT
 			api_key_id,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
+			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost,
+			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens)
+				FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_tokens,
+			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens)
+				FILTER (WHERE created_at >= $4), 0) as today_tokens
 		FROM usage_logs
 		WHERE api_key_id = ANY($1)
 		  AND created_at >= LEAST($2, $4)
@@ -589,13 +657,17 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		var apiKeyID int64
 		var total float64
 		var todayTotal float64
-		if err := rows.Scan(&apiKeyID, &total, &todayTotal); err != nil {
+		var totalTokens int64
+		var todayTokens int64
+		if err := rows.Scan(&apiKeyID, &total, &todayTotal, &totalTokens, &todayTokens); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		if stats, ok := result[apiKeyID]; ok {
 			stats.TotalActualCost = total
 			stats.TodayActualCost = todayTotal
+			stats.TotalTokens = totalTokens
+			stats.TodayTokens = todayTokens
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -628,6 +700,18 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
@@ -645,6 +729,14 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheTokens,
+		&stats.TotalCacheCreationTokens,
+		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.CacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.ReportedRequests,
+		&stats.EstimatedRequests,
+		&stats.UnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -676,6 +768,10 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
 		args = append(args, filters.GroupID)
 	}
+	if sessionID := strings.TrimSpace(filters.SessionID); sessionID != "" {
+		conditions = append(conditions, fmt.Sprintf("session_id = $%d", len(args)+1))
+		args = append(args, sessionID)
+	}
 	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
 	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
 	if filters.BillingType != nil {
@@ -703,6 +799,16 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as total_account_cost,
@@ -735,6 +841,12 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			&stats.TotalCacheTokens,
 			&stats.TotalCacheCreationTokens,
 			&stats.TotalCacheReadTokens,
+			&stats.TotalProviderCacheReadTokens,
+			&stats.CacheHitRequests,
+			&stats.TotalForcedCacheReadTokens,
+			&stats.ReportedRequests,
+			&stats.EstimatedRequests,
+			&stats.UnavailableRequests,
 			&stats.TotalCost,
 			&stats.TotalActualCost,
 			&totalAccountCost,
@@ -773,7 +885,13 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		endpointPaths = res
 	}
 
-	if r.db != nil {
+	if strings.TrimSpace(filters.SessionID) != "" {
+		// Session Usage only needs the summary. Avoid three unrelated endpoint
+		// scans on every short-poll attempt.
+		if err := runSummary(ctx); err != nil {
+			return nil, err
+		}
+	} else if r.db != nil {
 		// 生产路径:r.sql 是 *sql.DB 连接池,可并发。4 条查询并行,延迟取最大值。
 		g, gctx := errgroup.WithContext(ctx)
 		g.Go(func() error { return runSummary(gctx) })

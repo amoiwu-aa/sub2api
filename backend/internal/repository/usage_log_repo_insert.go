@@ -83,9 +83,11 @@ var usageLogInsertArgTypes = [...]string{
 	"numeric",     // account_stats_cost
 	"text",        // session_id
 	"timestamptz", // created_at
-	// 新列一律追加在 created_at 之后：列顺序对 INSERT 无意义，但追加能让
-	// 上面几处硬编码的 $1..$57 占位符保持原样，避免整体重排时错位。
+	// 新列一律追加在尾部：列顺序对 INSERT 无意义，但追加能让已有占位符
+	// 保持原样，避免整体重排时错位。
 	"numeric", // upstream_credits
+	"text",    // cache_usage_source
+	"integer", // forced_cache_read_tokens
 }
 
 const (
@@ -284,14 +286,16 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			account_stats_cost,
 			session_id,
 			created_at,
-			upstream_credits
+			upstream_credits,
+			cache_usage_source,
+			forced_cache_read_tokens
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -742,12 +746,14 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			account_stats_cost,
 			session_id,
 			created_at,
-			upstream_credits
+			upstream_credits,
+			cache_usage_source,
+			forced_cache_read_tokens
 		) AS (VALUES `)
 
-	// Each batch row prepends the synthetic input_index before the 60
+	// Each batch row prepends the synthetic input_index before the 62
 	// usage-log column values.
-	args := make([]any, 0, len(keys)*61)
+	args := make([]any, 0, len(keys)*63)
 	argPos := 1
 	for idx, key := range keys {
 		if idx > 0 {
@@ -835,7 +841,9 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				account_stats_cost,
 				session_id,
 				created_at,
-				upstream_credits
+				upstream_credits,
+				cache_usage_source,
+				forced_cache_read_tokens
 			)
 			SELECT
 				user_id,
@@ -897,7 +905,9 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				account_stats_cost,
 				session_id,
 				created_at,
-				upstream_credits
+				upstream_credits,
+				cache_usage_source,
+				forced_cache_read_tokens
 			FROM input
 			ON CONFLICT (request_id, api_key_id) DO NOTHING
 			RETURNING request_id, api_key_id, id, created_at
@@ -999,10 +1009,12 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			account_stats_cost,
 			session_id,
 			created_at,
-			upstream_credits
+			upstream_credits,
+			cache_usage_source,
+			forced_cache_read_tokens
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(preparedList)*60)
+	args := make([]any, 0, len(preparedList)*62)
 	argPos := 1
 	for idx, prepared := range preparedList {
 		if idx > 0 {
@@ -1087,7 +1099,9 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			account_stats_cost,
 			session_id,
 			created_at,
-			upstream_credits
+			upstream_credits,
+			cache_usage_source,
+			forced_cache_read_tokens
 		)
 		SELECT
 			user_id,
@@ -1149,7 +1163,9 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			account_stats_cost,
 			session_id,
 			created_at,
-			upstream_credits
+			upstream_credits,
+			cache_usage_source,
+			forced_cache_read_tokens
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`)
@@ -1219,14 +1235,16 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			account_stats_cost,
 			session_id,
 			created_at,
-			upstream_credits
+			upstream_credits,
+			cache_usage_source,
+			forced_cache_read_tokens
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9,
 			$10, $11,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1275,6 +1293,16 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 	upstreamModel := nullString(log.UpstreamModel)
 	upstreamResponseModel := nullString(log.UpstreamResponseModel)
 	upstreamModelMismatch := nullBool(log.UpstreamModelMismatch)
+	if log.CacheUsageSource == nil || !log.CacheUsageSource.IsValid() {
+		source := service.CacheUsageSourceUnavailable
+		log.CacheUsageSource = &source
+	}
+	cacheUsageSource := nullCacheUsageSource(log.CacheUsageSource)
+	forcedCacheReadTokens := log.ForcedCacheReadTokens
+	if forcedCacheReadTokens < 0 {
+		forcedCacheReadTokens = 0
+		log.ForcedCacheReadTokens = 0
+	}
 
 	var requestIDArg any
 	if requestID != "" {
@@ -1347,8 +1375,17 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			sessionID,            // session_id
 			createdAt,
 			log.UpstreamCredits, // upstream_credits
+			cacheUsageSource,    // cache_usage_source
+			forcedCacheReadTokens,
 		},
 	}
+}
+
+func nullCacheUsageSource(source *service.CacheUsageSource) sql.NullString {
+	if source == nil || !source.IsValid() {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: string(*source), Valid: true}
 }
 
 func usageLogBatchKey(requestID string, apiKeyID int64) string {

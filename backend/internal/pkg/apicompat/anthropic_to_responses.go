@@ -164,7 +164,7 @@ func parseAnthropicSystemContentParts(raw json.RawMessage) ([]ResponsesContentPa
 	var parts []ResponsesContentPart
 	for _, b := range blocks {
 		if b.Type == "text" && b.Text != "" && !isAnthropicBillingHeaderText(b.Text) {
-			parts = append(parts, ResponsesContentPart{Type: "input_text", Text: b.Text})
+			parts = append(parts, responsesContentPartFromAnthropicBlock("input_text", b, ""))
 		}
 	}
 	return parts, nil
@@ -233,11 +233,11 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 		switch b.Type {
 		case "text":
 			if b.Text != "" {
-				parts = append(parts, ResponsesContentPart{Type: "input_text", Text: b.Text})
+				parts = append(parts, responsesContentPartFromAnthropicBlock("input_text", b, ""))
 			}
 		case "image":
 			if uri := anthropicImageToDataURI(b.Source); uri != "" {
-				parts = append(parts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
+				parts = append(parts, responsesContentPartFromAnthropicBlock("input_image", b, uri))
 			}
 		}
 	}
@@ -301,8 +301,10 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 	// Text content → assistant message with output_text content parts.
 	text := extractAnthropicTextFromBlocks(blocks)
 	if text != "" {
-		parts := []ResponsesContentPart{{Type: "output_text", Text: text}}
-		partsJSON, err := json.Marshal(parts)
+		part := ResponsesContentPart{Type: "output_text", Text: text}
+		part.CacheControl, part.PromptCacheBreakpoint, part.Breakpoint =
+			lastAnthropicTextBlockCacheAnnotations(blocks)
+		partsJSON, err := json.Marshal([]ResponsesContentPart{part})
 		if err != nil {
 			return nil, err
 		}
@@ -451,14 +453,75 @@ func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
 			continue
 		}
 		out = append(out, ResponsesTool{
-			Type:        "function",
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  normalizeToolParameters(t.InputSchema),
-			Strict:      boolPtr(false),
+			Type:                  "function",
+			Name:                  t.Name,
+			Description:           t.Description,
+			Parameters:            normalizeToolParameters(t.InputSchema),
+			Strict:                boolPtr(false),
+			CacheControl:          anthropicCacheControlRaw(t.CacheControl),
+			PromptCacheBreakpoint: cloneRawMessage(t.PromptCacheBreakpoint),
+			Breakpoint:            cloneRawMessage(t.Breakpoint),
 		})
 	}
 	return out
+}
+
+func responsesContentPartFromAnthropicBlock(partType string, block AnthropicContentBlock, imageURL string) ResponsesContentPart {
+	return ResponsesContentPart{
+		Type:                  partType,
+		Text:                  block.Text,
+		ImageURL:              imageURL,
+		CacheControl:          anthropicCacheControlRaw(block.CacheControl),
+		PromptCacheBreakpoint: cloneRawMessage(block.PromptCacheBreakpoint),
+		Breakpoint:            cloneRawMessage(block.Breakpoint),
+	}
+}
+
+func anthropicCacheControlRaw(control *AnthropicCacheControl) json.RawMessage {
+	if control == nil {
+		return nil
+	}
+	raw, err := json.Marshal(control)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// anthropicCacheControlFromRaw parses a wire cache_control object back into the
+// typed Anthropic form. Unknown shapes yield nil instead of an invented marker.
+func anthropicCacheControlFromRaw(raw json.RawMessage) *AnthropicCacheControl {
+	if len(raw) == 0 {
+		return nil
+	}
+	var control AnthropicCacheControl
+	if err := json.Unmarshal(raw, &control); err != nil || control.Type == "" {
+		return nil
+	}
+	return &control
+}
+
+// anthropicBlockHasCacheAnnotations reports whether a block carries any
+// explicit prompt-cache marker.
+func anthropicBlockHasCacheAnnotations(b AnthropicContentBlock) bool {
+	return b.CacheControl != nil || len(b.PromptCacheBreakpoint) > 0 || len(b.Breakpoint) > 0
+}
+
+// lastAnthropicTextBlockCacheAnnotations returns the cache annotations of the
+// last text block carrying any. When several text blocks are folded into one
+// part, an Anthropic cache marker means "cache everything up to this block",
+// so the last marker still describes the fold's end boundary. Nothing is
+// invented when no block carries a marker.
+func lastAnthropicTextBlockCacheAnnotations(blocks []AnthropicContentBlock) (cc, pcb, bp json.RawMessage) {
+	for _, b := range blocks {
+		if b.Type != "text" || !anthropicBlockHasCacheAnnotations(b) {
+			continue
+		}
+		cc = anthropicCacheControlRaw(b.CacheControl)
+		pcb = cloneRawMessage(b.PromptCacheBreakpoint)
+		bp = cloneRawMessage(b.Breakpoint)
+	}
+	return cc, pcb, bp
 }
 
 func boolPtr(v bool) *bool {

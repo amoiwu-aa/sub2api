@@ -472,16 +472,22 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 		case "input_text", "text":
 			if p.Text != "" {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type: "text",
-					Text: p.Text,
+					Type:                  "text",
+					Text:                  p.Text,
+					CacheControl:          anthropicCacheControlFromRaw(p.CacheControl),
+					PromptCacheBreakpoint: cloneRawMessage(p.PromptCacheBreakpoint),
+					Breakpoint:            cloneRawMessage(p.Breakpoint),
 				})
 			}
 		case "input_image":
 			src := dataURIToAnthropicImageSource(p.ImageURL)
 			if src != nil {
 				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "image",
-					Source: src,
+					Type:                  "image",
+					Source:                src,
+					CacheControl:          anthropicCacheControlFromRaw(p.CacheControl),
+					PromptCacheBreakpoint: cloneRawMessage(p.PromptCacheBreakpoint),
+					Breakpoint:            cloneRawMessage(p.Breakpoint),
 				})
 			}
 		}
@@ -621,28 +627,38 @@ func convertResponsesToAnthropicTools(tools []ResponsesTool) []AnthropicTool {
 				Name: "web_search",
 			})
 		case "function":
-			out = append(out, AnthropicTool{
+			out = append(out, anthropicToolWithCacheAnnotations(AnthropicTool{
 				Name:        t.Name,
 				Description: t.Description,
 				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
-			})
+			}, t))
 		case "custom":
-			out = append(out, AnthropicTool{
+			out = append(out, anthropicToolWithCacheAnnotations(AnthropicTool{
 				Name:        t.Name,
 				Description: t.Description,
 				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
-			})
+			}, t))
 		default:
 			// Pass through unknown tool types
-			out = append(out, AnthropicTool{
+			out = append(out, anthropicToolWithCacheAnnotations(AnthropicTool{
 				Type:        t.Type,
 				Name:        t.Name,
 				Description: t.Description,
 				InputSchema: normalizeAnthropicInputSchema(t.Parameters),
-			})
+			}, t))
 		}
 	}
 	return out
+}
+
+// anthropicToolWithCacheAnnotations carries tool-level prompt-cache markers
+// from a Responses tool onto the converted Anthropic tool. Anthropic upstreams
+// honor tool cache_control natively, so dropping them wastes the prefix cache.
+func anthropicToolWithCacheAnnotations(tool AnthropicTool, src ResponsesTool) AnthropicTool {
+	tool.CacheControl = anthropicCacheControlFromRaw(src.CacheControl)
+	tool.PromptCacheBreakpoint = cloneRawMessage(src.PromptCacheBreakpoint)
+	tool.Breakpoint = cloneRawMessage(src.Breakpoint)
+	return tool
 }
 
 // normalizeAnthropicInputSchema ensures input_schema is a valid object schema.

@@ -718,50 +718,57 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	mustCreateAccount(s.T(), s.client, &service.Account{Name: "a-ov", OverloadUntil: &resetAt, Schedulable: true})
 
 	d1, d2, d3 := 100, 200, 300
+	reportedSource := service.CacheUsageSourceReported
+	estimatedSource := service.CacheUsageSourceEstimated
+	unavailableSource := service.CacheUsageSourceUnavailable
 	logToday := &service.UsageLog{
-		UserID:              userToday.ID,
-		APIKeyID:            apiKey1.ID,
-		AccountID:           accNormal.ID,
-		Model:               "claude-3",
-		GroupID:             &group.ID,
-		InputTokens:         10,
-		OutputTokens:        20,
-		CacheCreationTokens: 3,
-		CacheReadTokens:     4,
-		TotalCost:           1.5,
-		ActualCost:          1.2,
-		DurationMs:          &d1,
-		CreatedAt:           testMaxTime(todayStart.Add(2*time.Minute), now.Add(-2*time.Minute)),
+		UserID:                userToday.ID,
+		APIKeyID:              apiKey1.ID,
+		AccountID:             accNormal.ID,
+		Model:                 "claude-3",
+		GroupID:               &group.ID,
+		InputTokens:           10,
+		OutputTokens:          20,
+		CacheCreationTokens:   3,
+		CacheReadTokens:       4,
+		CacheUsageSource:      &reportedSource,
+		ForcedCacheReadTokens: 1,
+		TotalCost:             1.5,
+		ActualCost:            1.2,
+		DurationMs:            &d1,
+		CreatedAt:             testMaxTime(todayStart.Add(2*time.Minute), now.Add(-2*time.Minute)),
 	}
 	_, err = s.repo.Create(s.ctx, logToday)
 	s.Require().NoError(err, "Create logToday")
 
 	logOld := &service.UsageLog{
-		UserID:       userOld.ID,
-		APIKeyID:     apiKey1.ID,
-		AccountID:    accNormal.ID,
-		Model:        "claude-3",
-		InputTokens:  5,
-		OutputTokens: 6,
-		TotalCost:    0.7,
-		ActualCost:   0.7,
-		DurationMs:   &d2,
-		CreatedAt:    todayStart.Add(-1 * time.Hour),
+		UserID:           userOld.ID,
+		APIKeyID:         apiKey1.ID,
+		AccountID:        accNormal.ID,
+		Model:            "claude-3",
+		InputTokens:      5,
+		OutputTokens:     6,
+		CacheUsageSource: &unavailableSource,
+		TotalCost:        0.7,
+		ActualCost:       0.7,
+		DurationMs:       &d2,
+		CreatedAt:        todayStart.Add(-1 * time.Hour),
 	}
 	_, err = s.repo.Create(s.ctx, logOld)
 	s.Require().NoError(err, "Create logOld")
 
 	logPerf := &service.UsageLog{
-		UserID:       userToday.ID,
-		APIKeyID:     apiKey1.ID,
-		AccountID:    accNormal.ID,
-		Model:        "claude-3",
-		InputTokens:  1,
-		OutputTokens: 2,
-		TotalCost:    0.1,
-		ActualCost:   0.1,
-		DurationMs:   &d3,
-		CreatedAt:    now.Add(-30 * time.Second),
+		UserID:           userToday.ID,
+		APIKeyID:         apiKey1.ID,
+		AccountID:        accNormal.ID,
+		Model:            "claude-3",
+		InputTokens:      1,
+		OutputTokens:     2,
+		CacheUsageSource: &estimatedSource,
+		TotalCost:        0.1,
+		ActualCost:       0.1,
+		DurationMs:       &d3,
+		CreatedAt:        now.Add(-30 * time.Second),
 	}
 	_, err = s.repo.Create(s.ctx, logPerf)
 	s.Require().NoError(err, "Create logPerf")
@@ -789,12 +796,24 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	s.Require().Equal(baseStats.TotalOutputTokens+int64(28), stats.TotalOutputTokens, "TotalOutputTokens mismatch")
 	s.Require().Equal(baseStats.TotalCacheCreationTokens+int64(3), stats.TotalCacheCreationTokens, "TotalCacheCreationTokens mismatch")
 	s.Require().Equal(baseStats.TotalCacheReadTokens+int64(4), stats.TotalCacheReadTokens, "TotalCacheReadTokens mismatch")
+	s.Require().Equal(baseStats.TotalProviderCacheReadTokens+int64(3), stats.TotalProviderCacheReadTokens, "TotalProviderCacheReadTokens mismatch")
+	s.Require().Equal(baseStats.TotalCacheHitRequests+int64(1), stats.TotalCacheHitRequests, "TotalCacheHitRequests mismatch")
+	s.Require().Equal(baseStats.TotalForcedCacheReadTokens+int64(1), stats.TotalForcedCacheReadTokens, "TotalForcedCacheReadTokens mismatch")
+	s.Require().Equal(baseStats.TotalReportedRequests+int64(1), stats.TotalReportedRequests, "TotalReportedRequests mismatch")
+	s.Require().Equal(baseStats.TotalEstimatedRequests+int64(1), stats.TotalEstimatedRequests, "TotalEstimatedRequests mismatch")
+	s.Require().Equal(baseStats.TotalUnavailableRequests+int64(1), stats.TotalUnavailableRequests, "TotalUnavailableRequests mismatch")
 	s.Require().Equal(baseStats.TotalTokens+int64(51), stats.TotalTokens, "TotalTokens mismatch")
 	s.Require().Equal(baseStats.TotalCost+2.3, stats.TotalCost, "TotalCost mismatch")
 	s.Require().Equal(baseStats.TotalActualCost+2.0, stats.TotalActualCost, "TotalActualCost mismatch")
 	// account_cost falls back to total_cost when account_stats_cost is NULL
 	s.Require().Equal(baseStats.TotalAccountCost+2.3, stats.TotalAccountCost, "TotalAccountCost mismatch")
 	s.Require().GreaterOrEqual(stats.TodayRequests, int64(1), "expected TodayRequests >= 1")
+	s.Require().Equal(baseStats.TodayProviderCacheReadTokens+int64(3), stats.TodayProviderCacheReadTokens, "TodayProviderCacheReadTokens mismatch")
+	s.Require().Equal(baseStats.TodayCacheHitRequests+int64(1), stats.TodayCacheHitRequests, "TodayCacheHitRequests mismatch")
+	s.Require().Equal(baseStats.TodayForcedCacheReadTokens+int64(1), stats.TodayForcedCacheReadTokens, "TodayForcedCacheReadTokens mismatch")
+	s.Require().Equal(baseStats.TodayReportedRequests+int64(1), stats.TodayReportedRequests, "TodayReportedRequests mismatch")
+	s.Require().Equal(baseStats.TodayEstimatedRequests+int64(1), stats.TodayEstimatedRequests, "TodayEstimatedRequests mismatch")
+	s.Require().Equal(baseStats.TodayUnavailableRequests, stats.TodayUnavailableRequests, "TodayUnavailableRequests mismatch")
 	s.Require().GreaterOrEqual(stats.TodayCost, 0.0, "expected TodayCost >= 0")
 	s.Require().GreaterOrEqual(stats.TodayAccountCost, 0.0, "expected TodayAccountCost >= 0")
 
@@ -1139,6 +1158,10 @@ func (s *UsageLogRepoSuite) TestGetBatchApiKeyUsageStats() {
 	stats, err := s.repo.GetBatchAPIKeyUsageStats(s.ctx, []int64{apiKey1.ID, apiKey2.ID}, time.Time{}, time.Time{})
 	s.Require().NoError(err, "GetBatchAPIKeyUsageStats")
 	s.Require().Len(stats, 2)
+	s.Require().Equal(int64(30), stats[apiKey1.ID].TodayTokens)
+	s.Require().Equal(int64(30), stats[apiKey1.ID].TotalTokens)
+	s.Require().Equal(int64(40), stats[apiKey2.ID].TodayTokens)
+	s.Require().Equal(int64(40), stats[apiKey2.ID].TotalTokens)
 }
 
 func (s *UsageLogRepoSuite) TestGetBatchApiKeyUsageStats_Empty() {

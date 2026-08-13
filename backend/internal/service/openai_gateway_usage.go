@@ -285,6 +285,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			zap.String("selected_response_model", strings.TrimSpace(result.UpstreamResponseModel)),
 		)
 	}
+	cacheUsageSource := result.Usage.CacheUsageSource
+	if !cacheUsageSource.IsValid() {
+		cacheUsageSource = CacheUsageSourceUnavailable
+	}
 
 	usageLog := &UsageLog{
 		UserID:                user.ID,
@@ -304,6 +308,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		OutputTokens:          result.Usage.OutputTokens,
 		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
 		CacheReadTokens:       result.Usage.CacheReadInputTokens,
+		CacheUsageSource:      optionalCacheUsageSource(cacheUsageSource),
+		ForcedCacheReadTokens: result.Usage.ForcedCacheReadInputTokens,
 		ImageInputTokens:      result.Usage.ImageInputTokens,
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 		ImageCount:            result.ImageCount,

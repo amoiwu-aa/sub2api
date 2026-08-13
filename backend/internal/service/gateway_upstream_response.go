@@ -1159,6 +1159,8 @@ func (s *GatewayService) parseSSEUsage(data string, usage *ClaudeUsage) {
 }
 
 type sseUsagePatch struct {
+	hasUsage                 bool
+	hasCacheUsage            bool
 	inputTokens              int
 	hasInputTokens           bool
 	outputTokens             int
@@ -1187,7 +1189,10 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 			return nil
 		}
 
-		patch := &sseUsagePatch{}
+		patch := &sseUsagePatch{
+			hasUsage:      true,
+			hasCacheUsage: claudeUsageMapHasCacheFields(usageObj),
+		}
 		patch.hasInputTokens = true
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok {
 			patch.inputTokens = v
@@ -1210,6 +1215,7 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 				patch.hasCacheCreation1h = true
 			}
 		}
+		applySSEUsagePatchCacheAliases(usageObj, patch)
 		return patch
 
 	case "message_delta":
@@ -1218,7 +1224,10 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 			return nil
 		}
 
-		patch := &sseUsagePatch{}
+		patch := &sseUsagePatch{
+			hasUsage:      true,
+			hasCacheUsage: claudeUsageMapHasCacheFields(usageObj),
+		}
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok && v > 0 {
 			patch.inputTokens = v
 			patch.hasInputTokens = true
@@ -1245,15 +1254,57 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 				patch.hasCacheCreation1h = true
 			}
 		}
+		applySSEUsagePatchCacheAliases(usageObj, patch)
 		return patch
 	}
 
 	return nil
 }
 
+// applySSEUsagePatchCacheAliases fills zero-valued cache counters in an SSE
+// usage patch from alias fields, mirroring applyClaudeUsageCacheAliases so the
+// map-based compat stream parser decodes everything its detector accepts.
+func applySSEUsagePatchCacheAliases(usageObj map[string]any, patch *sseUsagePatch) {
+	if patch == nil {
+		return
+	}
+	node := claudeUsageNodeFromMap(usageObj)
+	if !node.Exists() {
+		return
+	}
+	temp := ClaudeUsage{
+		CacheCreationInputTokens: patch.cacheCreationInputTokens,
+		CacheReadInputTokens:     patch.cacheReadInputTokens,
+		CacheCreation5mTokens:    patch.cacheCreation5mTokens,
+		CacheCreation1hTokens:    patch.cacheCreation1hTokens,
+	}
+	applyClaudeUsageCacheAliases(node, &temp)
+	if temp.CacheReadInputTokens != patch.cacheReadInputTokens {
+		patch.cacheReadInputTokens = temp.CacheReadInputTokens
+		patch.hasCacheReadInput = true
+	}
+	if temp.CacheCreationInputTokens != patch.cacheCreationInputTokens {
+		patch.cacheCreationInputTokens = temp.CacheCreationInputTokens
+		patch.hasCacheCreationInput = true
+	}
+	if temp.CacheCreation5mTokens != patch.cacheCreation5mTokens {
+		patch.cacheCreation5mTokens = temp.CacheCreation5mTokens
+		patch.hasCacheCreation5m = true
+	}
+	if temp.CacheCreation1hTokens != patch.cacheCreation1hTokens {
+		patch.cacheCreation1hTokens = temp.CacheCreation1hTokens
+		patch.hasCacheCreation1h = true
+	}
+}
+
 func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 	if usage == nil || patch == nil {
 		return
+	}
+	if patch.hasCacheUsage {
+		usage.CacheUsageSource = CacheUsageSourceReported
+	} else if patch.hasUsage && usage.CacheUsageSource == "" {
+		usage.CacheUsageSource = CacheUsageSourceUnavailable
 	}
 
 	if patch.hasInputTokens {
@@ -1399,6 +1450,12 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		}
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
+	if usageNode := gjson.GetBytes(body, "usage"); usageNode.Exists() {
+		response.Usage.CacheUsageSource = CacheUsageSourceUnavailable
+		if claudeUsageNodeHasCacheFields(usageNode) {
+			response.Usage.CacheUsageSource = CacheUsageSourceReported
+		}
+	}
 
 	// 解析嵌套的 cache_creation 对象中的 5m/1h 明细
 	cc5m := gjson.GetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens")
@@ -1418,6 +1475,9 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 			}
 		}
 	}
+	// 其余 OpenAI 风格别名（cache_write_tokens、嵌套 details 等）：检测器认，
+	// 提取也必须认，否则"已上报"的用量会被记成 0。
+	applyClaudeUsageCacheAliases(gjson.GetBytes(body, "usage"), &response.Usage)
 
 	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。
 	// 账号级设置优先；全局 1h 请求注入开启时，默认把 usage 计费归回 5m。

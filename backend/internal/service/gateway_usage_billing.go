@@ -708,8 +708,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if input.ForceCacheBilling && result.Usage.InputTokens > 0 {
 		logger.LegacyPrintf("service.gateway", "force_cache_billing: %d input_tokens → cache_read_input_tokens (account=%d)",
 			result.Usage.InputTokens, account.ID)
-		result.Usage.CacheReadInputTokens += result.Usage.InputTokens
-		result.Usage.InputTokens = 0
+		ApplyForceCacheBilling(&result.Usage)
 	}
 
 	// Cache TTL Override: 确保计费时 token 分类与账号设置一致。
@@ -1003,6 +1002,13 @@ func (s *GatewayService) calculateTokenCost(
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 	}
 
+	// 生效的速度/服务档位（目前只有 Cursor 通道写入，如 "fast"）。
+	// 其他平台为 nil，serviceTier 为空串，计费行为不变。
+	serviceTier := ""
+	if result.ServiceTier != nil {
+		serviceTier = *result.ServiceTier
+	}
+
 	var cost *CostBreakdown
 	var err error
 
@@ -1016,14 +1022,17 @@ func (s *GatewayService) calculateTokenCost(
 			Tokens:         tokens,
 			RequestCount:   1,
 			RateMultiplier: multiplier,
+			ServiceTier:    serviceTier,
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
 	} else if opts.LongContextThreshold > 0 {
-		// 长上下文双倍计费（如 Gemini 200K 阈值）
+		// 长上下文双倍计费（如 Gemini 200K 阈值）。该入口目前只有 Gemini 用，
+		// 不传 serviceTier；Cursor 的长上下文倍率走价格表字段，在
+		// computeTokenBreakdown 内与 fast 档同时生效。
 		cost, err = s.billingService.CalculateCostWithLongContext(billingModel, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier)
 	} else {
-		cost, err = s.billingService.CalculateCost(billingModel, tokens, multiplier)
+		cost, err = s.billingService.CalculateCostWithServiceTier(billingModel, tokens, multiplier, serviceTier)
 	}
 	if err != nil {
 		logger.LegacyPrintf("service.gateway", "Calculate cost failed: %v", err)
@@ -1062,6 +1071,10 @@ func (s *GatewayService) buildRecordUsageLog(
 			"selected_response_model", strings.TrimSpace(result.UpstreamResponseModel),
 		)
 	}
+	cacheUsageSource := result.Usage.CacheUsageSource
+	if !cacheUsageSource.IsValid() {
+		cacheUsageSource = CacheUsageSourceUnavailable
+	}
 	usageLog := &UsageLog{
 		UserID:                user.ID,
 		APIKeyID:              apiKey.ID,
@@ -1072,6 +1085,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		UpstreamModel:         optionalTrimmedStringPtr(result.UpstreamModel),
 		UpstreamResponseModel: optionalTrimmedStringPtr(result.UpstreamResponseModel),
 		UpstreamModelMismatch: upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
+		ServiceTier:           result.ServiceTier,
 		ReasoningEffort:       result.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
@@ -1079,6 +1093,8 @@ func (s *GatewayService) buildRecordUsageLog(
 		OutputTokens:          result.Usage.OutputTokens,
 		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
 		CacheReadTokens:       result.Usage.CacheReadInputTokens,
+		CacheUsageSource:      optionalCacheUsageSource(cacheUsageSource),
+		ForcedCacheReadTokens: result.Usage.ForcedCacheReadInputTokens,
 		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
 		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,

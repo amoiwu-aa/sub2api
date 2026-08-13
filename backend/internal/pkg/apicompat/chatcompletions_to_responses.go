@@ -27,13 +27,18 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 	}
 
 	out := &ResponsesRequest{
-		Model:             req.Model,
-		Instructions:      req.Instructions,
-		Input:             inputJSON,
-		Stream:            true, // upstream always streams
-		Include:           []string{"reasoning.encrypted_content"},
-		ServiceTier:       req.ServiceTier,
-		ParallelToolCalls: req.ParallelToolCalls,
+		Model:              req.Model,
+		Instructions:       req.Instructions,
+		Input:              inputJSON,
+		Stream:             true, // upstream always streams
+		Include:            []string{"reasoning.encrypted_content"},
+		ServiceTier:        req.ServiceTier,
+		PromptCacheKey:     req.PromptCacheKey,
+		PromptCacheOptions: cloneRawMessage(req.PromptCacheOptions),
+		ParallelToolCalls:  req.ParallelToolCalls,
+	}
+	if req.StreamOptions != nil {
+		out.StreamOptions = &ChatStreamOptions{IncludeUsage: req.StreamOptions.IncludeUsage}
 	}
 
 	// Reasoning models (gpt-5.x) do not accept sampling parameters.
@@ -184,8 +189,17 @@ func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 	}
 
 	if content != "" {
-		parts := []ResponsesContentPart{{Type: "output_text", Text: content}}
-		partsJSON, err := json.Marshal(parts)
+		part := ResponsesContentPart{Type: "output_text", Text: content}
+		// 折叠后缓存标记不能丢：优先取内容分片上最后一个标记（折叠边界），
+		// 分片没有标记时回退到消息级标记。
+		cc, pcb, bp := lastChatContentPartCacheAnnotations(m.Content)
+		if cc == nil && pcb == nil && bp == nil {
+			cc = cloneRawMessage(m.CacheControl)
+			pcb = cloneRawMessage(m.PromptCacheBreakpoint)
+			bp = cloneRawMessage(m.Breakpoint)
+		}
+		part.CacheControl, part.PromptCacheBreakpoint, part.Breakpoint = cc, pcb, bp
+		partsJSON, err := json.Marshal([]ResponsesContentPart{part})
 		if err != nil {
 			return nil, err
 		}
@@ -367,15 +381,21 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 		case "text":
 			if p.Text != "" {
 				responseParts = append(responseParts, ResponsesContentPart{
-					Type: "input_text",
-					Text: p.Text,
+					Type:                  "input_text",
+					Text:                  p.Text,
+					CacheControl:          cloneRawMessage(p.CacheControl),
+					PromptCacheBreakpoint: cloneRawMessage(p.PromptCacheBreakpoint),
+					Breakpoint:            cloneRawMessage(p.Breakpoint),
 				})
 			}
 		case "image_url":
 			if p.ImageURL != nil && p.ImageURL.URL != "" && !isEmptyBase64DataURI(p.ImageURL.URL) {
 				responseParts = append(responseParts, ResponsesContentPart{
-					Type:     "input_image",
-					ImageURL: p.ImageURL.URL,
+					Type:                  "input_image",
+					ImageURL:              p.ImageURL.URL,
+					CacheControl:          cloneRawMessage(p.CacheControl),
+					PromptCacheBreakpoint: cloneRawMessage(p.PromptCacheBreakpoint),
+					Breakpoint:            cloneRawMessage(p.Breakpoint),
 				})
 			}
 		}
@@ -413,6 +433,36 @@ func stringPtr(s string) *string {
 	return &s
 }
 
+func cloneRawMessage(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
+}
+
+// lastChatContentPartCacheAnnotations returns the cache annotations of the last
+// typed content part carrying any. Mirrors lastAnthropicTextBlockCacheAnnotations:
+// when parts are folded into a single string, the last marker still describes
+// the fold's end boundary. Plain-string content yields nothing.
+func lastChatContentPartCacheAnnotations(raw json.RawMessage) (cc, pcb, bp json.RawMessage) {
+	if len(raw) == 0 {
+		return nil, nil, nil
+	}
+	var parts []ChatContentPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, nil, nil
+	}
+	for _, p := range parts {
+		if len(p.CacheControl) == 0 && len(p.PromptCacheBreakpoint) == 0 && len(p.Breakpoint) == 0 {
+			continue
+		}
+		cc = cloneRawMessage(p.CacheControl)
+		pcb = cloneRawMessage(p.PromptCacheBreakpoint)
+		bp = cloneRawMessage(p.Breakpoint)
+	}
+	return cc, pcb, bp
+}
+
 // convertChatToolsToResponses maps Chat Completions tool definitions and legacy
 // function definitions to Responses API tool definitions.
 func convertChatToolsToResponses(tools []ChatTool, functions []ChatFunction) []ResponsesTool {
@@ -423,11 +473,14 @@ func convertChatToolsToResponses(tools []ChatTool, functions []ChatFunction) []R
 			continue
 		}
 		rt := ResponsesTool{
-			Type:        "function",
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
-			Parameters:  t.Function.Parameters,
-			Strict:      defaultStrictFalse(t.Function.Strict),
+			Type:                  "function",
+			Name:                  t.Function.Name,
+			Description:           t.Function.Description,
+			Parameters:            t.Function.Parameters,
+			Strict:                defaultStrictFalse(t.Function.Strict),
+			CacheControl:          cloneRawMessage(t.CacheControl),
+			PromptCacheBreakpoint: cloneRawMessage(t.PromptCacheBreakpoint),
+			Breakpoint:            cloneRawMessage(t.Breakpoint),
 		}
 		out = append(out, rt)
 	}

@@ -18,40 +18,48 @@ var (
 
 // CreateUsageLogRequest 创建使用日志请求
 type CreateUsageLogRequest struct {
-	UserID                int64   `json:"user_id"`
-	APIKeyID              int64   `json:"api_key_id"`
-	AccountID             int64   `json:"account_id"`
-	RequestID             string  `json:"request_id"`
-	Model                 string  `json:"model"`
-	InputTokens           int     `json:"input_tokens"`
-	OutputTokens          int     `json:"output_tokens"`
-	CacheCreationTokens   int     `json:"cache_creation_tokens"`
-	CacheReadTokens       int     `json:"cache_read_tokens"`
-	CacheCreation5mTokens int     `json:"cache_creation_5m_tokens"`
-	CacheCreation1hTokens int     `json:"cache_creation_1h_tokens"`
-	InputCost             float64 `json:"input_cost"`
-	OutputCost            float64 `json:"output_cost"`
-	CacheCreationCost     float64 `json:"cache_creation_cost"`
-	CacheReadCost         float64 `json:"cache_read_cost"`
-	TotalCost             float64 `json:"total_cost"`
-	ActualCost            float64 `json:"actual_cost"`
-	RateMultiplier        float64 `json:"rate_multiplier"`
-	Stream                bool    `json:"stream"`
-	DurationMs            *int    `json:"duration_ms"`
+	UserID                int64             `json:"user_id"`
+	APIKeyID              int64             `json:"api_key_id"`
+	AccountID             int64             `json:"account_id"`
+	RequestID             string            `json:"request_id"`
+	Model                 string            `json:"model"`
+	InputTokens           int               `json:"input_tokens"`
+	OutputTokens          int               `json:"output_tokens"`
+	CacheCreationTokens   int               `json:"cache_creation_tokens"`
+	CacheReadTokens       int               `json:"cache_read_tokens"`
+	CacheUsageSource      *CacheUsageSource `json:"cache_usage_source"`
+	ForcedCacheReadTokens int               `json:"forced_cache_read_tokens"`
+	CacheCreation5mTokens int               `json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens int               `json:"cache_creation_1h_tokens"`
+	InputCost             float64           `json:"input_cost"`
+	OutputCost            float64           `json:"output_cost"`
+	CacheCreationCost     float64           `json:"cache_creation_cost"`
+	CacheReadCost         float64           `json:"cache_read_cost"`
+	TotalCost             float64           `json:"total_cost"`
+	ActualCost            float64           `json:"actual_cost"`
+	RateMultiplier        float64           `json:"rate_multiplier"`
+	Stream                bool              `json:"stream"`
+	DurationMs            *int              `json:"duration_ms"`
 }
 
 // UsageStats 使用统计
 type UsageStats struct {
-	TotalRequests            int64   `json:"total_requests"`
-	TotalInputTokens         int64   `json:"total_input_tokens"`
-	TotalOutputTokens        int64   `json:"total_output_tokens"`
-	TotalCacheTokens         int64   `json:"total_cache_tokens"`
-	TotalCacheCreationTokens int64   `json:"total_cache_creation_tokens"`
-	TotalCacheReadTokens     int64   `json:"total_cache_read_tokens"`
-	TotalTokens              int64   `json:"total_tokens"`
-	TotalCost                float64 `json:"total_cost"`
-	TotalActualCost          float64 `json:"total_actual_cost"`
-	AverageDurationMs        float64 `json:"average_duration_ms"`
+	TotalRequests                int64   `json:"total_requests"`
+	TotalInputTokens             int64   `json:"total_input_tokens"`
+	TotalOutputTokens            int64   `json:"total_output_tokens"`
+	TotalCacheTokens             int64   `json:"total_cache_tokens"`
+	TotalCacheCreationTokens     int64   `json:"total_cache_creation_tokens"`
+	TotalCacheReadTokens         int64   `json:"total_cache_read_tokens"`
+	TotalProviderCacheReadTokens int64   `json:"total_provider_cache_read_tokens"`
+	CacheHitRequests             int64   `json:"cache_hit_requests"`
+	TotalForcedCacheReadTokens   int64   `json:"total_forced_cache_read_tokens"`
+	ReportedRequests             int64   `json:"reported_requests"`
+	EstimatedRequests            int64   `json:"estimated_requests"`
+	UnavailableRequests          int64   `json:"unavailable_requests"`
+	TotalTokens                  int64   `json:"total_tokens"`
+	TotalCost                    float64 `json:"total_cost"`
+	TotalActualCost              float64 `json:"total_actual_cost"`
+	AverageDurationMs            float64 `json:"average_duration_ms"`
 }
 
 // UsageService 使用统计服务
@@ -103,6 +111,8 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		OutputTokens:          req.OutputTokens,
 		CacheCreationTokens:   req.CacheCreationTokens,
 		CacheReadTokens:       req.CacheReadTokens,
+		CacheUsageSource:      req.CacheUsageSource,
+		ForcedCacheReadTokens: req.ForcedCacheReadTokens,
 		CacheCreation5mTokens: req.CacheCreation5mTokens,
 		CacheCreation1hTokens: req.CacheCreation1hTokens,
 		InputCost:             req.InputCost,
@@ -192,16 +202,22 @@ func (s *UsageService) GetStatsByUser(ctx context.Context, userID int64, startTi
 	}
 
 	return &UsageStats{
-		TotalRequests:            stats.TotalRequests,
-		TotalInputTokens:         stats.TotalInputTokens,
-		TotalOutputTokens:        stats.TotalOutputTokens,
-		TotalCacheTokens:         stats.TotalCacheTokens,
-		TotalCacheCreationTokens: stats.TotalCacheCreationTokens,
-		TotalCacheReadTokens:     stats.TotalCacheReadTokens,
-		TotalTokens:              stats.TotalTokens,
-		TotalCost:                stats.TotalCost,
-		TotalActualCost:          stats.TotalActualCost,
-		AverageDurationMs:        stats.AverageDurationMs,
+		TotalRequests:                stats.TotalRequests,
+		TotalInputTokens:             stats.TotalInputTokens,
+		TotalOutputTokens:            stats.TotalOutputTokens,
+		TotalCacheTokens:             stats.TotalCacheTokens,
+		TotalCacheCreationTokens:     stats.TotalCacheCreationTokens,
+		TotalCacheReadTokens:         stats.TotalCacheReadTokens,
+		TotalProviderCacheReadTokens: stats.TotalProviderCacheReadTokens,
+		CacheHitRequests:             stats.CacheHitRequests,
+		TotalForcedCacheReadTokens:   stats.TotalForcedCacheReadTokens,
+		ReportedRequests:             stats.ReportedRequests,
+		EstimatedRequests:            stats.EstimatedRequests,
+		UnavailableRequests:          stats.UnavailableRequests,
+		TotalTokens:                  stats.TotalTokens,
+		TotalCost:                    stats.TotalCost,
+		TotalActualCost:              stats.TotalActualCost,
+		AverageDurationMs:            stats.AverageDurationMs,
 	}, nil
 }
 
@@ -213,16 +229,22 @@ func (s *UsageService) GetStatsByAPIKey(ctx context.Context, apiKeyID int64, sta
 	}
 
 	return &UsageStats{
-		TotalRequests:            stats.TotalRequests,
-		TotalInputTokens:         stats.TotalInputTokens,
-		TotalOutputTokens:        stats.TotalOutputTokens,
-		TotalCacheTokens:         stats.TotalCacheTokens,
-		TotalCacheCreationTokens: stats.TotalCacheCreationTokens,
-		TotalCacheReadTokens:     stats.TotalCacheReadTokens,
-		TotalTokens:              stats.TotalTokens,
-		TotalCost:                stats.TotalCost,
-		TotalActualCost:          stats.TotalActualCost,
-		AverageDurationMs:        stats.AverageDurationMs,
+		TotalRequests:                stats.TotalRequests,
+		TotalInputTokens:             stats.TotalInputTokens,
+		TotalOutputTokens:            stats.TotalOutputTokens,
+		TotalCacheTokens:             stats.TotalCacheTokens,
+		TotalCacheCreationTokens:     stats.TotalCacheCreationTokens,
+		TotalCacheReadTokens:         stats.TotalCacheReadTokens,
+		TotalProviderCacheReadTokens: stats.TotalProviderCacheReadTokens,
+		CacheHitRequests:             stats.CacheHitRequests,
+		TotalForcedCacheReadTokens:   stats.TotalForcedCacheReadTokens,
+		ReportedRequests:             stats.ReportedRequests,
+		EstimatedRequests:            stats.EstimatedRequests,
+		UnavailableRequests:          stats.UnavailableRequests,
+		TotalTokens:                  stats.TotalTokens,
+		TotalCost:                    stats.TotalCost,
+		TotalActualCost:              stats.TotalActualCost,
+		AverageDurationMs:            stats.AverageDurationMs,
 	}, nil
 }
 
@@ -234,16 +256,22 @@ func (s *UsageService) GetStatsByAccount(ctx context.Context, accountID int64, s
 	}
 
 	return &UsageStats{
-		TotalRequests:            stats.TotalRequests,
-		TotalInputTokens:         stats.TotalInputTokens,
-		TotalOutputTokens:        stats.TotalOutputTokens,
-		TotalCacheTokens:         stats.TotalCacheTokens,
-		TotalCacheCreationTokens: stats.TotalCacheCreationTokens,
-		TotalCacheReadTokens:     stats.TotalCacheReadTokens,
-		TotalTokens:              stats.TotalTokens,
-		TotalCost:                stats.TotalCost,
-		TotalActualCost:          stats.TotalActualCost,
-		AverageDurationMs:        stats.AverageDurationMs,
+		TotalRequests:                stats.TotalRequests,
+		TotalInputTokens:             stats.TotalInputTokens,
+		TotalOutputTokens:            stats.TotalOutputTokens,
+		TotalCacheTokens:             stats.TotalCacheTokens,
+		TotalCacheCreationTokens:     stats.TotalCacheCreationTokens,
+		TotalCacheReadTokens:         stats.TotalCacheReadTokens,
+		TotalProviderCacheReadTokens: stats.TotalProviderCacheReadTokens,
+		CacheHitRequests:             stats.CacheHitRequests,
+		TotalForcedCacheReadTokens:   stats.TotalForcedCacheReadTokens,
+		ReportedRequests:             stats.ReportedRequests,
+		EstimatedRequests:            stats.EstimatedRequests,
+		UnavailableRequests:          stats.UnavailableRequests,
+		TotalTokens:                  stats.TotalTokens,
+		TotalCost:                    stats.TotalCost,
+		TotalActualCost:              stats.TotalActualCost,
+		AverageDurationMs:            stats.AverageDurationMs,
 	}, nil
 }
 
@@ -255,16 +283,22 @@ func (s *UsageService) GetStatsByModel(ctx context.Context, modelName string, st
 	}
 
 	return &UsageStats{
-		TotalRequests:            stats.TotalRequests,
-		TotalInputTokens:         stats.TotalInputTokens,
-		TotalOutputTokens:        stats.TotalOutputTokens,
-		TotalCacheTokens:         stats.TotalCacheTokens,
-		TotalCacheCreationTokens: stats.TotalCacheCreationTokens,
-		TotalCacheReadTokens:     stats.TotalCacheReadTokens,
-		TotalTokens:              stats.TotalTokens,
-		TotalCost:                stats.TotalCost,
-		TotalActualCost:          stats.TotalActualCost,
-		AverageDurationMs:        stats.AverageDurationMs,
+		TotalRequests:                stats.TotalRequests,
+		TotalInputTokens:             stats.TotalInputTokens,
+		TotalOutputTokens:            stats.TotalOutputTokens,
+		TotalCacheTokens:             stats.TotalCacheTokens,
+		TotalCacheCreationTokens:     stats.TotalCacheCreationTokens,
+		TotalCacheReadTokens:         stats.TotalCacheReadTokens,
+		TotalProviderCacheReadTokens: stats.TotalProviderCacheReadTokens,
+		CacheHitRequests:             stats.CacheHitRequests,
+		TotalForcedCacheReadTokens:   stats.TotalForcedCacheReadTokens,
+		ReportedRequests:             stats.ReportedRequests,
+		EstimatedRequests:            stats.EstimatedRequests,
+		UnavailableRequests:          stats.UnavailableRequests,
+		TotalTokens:                  stats.TotalTokens,
+		TotalCost:                    stats.TotalCost,
+		TotalActualCost:              stats.TotalActualCost,
+		AverageDurationMs:            stats.AverageDurationMs,
 	}, nil
 }
 
@@ -426,7 +460,7 @@ func (s *UsageService) GetAPIKeyDailyUsage(ctx context.Context, userID, apiKeyID
 	return points, nil
 }
 
-// GetBatchAPIKeyUsageStats returns today/total actual_cost for given api keys.
+// GetBatchAPIKeyUsageStats returns today/30-day actual cost and token usage for given API keys.
 func (s *UsageService) GetBatchAPIKeyUsageStats(ctx context.Context, apiKeyIDs []int64, startTime, endTime time.Time) (map[int64]*usagestats.BatchAPIKeyUsageStats, error) {
 	stats, err := s.usageRepo.GetBatchAPIKeyUsageStats(ctx, apiKeyIDs, startTime, endTime)
 	if err != nil {

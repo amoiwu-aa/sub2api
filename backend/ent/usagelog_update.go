@@ -393,6 +393,53 @@ func (_u *UsageLogUpdate) AddCacheReadTokens(v int) *UsageLogUpdate {
 	return _u
 }
 
+// SetCacheUsageSource sets the "cache_usage_source" field.
+func (_u *UsageLogUpdate) SetCacheUsageSource(v string) *UsageLogUpdate {
+	_u.mutation.SetCacheUsageSource(v)
+	return _u
+}
+
+// SetNillableCacheUsageSource sets the "cache_usage_source" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableCacheUsageSource(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetCacheUsageSource(*v)
+	}
+	return _u
+}
+
+// ClearCacheUsageSource clears the value of the "cache_usage_source" field.
+func (_u *UsageLogUpdate) ClearCacheUsageSource() *UsageLogUpdate {
+	_u.mutation.ClearCacheUsageSource()
+	return _u
+}
+
+// SetForcedCacheReadTokens sets the "forced_cache_read_tokens" field.
+func (_u *UsageLogUpdate) SetForcedCacheReadTokens(v int) *UsageLogUpdate {
+	_u.mutation.ResetForcedCacheReadTokens()
+	_u.mutation.SetForcedCacheReadTokens(v)
+	return _u
+}
+
+// SetNillableForcedCacheReadTokens sets the "forced_cache_read_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableForcedCacheReadTokens(v *int) *UsageLogUpdate {
+	if v != nil {
+		_u.SetForcedCacheReadTokens(*v)
+	}
+	return _u
+}
+
+// AddForcedCacheReadTokens adds value to the "forced_cache_read_tokens" field.
+func (_u *UsageLogUpdate) AddForcedCacheReadTokens(v int) *UsageLogUpdate {
+	_u.mutation.AddForcedCacheReadTokens(v)
+	return _u
+}
+
+// ClearForcedCacheReadTokens clears the value of the "forced_cache_read_tokens" field.
+func (_u *UsageLogUpdate) ClearForcedCacheReadTokens() *UsageLogUpdate {
+	_u.mutation.ClearForcedCacheReadTokens()
+	return _u
+}
+
 // SetCacheCreation5mTokens sets the "cache_creation_5m_tokens" field.
 func (_u *UsageLogUpdate) SetCacheCreation5mTokens(v int) *UsageLogUpdate {
 	_u.mutation.ResetCacheCreation5mTokens()
@@ -773,6 +820,26 @@ func (_u *UsageLogUpdate) ClearIPAddress() *UsageLogUpdate {
 	return _u
 }
 
+// SetSessionID sets the "session_id" field.
+func (_u *UsageLogUpdate) SetSessionID(v string) *UsageLogUpdate {
+	_u.mutation.SetSessionID(v)
+	return _u
+}
+
+// SetNillableSessionID sets the "session_id" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableSessionID(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetSessionID(*v)
+	}
+	return _u
+}
+
+// ClearSessionID clears the value of the "session_id" field.
+func (_u *UsageLogUpdate) ClearSessionID() *UsageLogUpdate {
+	_u.mutation.ClearSessionID()
+	return _u
+}
+
 // SetImageCount sets the "image_count" field.
 func (_u *UsageLogUpdate) SetImageCount(v int) *UsageLogUpdate {
 	_u.mutation.ResetImageCount()
@@ -1097,6 +1164,16 @@ func (_u *UsageLogUpdate) check() error {
 			return &ValidationError{Name: "billing_mode", err: fmt.Errorf(`ent: validator failed for field "UsageLog.billing_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CacheUsageSource(); ok {
+		if err := usagelog.CacheUsageSourceValidator(v); err != nil {
+			return &ValidationError{Name: "cache_usage_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.cache_usage_source": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ForcedCacheReadTokens(); ok {
+		if err := usagelog.ForcedCacheReadTokensValidator(v); err != nil {
+			return &ValidationError{Name: "forced_cache_read_tokens", err: fmt.Errorf(`ent: validator failed for field "UsageLog.forced_cache_read_tokens": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.UserAgent(); ok {
 		if err := usagelog.UserAgentValidator(v); err != nil {
 			return &ValidationError{Name: "user_agent", err: fmt.Errorf(`ent: validator failed for field "UsageLog.user_agent": %w`, err)}
@@ -1105,6 +1182,11 @@ func (_u *UsageLogUpdate) check() error {
 	if v, ok := _u.mutation.IPAddress(); ok {
 		if err := usagelog.IPAddressValidator(v); err != nil {
 			return &ValidationError{Name: "ip_address", err: fmt.Errorf(`ent: validator failed for field "UsageLog.ip_address": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.SessionID(); ok {
+		if err := usagelog.SessionIDValidator(v); err != nil {
+			return &ValidationError{Name: "session_id", err: fmt.Errorf(`ent: validator failed for field "UsageLog.session_id": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.ImageSize(); ok {
@@ -1237,6 +1319,21 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedCacheReadTokens(); ok {
 		_spec.AddField(usagelog.FieldCacheReadTokens, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.CacheUsageSource(); ok {
+		_spec.SetField(usagelog.FieldCacheUsageSource, field.TypeString, value)
+	}
+	if _u.mutation.CacheUsageSourceCleared() {
+		_spec.ClearField(usagelog.FieldCacheUsageSource, field.TypeString)
+	}
+	if value, ok := _u.mutation.ForcedCacheReadTokens(); ok {
+		_spec.SetField(usagelog.FieldForcedCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedForcedCacheReadTokens(); ok {
+		_spec.AddField(usagelog.FieldForcedCacheReadTokens, field.TypeInt, value)
+	}
+	if _u.mutation.ForcedCacheReadTokensCleared() {
+		_spec.ClearField(usagelog.FieldForcedCacheReadTokens, field.TypeInt)
+	}
 	if value, ok := _u.mutation.CacheCreation5mTokens(); ok {
 		_spec.SetField(usagelog.FieldCacheCreation5mTokens, field.TypeInt, value)
 	}
@@ -1347,6 +1444,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.IPAddressCleared() {
 		_spec.ClearField(usagelog.FieldIPAddress, field.TypeString)
+	}
+	if value, ok := _u.mutation.SessionID(); ok {
+		_spec.SetField(usagelog.FieldSessionID, field.TypeString, value)
+	}
+	if _u.mutation.SessionIDCleared() {
+		_spec.ClearField(usagelog.FieldSessionID, field.TypeString)
 	}
 	if value, ok := _u.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)
@@ -1934,6 +2037,53 @@ func (_u *UsageLogUpdateOne) AddCacheReadTokens(v int) *UsageLogUpdateOne {
 	return _u
 }
 
+// SetCacheUsageSource sets the "cache_usage_source" field.
+func (_u *UsageLogUpdateOne) SetCacheUsageSource(v string) *UsageLogUpdateOne {
+	_u.mutation.SetCacheUsageSource(v)
+	return _u
+}
+
+// SetNillableCacheUsageSource sets the "cache_usage_source" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableCacheUsageSource(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetCacheUsageSource(*v)
+	}
+	return _u
+}
+
+// ClearCacheUsageSource clears the value of the "cache_usage_source" field.
+func (_u *UsageLogUpdateOne) ClearCacheUsageSource() *UsageLogUpdateOne {
+	_u.mutation.ClearCacheUsageSource()
+	return _u
+}
+
+// SetForcedCacheReadTokens sets the "forced_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) SetForcedCacheReadTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.ResetForcedCacheReadTokens()
+	_u.mutation.SetForcedCacheReadTokens(v)
+	return _u
+}
+
+// SetNillableForcedCacheReadTokens sets the "forced_cache_read_tokens" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableForcedCacheReadTokens(v *int) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetForcedCacheReadTokens(*v)
+	}
+	return _u
+}
+
+// AddForcedCacheReadTokens adds value to the "forced_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) AddForcedCacheReadTokens(v int) *UsageLogUpdateOne {
+	_u.mutation.AddForcedCacheReadTokens(v)
+	return _u
+}
+
+// ClearForcedCacheReadTokens clears the value of the "forced_cache_read_tokens" field.
+func (_u *UsageLogUpdateOne) ClearForcedCacheReadTokens() *UsageLogUpdateOne {
+	_u.mutation.ClearForcedCacheReadTokens()
+	return _u
+}
+
 // SetCacheCreation5mTokens sets the "cache_creation_5m_tokens" field.
 func (_u *UsageLogUpdateOne) SetCacheCreation5mTokens(v int) *UsageLogUpdateOne {
 	_u.mutation.ResetCacheCreation5mTokens()
@@ -2314,6 +2464,26 @@ func (_u *UsageLogUpdateOne) ClearIPAddress() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetSessionID sets the "session_id" field.
+func (_u *UsageLogUpdateOne) SetSessionID(v string) *UsageLogUpdateOne {
+	_u.mutation.SetSessionID(v)
+	return _u
+}
+
+// SetNillableSessionID sets the "session_id" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableSessionID(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetSessionID(*v)
+	}
+	return _u
+}
+
+// ClearSessionID clears the value of the "session_id" field.
+func (_u *UsageLogUpdateOne) ClearSessionID() *UsageLogUpdateOne {
+	_u.mutation.ClearSessionID()
+	return _u
+}
+
 // SetImageCount sets the "image_count" field.
 func (_u *UsageLogUpdateOne) SetImageCount(v int) *UsageLogUpdateOne {
 	_u.mutation.ResetImageCount()
@@ -2651,6 +2821,16 @@ func (_u *UsageLogUpdateOne) check() error {
 			return &ValidationError{Name: "billing_mode", err: fmt.Errorf(`ent: validator failed for field "UsageLog.billing_mode": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.CacheUsageSource(); ok {
+		if err := usagelog.CacheUsageSourceValidator(v); err != nil {
+			return &ValidationError{Name: "cache_usage_source", err: fmt.Errorf(`ent: validator failed for field "UsageLog.cache_usage_source": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.ForcedCacheReadTokens(); ok {
+		if err := usagelog.ForcedCacheReadTokensValidator(v); err != nil {
+			return &ValidationError{Name: "forced_cache_read_tokens", err: fmt.Errorf(`ent: validator failed for field "UsageLog.forced_cache_read_tokens": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.UserAgent(); ok {
 		if err := usagelog.UserAgentValidator(v); err != nil {
 			return &ValidationError{Name: "user_agent", err: fmt.Errorf(`ent: validator failed for field "UsageLog.user_agent": %w`, err)}
@@ -2659,6 +2839,11 @@ func (_u *UsageLogUpdateOne) check() error {
 	if v, ok := _u.mutation.IPAddress(); ok {
 		if err := usagelog.IPAddressValidator(v); err != nil {
 			return &ValidationError{Name: "ip_address", err: fmt.Errorf(`ent: validator failed for field "UsageLog.ip_address": %w`, err)}
+		}
+	}
+	if v, ok := _u.mutation.SessionID(); ok {
+		if err := usagelog.SessionIDValidator(v); err != nil {
+			return &ValidationError{Name: "session_id", err: fmt.Errorf(`ent: validator failed for field "UsageLog.session_id": %w`, err)}
 		}
 	}
 	if v, ok := _u.mutation.ImageSize(); ok {
@@ -2808,6 +2993,21 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	if value, ok := _u.mutation.AddedCacheReadTokens(); ok {
 		_spec.AddField(usagelog.FieldCacheReadTokens, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.CacheUsageSource(); ok {
+		_spec.SetField(usagelog.FieldCacheUsageSource, field.TypeString, value)
+	}
+	if _u.mutation.CacheUsageSourceCleared() {
+		_spec.ClearField(usagelog.FieldCacheUsageSource, field.TypeString)
+	}
+	if value, ok := _u.mutation.ForcedCacheReadTokens(); ok {
+		_spec.SetField(usagelog.FieldForcedCacheReadTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedForcedCacheReadTokens(); ok {
+		_spec.AddField(usagelog.FieldForcedCacheReadTokens, field.TypeInt, value)
+	}
+	if _u.mutation.ForcedCacheReadTokensCleared() {
+		_spec.ClearField(usagelog.FieldForcedCacheReadTokens, field.TypeInt)
+	}
 	if value, ok := _u.mutation.CacheCreation5mTokens(); ok {
 		_spec.SetField(usagelog.FieldCacheCreation5mTokens, field.TypeInt, value)
 	}
@@ -2918,6 +3118,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.IPAddressCleared() {
 		_spec.ClearField(usagelog.FieldIPAddress, field.TypeString)
+	}
+	if value, ok := _u.mutation.SessionID(); ok {
+		_spec.SetField(usagelog.FieldSessionID, field.TypeString, value)
+	}
+	if _u.mutation.SessionIDCleared() {
+		_spec.ClearField(usagelog.FieldSessionID, field.TypeString)
 	}
 	if value, ok := _u.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)

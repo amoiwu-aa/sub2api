@@ -130,7 +130,12 @@ func anthropicToChatMessages(system json.RawMessage, msgs []AnthropicMessage) ([
 			text := joinResponsesContentPartText(sysParts)
 			if text != "" {
 				content, _ := json.Marshal(text)
-				messages = append(messages, ChatMessage{Role: "system", Content: content})
+				msg := ChatMessage{Role: "system", Content: content}
+				// 折叠成单个字符串后，块级缓存标记转移到消息级，
+				// 支持 cache_control 的 chat 上游才能继续命中前缀缓存。
+				msg.CacheControl, msg.PromptCacheBreakpoint, msg.Breakpoint =
+					lastResponsesPartCacheAnnotations(sysParts)
+				messages = append(messages, msg)
 			}
 		}
 	}
@@ -188,9 +193,12 @@ func anthropicUserToChatMessages(raw json.RawMessage) ([]ChatMessage, error) {
 		text, imageParts := convertToolResultOutput(b)
 		content, _ := json.Marshal(text)
 		out = append(out, ChatMessage{
-			Role:       "tool",
-			Content:    content,
-			ToolCallID: b.ToolUseID,
+			Role:                  "tool",
+			Content:               content,
+			ToolCallID:            b.ToolUseID,
+			CacheControl:          anthropicCacheControlRaw(b.CacheControl),
+			PromptCacheBreakpoint: cloneRawMessage(b.PromptCacheBreakpoint),
+			Breakpoint:            cloneRawMessage(b.Breakpoint),
 		})
 		for _, ip := range imageParts {
 			toolResultImageParts = append(toolResultImageParts, ChatContentPart{
@@ -213,14 +221,23 @@ func anthropicUserToChatMessages(raw json.RawMessage) ([]ChatMessage, error) {
 		case "text":
 			if b.Text != "" {
 				textParts = append(textParts, b.Text)
-				parts = append(parts, ChatContentPart{Type: "text", Text: b.Text})
+				parts = append(parts, ChatContentPart{
+					Type:                  "text",
+					Text:                  b.Text,
+					CacheControl:          anthropicCacheControlRaw(b.CacheControl),
+					PromptCacheBreakpoint: cloneRawMessage(b.PromptCacheBreakpoint),
+					Breakpoint:            cloneRawMessage(b.Breakpoint),
+				})
 			}
 		case "image":
 			if uri := anthropicImageToDataURI(b.Source); uri != "" {
 				hasImage = true
 				parts = append(parts, ChatContentPart{
-					Type:     "image_url",
-					ImageURL: &ChatImageURL{URL: uri},
+					Type:                  "image_url",
+					ImageURL:              &ChatImageURL{URL: uri},
+					CacheControl:          anthropicCacheControlRaw(b.CacheControl),
+					PromptCacheBreakpoint: cloneRawMessage(b.PromptCacheBreakpoint),
+					Breakpoint:            cloneRawMessage(b.Breakpoint),
 				})
 			}
 		}
@@ -233,7 +250,11 @@ func anthropicUserToChatMessages(raw json.RawMessage) ([]ChatMessage, error) {
 	if !hasImage {
 		if len(textParts) > 0 {
 			content, _ := json.Marshal(strings.Join(textParts, "\n\n"))
-			out = append(out, ChatMessage{Role: "user", Content: content})
+			msg := ChatMessage{Role: "user", Content: content}
+			// 文本折叠成单字符串后，块级缓存标记转移到消息级。
+			msg.CacheControl, msg.PromptCacheBreakpoint, msg.Breakpoint =
+				lastAnthropicTextBlockCacheAnnotations(blocks)
+			out = append(out, msg)
 		}
 		return out, nil
 	}
@@ -269,6 +290,8 @@ func anthropicAssistantToChatMessages(raw json.RawMessage) ([]ChatMessage, error
 	if text != "" {
 		content, _ := json.Marshal(text)
 		msg.Content = content
+		msg.CacheControl, msg.PromptCacheBreakpoint, msg.Breakpoint =
+			lastAnthropicTextBlockCacheAnnotations(blocks)
 	}
 
 	for _, b := range blocks {
@@ -309,6 +332,9 @@ func anthropicToolsToChatTools(tools []AnthropicTool) []ChatTool {
 				Parameters:  normalizeToolParameters(t.InputSchema),
 				Strict:      boolPtr(false),
 			},
+			CacheControl:          anthropicCacheControlRaw(t.CacheControl),
+			PromptCacheBreakpoint: cloneRawMessage(t.PromptCacheBreakpoint),
+			Breakpoint:            cloneRawMessage(t.Breakpoint),
 		})
 	}
 	return out
@@ -364,6 +390,20 @@ func joinResponsesContentPartText(parts []ResponsesContentPart) string {
 		}
 	}
 	return strings.Join(texts, "\n\n")
+}
+
+// lastResponsesPartCacheAnnotations returns the cache annotations of the last
+// content part carrying any, for folding parts into a single string message.
+func lastResponsesPartCacheAnnotations(parts []ResponsesContentPart) (cc, pcb, bp json.RawMessage) {
+	for _, p := range parts {
+		if len(p.CacheControl) == 0 && len(p.PromptCacheBreakpoint) == 0 && len(p.Breakpoint) == 0 {
+			continue
+		}
+		cc = cloneRawMessage(p.CacheControl)
+		pcb = cloneRawMessage(p.PromptCacheBreakpoint)
+		bp = cloneRawMessage(p.Breakpoint)
+	}
+	return cc, pcb, bp
 }
 
 // ---------------------------------------------------------------------------
@@ -489,15 +529,32 @@ func chatUsageToAnthropicUsage(usage *ChatUsage) AnthropicUsage {
 
 	cachedTokens := 0
 	cacheCreationTokens := 0
+	cacheReadPresent := false
+	cacheCreationPresent := false
+	var cacheCreation *AnthropicCacheCreationUsage
 	if usage.PromptTokensDetails != nil {
 		cachedTokens = usage.PromptTokensDetails.CachedTokens
+		cacheReadPresent = usage.PromptTokensDetails.cacheFieldsPresent.cached || cachedTokens != 0
 		// cache_write_tokens and cache_creation_tokens are alternate spellings of
 		// the same quantity, not additive; the double-conversion path
 		// (ChatUsageToResponsesUsage) prefers write and falls back to creation.
-		if usage.PromptTokensDetails.CacheWriteTokens > 0 {
+		if usage.PromptTokensDetails.cacheFieldsPresent.write || usage.PromptTokensDetails.CacheWriteTokens != 0 {
 			cacheCreationTokens = usage.PromptTokensDetails.CacheWriteTokens
-		} else {
+			cacheCreationPresent = true
+		} else if usage.PromptTokensDetails.cacheFieldsPresent.creation || usage.PromptTokensDetails.CacheCreationTokens != 0 {
 			cacheCreationTokens = usage.PromptTokensDetails.CacheCreationTokens
+			cacheCreationPresent = true
+		}
+		cacheCreation5mPresent := usage.PromptTokensDetails.cacheFieldsPresent.creation5m ||
+			usage.PromptTokensDetails.CacheCreation5mTokens != 0
+		cacheCreation1hPresent := usage.PromptTokensDetails.cacheFieldsPresent.creation1h ||
+			usage.PromptTokensDetails.CacheCreation1hTokens != 0
+		if cacheCreation5mPresent || cacheCreation1hPresent {
+			cacheCreation = &AnthropicCacheCreationUsage{
+				Ephemeral5mInputTokens: usage.PromptTokensDetails.CacheCreation5mTokens,
+				Ephemeral1hInputTokens: usage.PromptTokensDetails.CacheCreation1hTokens,
+			}
+			cacheCreation.markFieldsPresent(cacheCreation5mPresent, cacheCreation1hPresent)
 		}
 	}
 
@@ -511,6 +568,10 @@ func chatUsageToAnthropicUsage(usage *ChatUsage) AnthropicUsage {
 		OutputTokens:             usage.CompletionTokens,
 		CacheReadInputTokens:     cachedTokens,
 		CacheCreationInputTokens: cacheCreationTokens,
+		CacheCreation:            cacheCreation,
+
+		cacheReadInputTokensPresent:     cacheReadPresent,
+		cacheCreationInputTokensPresent: cacheCreationPresent,
 	}
 }
 
@@ -557,6 +618,13 @@ type ChatCompletionsToAnthropicStreamState struct {
 	OutputTokens             int
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
+	CacheCreation5mTokens    int
+	CacheCreation1hTokens    int
+
+	CacheReadInputTokensPresent     bool
+	CacheCreationInputTokensPresent bool
+	CacheCreation5mTokensPresent    bool
+	CacheCreation1hTokensPresent    bool
 
 	ResponseID string
 	Model      string
@@ -601,6 +669,18 @@ func ChatCompletionsChunkToAnthropicEvents(
 		state.OutputTokens = u.OutputTokens
 		state.CacheReadInputTokens = u.CacheReadInputTokens
 		state.CacheCreationInputTokens = u.CacheCreationInputTokens
+		state.CacheReadInputTokensPresent = u.hasCacheReadInputTokens()
+		state.CacheCreationInputTokensPresent = u.hasCacheCreationInputTokens()
+		if u.CacheCreation != nil {
+			if u.CacheCreation.hasEphemeral5mInputTokens() {
+				state.CacheCreation5mTokens = u.CacheCreation.Ephemeral5mInputTokens
+				state.CacheCreation5mTokensPresent = true
+			}
+			if u.CacheCreation.hasEphemeral1hInputTokens() {
+				state.CacheCreation1hTokens = u.CacheCreation.Ephemeral1hInputTokens
+				state.CacheCreation1hTokensPresent = true
+			}
+		}
 	}
 
 	var events []AnthropicStreamEvent
@@ -679,17 +759,35 @@ func FinalizeChatCompletionsAnthropicStream(state *ChatCompletionsToAnthropicStr
 			Delta: &AnthropicDelta{
 				StopReason: stopReason,
 			},
-			Usage: &AnthropicUsage{
-				InputTokens:              state.InputTokens,
-				OutputTokens:             state.OutputTokens,
-				CacheReadInputTokens:     state.CacheReadInputTokens,
-				CacheCreationInputTokens: state.CacheCreationInputTokens,
-			},
+			Usage: anthropicUsageFromChatStreamState(state),
 		},
 		AnthropicStreamEvent{Type: "message_stop"},
 	)
 	state.MessageStopSent = true
 	return events
+}
+
+func anthropicUsageFromChatStreamState(state *ChatCompletionsToAnthropicStreamState) *AnthropicUsage {
+	usage := &AnthropicUsage{
+		InputTokens:              state.InputTokens,
+		OutputTokens:             state.OutputTokens,
+		CacheReadInputTokens:     state.CacheReadInputTokens,
+		CacheCreationInputTokens: state.CacheCreationInputTokens,
+
+		cacheReadInputTokensPresent:     state.CacheReadInputTokensPresent,
+		cacheCreationInputTokensPresent: state.CacheCreationInputTokensPresent,
+	}
+	if state.CacheCreation5mTokensPresent || state.CacheCreation1hTokensPresent {
+		usage.CacheCreation = &AnthropicCacheCreationUsage{
+			Ephemeral5mInputTokens: state.CacheCreation5mTokens,
+			Ephemeral1hInputTokens: state.CacheCreation1hTokens,
+		}
+		usage.CacheCreation.markFieldsPresent(
+			state.CacheCreation5mTokensPresent,
+			state.CacheCreation1hTokensPresent,
+		)
+	}
+	return usage
 }
 
 // ensureCCAnthropicMessageStart emits message_start on the first event.

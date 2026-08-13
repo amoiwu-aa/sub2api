@@ -791,7 +791,12 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
 
 func TestParseOpenAIImagesSSEUsageBytes_ToolUsagePrecedenceAndFallback(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	fallback := OpenAIUsage{InputTokens: 3, OutputTokens: 4, ImageOutputTokens: 2}
+	fallback := OpenAIUsage{
+		InputTokens:       3,
+		OutputTokens:      4,
+		CacheUsageSource:  CacheUsageSourceUnavailable,
+		ImageOutputTokens: 2,
+	}
 	tests := []struct {
 		name      string
 		toolUsage string
@@ -800,7 +805,12 @@ func TestParseOpenAIImagesSSEUsageBytes_ToolUsagePrecedenceAndFallback(t *testin
 		{
 			name:      "valid tool usage takes atomic precedence",
 			toolUsage: `{"input_tokens":4.6e1,"output_tokens":2459e0,"output_tokens_details":{"image_tokens":24590e-1}}`,
-			want:      OpenAIUsage{InputTokens: 46, OutputTokens: 2459, ImageOutputTokens: 2459},
+			want: OpenAIUsage{
+				InputTokens:       46,
+				OutputTokens:      2459,
+				CacheUsageSource:  CacheUsageSourceUnavailable,
+				ImageOutputTokens: 2459,
+			},
 		},
 		{name: "absent", want: fallback},
 		{name: "malformed field", toolUsage: `{"input_tokens":"46","output_tokens":2459,"output_tokens_details":{"image_tokens":2459}}`, want: fallback},
@@ -833,7 +843,12 @@ func TestParseOpenAIImagesSSEUsageBytes_MalformedCompletedDoesNotOverrideUsage(t
 	svc.parseOpenAIImagesSSEUsageBytes([]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":4,"output_tokens_details":{"image_tokens":2}}}}`), &usage)
 	svc.parseOpenAIImagesSSEUsageBytes([]byte(`{"type":"response.completed","response":{"tool_usage":{"image_gen":{"input_tokens":46,"output_tokens":2459,"output_tokens_details":{"image_tokens":2459}}}}} trailing`), &usage)
 
-	require.Equal(t, OpenAIUsage{InputTokens: 3, OutputTokens: 4, ImageOutputTokens: 2}, usage)
+	require.Equal(t, OpenAIUsage{
+		InputTokens:       3,
+		OutputTokens:      4,
+		CacheUsageSource:  CacheUsageSourceUnavailable,
+		ImageOutputTokens: 2,
+	}, usage)
 }
 
 func TestBoundedJSONNonNegativeInt(t *testing.T) {
@@ -1442,7 +1457,12 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingTransformsEvents(t *tes
 	require.NotNil(t, result)
 	require.True(t, result.Stream)
 	require.Equal(t, 1, result.ImageCount)
-	require.Equal(t, OpenAIUsage{InputTokens: 46, OutputTokens: 2459, ImageOutputTokens: 2459}, result.Usage)
+	require.Equal(t, OpenAIUsage{
+		InputTokens:       46,
+		OutputTokens:      2459,
+		CacheUsageSource:  CacheUsageSourceUnavailable,
+		ImageOutputTokens: 2459,
+	}, result.Usage)
 	events := parseOpenAIImageTestSSEEvents(rec.Body.String())
 	partial, ok := findOpenAIImageTestSSEEvent(events, "image_generation.partial_image")
 	require.True(t, ok)

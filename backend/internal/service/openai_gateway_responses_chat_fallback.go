@@ -72,6 +72,13 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions fallback request: %w", err)
 	}
+	// 这条回退路径不经过 /v1/responses 主管线的能力门，转换保真会把
+	// prompt_cache_options / breakpoint / cache_control 一并带过来，
+	// 必须按目标模型能力在这里补一次剥离。
+	chatBody, err = applyOpenAIPromptCachePolicyToBody(account, upstreamModel, chatBody)
+	if err != nil {
+		return nil, err
+	}
 	chatBody, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
 	if err != nil {
 		var blocked *OpenAIFastBlockedError

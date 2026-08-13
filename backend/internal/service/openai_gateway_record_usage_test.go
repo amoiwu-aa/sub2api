@@ -370,6 +370,8 @@ func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t
 	require.Equal(t, "pricing-missing-test-model", usageRepo.lastLog.RequestedModel)
 	require.Equal(t, 1200, usageRepo.lastLog.InputTokens)
 	require.Equal(t, 300, usageRepo.lastLog.OutputTokens)
+	require.NotNil(t, usageRepo.lastLog.CacheUsageSource)
+	require.Equal(t, CacheUsageSourceUnavailable, *usageRepo.lastLog.CacheUsageSource)
 	require.Zero(t, usageRepo.lastLog.TotalCost)
 	require.Zero(t, usageRepo.lastLog.ActualCost)
 	require.NotNil(t, usageRepo.lastLog.BillingMode)
@@ -387,7 +389,12 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 	groupID := int64(11)
 	groupRate := 1.4
 	userRate := 1.8
-	usage := OpenAIUsage{InputTokens: 15, OutputTokens: 4, CacheReadInputTokens: 3}
+	usage := OpenAIUsage{
+		InputTokens:          15,
+		OutputTokens:         4,
+		CacheReadInputTokens: 3,
+		CacheUsageSource:     CacheUsageSourceReported,
+	}
 
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -420,6 +427,8 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 	require.Equal(t, userRate, usageRepo.lastLog.RateMultiplier)
 	require.Equal(t, 12, usageRepo.lastLog.InputTokens)
 	require.Equal(t, 3, usageRepo.lastLog.CacheReadTokens)
+	require.NotNil(t, usageRepo.lastLog.CacheUsageSource)
+	require.Equal(t, CacheUsageSourceReported, *usageRepo.lastLog.CacheUsageSource)
 
 	expected := expectedOpenAICost(t, svc, "gpt-5.1", usage, userRate)
 	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)

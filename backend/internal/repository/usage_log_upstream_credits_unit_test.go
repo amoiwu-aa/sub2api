@@ -27,8 +27,13 @@ func newUpstreamCreditsUsageLog(credits float64) *service.UsageLog {
 	}
 }
 
-// TestPrepareUsageLogInsert_UpstreamCreditsArgWiring pins upstream_credits to the
-// tail of the arg slice.
+func upstreamCreditsArgIndex(args []any) int {
+	const argsAfterUpstreamCredits = 2 // cache_usage_source, forced_cache_read_tokens
+	return len(args) - 1 - argsAfterUpstreamCredits
+}
+
+// TestPrepareUsageLogInsert_UpstreamCreditsArgWiring pins upstream_credits near
+// the tail of the arg slice, before later append-only columns.
 //
 // Position matters beyond bookkeeping: several INSERT paths in this package spell
 // out $1..$N by hand, so the column was deliberately appended after created_at to
@@ -40,12 +45,12 @@ func TestPrepareUsageLogInsert_UpstreamCreditsArgWiring(t *testing.T) {
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes),
 		"prepared args must match the arg-type table length")
 
-	last := len(prepared.args) - 1
-	credits, ok := prepared.args[last].(float64)
-	require.True(t, ok, "upstream_credits arg should be a float64, got %T", prepared.args[last])
+	index := upstreamCreditsArgIndex(prepared.args)
+	credits, ok := prepared.args[index].(float64)
+	require.True(t, ok, "upstream_credits arg should be a float64, got %T", prepared.args[index])
 	require.InDelta(t, 0.148231, credits, 1e-9)
 
-	require.Equal(t, "numeric", usageLogInsertArgTypes[last],
+	require.Equal(t, "numeric", usageLogInsertArgTypes[index],
 		"upstream_credits arg type must be numeric")
 }
 
@@ -54,7 +59,7 @@ func TestPrepareUsageLogInsert_UpstreamCreditsArgWiring(t *testing.T) {
 // NOT NULL and callers sum it without a nil guard).
 func TestPrepareUsageLogInsert_UpstreamCreditsDefaultsToZero(t *testing.T) {
 	prepared := prepareUsageLogInsert(newUpstreamCreditsUsageLog(0))
-	require.Equal(t, 0.0, prepared.args[len(prepared.args)-1])
+	require.Equal(t, 0.0, prepared.args[upstreamCreditsArgIndex(prepared.args)])
 }
 
 // TestUsageLogInsertQueries_IncludeUpstreamCredits guards that every generated

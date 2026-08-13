@@ -146,6 +146,12 @@ type UsageLog struct {
 	OutputTokens        int
 	CacheCreationTokens int
 	CacheReadTokens     int
+	// CacheUsageSource is nil for legacy rows and requests without an explicit
+	// cache observation. A zero cache-read count can still be reported.
+	CacheUsageSource *CacheUsageSource
+	// ForcedCacheReadTokens is the accounting-only portion of CacheReadTokens
+	// moved from ordinary input by ForceCacheBilling.
+	ForcedCacheReadTokens int
 
 	CacheCreation5mTokens int `gorm:"column:cache_creation_5m_tokens"`
 	CacheCreation1hTokens int `gorm:"column:cache_creation_1h_tokens"`
@@ -214,6 +220,21 @@ type UsageLog struct {
 
 func (u *UsageLog) TotalTokens() int {
 	return u.InputTokens + u.OutputTokens + u.CacheCreationTokens + u.CacheReadTokens
+}
+
+func (u *UsageLog) ProviderCacheReadTokens() int {
+	if u == nil || u.CacheUsageSource == nil || *u.CacheUsageSource != CacheUsageSourceReported {
+		return 0
+	}
+	forcedTokens := u.ForcedCacheReadTokens
+	if forcedTokens < 0 {
+		forcedTokens = 0
+	}
+	providerTokens := u.CacheReadTokens - forcedTokens
+	if providerTokens < 0 {
+		return 0
+	}
+	return providerTokens
 }
 
 func (u *UsageLog) EffectiveRequestType() RequestType {

@@ -76,6 +76,12 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions request: %w", err)
 	}
+	// 直接桥现在保真携带 Anthropic 缓存标记；与 Responses 回退一样，
+	// 不支持显式缓存的上游必须在发出前剥离（忽略，不伪造）。
+	chatBody, err = applyOpenAIPromptCachePolicyToBody(account, upstreamModel, chatBody)
+	if err != nil {
+		return nil, err
+	}
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(chatBody, upstreamModel); normalized {
 		chatBody = normalizedBody
 	}

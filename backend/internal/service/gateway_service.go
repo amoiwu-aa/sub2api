@@ -581,6 +581,10 @@ type ClaudeUsage struct {
 	CacheCreation5mTokens    int // 5分钟缓存创建token（来自嵌套 cache_creation 对象）
 	CacheCreation1hTokens    int // 1小时缓存创建token（来自嵌套 cache_creation 对象）
 	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
+	// CacheUsageSource records cache observability, not whether the numeric value is non-zero.
+	CacheUsageSource CacheUsageSource `json:"-"`
+	// ForcedCacheReadInputTokens is the accounting-only portion moved from ordinary input.
+	ForcedCacheReadInputTokens int `json:"-"`
 }
 
 // ForwardResult 转发结果
@@ -605,6 +609,10 @@ type ForwardResult struct {
 	FirstTokenMs                  *int // 首字时间（流式请求）
 	ClientDisconnect              bool // 客户端是否在流式传输过程中断开
 	ReasoningEffort               *string
+	// ServiceTier 是本次请求生效的速度/服务档位，写进用量日志并参与计费。
+	// Cursor 通道写 "fast" / "standard"（OpenAI 的 priority/flex 走
+	// openai_gateway_usage.go 的专属路径，不经过这里）。
+	ServiceTier *string
 
 	// UpstreamCredits 是上游对本次请求自报的计费量（目前只有 Kiro 的 meteringEvent）。
 	// 与 Usage 里的 token 不同量纲，不参与计费，只落库供对账与额度归因。

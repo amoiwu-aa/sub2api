@@ -174,6 +174,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
+	// Anthropic→Responses 转换保真携带 cache_control/breakpoint；此路径不经过
+	// /v1/responses 主管线的能力门，需在此按目标模型能力决定保留或剥离。
+	// （cache_control 的缓存意图已在上方折算进 prompt_cache_key，剥离不丢收益。）
+	responsesBody, err = applyOpenAIPromptCachePolicyToBody(account, upstreamModel, responsesBody)
+	if err != nil {
+		return nil, err
+	}
 
 	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
 		var reqBody map[string]any

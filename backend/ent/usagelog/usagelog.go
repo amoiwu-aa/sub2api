@@ -52,6 +52,10 @@ const (
 	FieldCacheCreationTokens = "cache_creation_tokens"
 	// FieldCacheReadTokens holds the string denoting the cache_read_tokens field in the database.
 	FieldCacheReadTokens = "cache_read_tokens"
+	// FieldCacheUsageSource holds the string denoting the cache_usage_source field in the database.
+	FieldCacheUsageSource = "cache_usage_source"
+	// FieldForcedCacheReadTokens holds the string denoting the forced_cache_read_tokens field in the database.
+	FieldForcedCacheReadTokens = "forced_cache_read_tokens"
 	// FieldCacheCreation5mTokens holds the string denoting the cache_creation_5m_tokens field in the database.
 	FieldCacheCreation5mTokens = "cache_creation_5m_tokens"
 	// FieldCacheCreation1hTokens holds the string denoting the cache_creation_1h_tokens field in the database.
@@ -88,6 +92,8 @@ const (
 	FieldUserAgent = "user_agent"
 	// FieldIPAddress holds the string denoting the ip_address field in the database.
 	FieldIPAddress = "ip_address"
+	// FieldSessionID holds the string denoting the session_id field in the database.
+	FieldSessionID = "session_id"
 	// FieldImageCount holds the string denoting the image_count field in the database.
 	FieldImageCount = "image_count"
 	// FieldImageSize holds the string denoting the image_size field in the database.
@@ -181,6 +187,8 @@ var Columns = []string{
 	FieldOutputTokens,
 	FieldCacheCreationTokens,
 	FieldCacheReadTokens,
+	FieldCacheUsageSource,
+	FieldForcedCacheReadTokens,
 	FieldCacheCreation5mTokens,
 	FieldCacheCreation1hTokens,
 	FieldInputCost,
@@ -199,6 +207,7 @@ var Columns = []string{
 	FieldFirstTokenMs,
 	FieldUserAgent,
 	FieldIPAddress,
+	FieldSessionID,
 	FieldImageCount,
 	FieldImageSize,
 	FieldImageInputSize,
@@ -247,6 +256,10 @@ var (
 	DefaultCacheCreationTokens int
 	// DefaultCacheReadTokens holds the default value on creation for the "cache_read_tokens" field.
 	DefaultCacheReadTokens int
+	// CacheUsageSourceValidator is a validator for the "cache_usage_source" field. It is called by the builders before save.
+	CacheUsageSourceValidator func(string) error
+	// ForcedCacheReadTokensValidator is a validator for the "forced_cache_read_tokens" field. It is called by the builders before save.
+	ForcedCacheReadTokensValidator func(int) error
 	// DefaultCacheCreation5mTokens holds the default value on creation for the "cache_creation_5m_tokens" field.
 	DefaultCacheCreation5mTokens int
 	// DefaultCacheCreation1hTokens holds the default value on creation for the "cache_creation_1h_tokens" field.
@@ -277,6 +290,8 @@ var (
 	UserAgentValidator func(string) error
 	// IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
 	IPAddressValidator func(string) error
+	// SessionIDValidator is a validator for the "session_id" field. It is called by the builders before save.
+	SessionIDValidator func(string) error
 	// DefaultImageCount holds the default value on creation for the "image_count" field.
 	DefaultImageCount int
 	// ImageSizeValidator is a validator for the "image_size" field. It is called by the builders before save.
@@ -400,6 +415,16 @@ func ByCacheReadTokens(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCacheReadTokens, opts...).ToFunc()
 }
 
+// ByCacheUsageSource orders the results by the cache_usage_source field.
+func ByCacheUsageSource(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCacheUsageSource, opts...).ToFunc()
+}
+
+// ByForcedCacheReadTokens orders the results by the forced_cache_read_tokens field.
+func ByForcedCacheReadTokens(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldForcedCacheReadTokens, opts...).ToFunc()
+}
+
 // ByCacheCreation5mTokens orders the results by the cache_creation_5m_tokens field.
 func ByCacheCreation5mTokens(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCacheCreation5mTokens, opts...).ToFunc()
@@ -488,6 +513,11 @@ func ByUserAgent(opts ...sql.OrderTermOption) OrderOption {
 // ByIPAddress orders the results by the ip_address field.
 func ByIPAddress(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIPAddress, opts...).ToFunc()
+}
+
+// BySessionID orders the results by the session_id field.
+func BySessionID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSessionID, opts...).ToFunc()
 }
 
 // ByImageCount orders the results by the image_count field.
