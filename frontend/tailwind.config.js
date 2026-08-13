@@ -70,8 +70,14 @@ export default {
         glow: '0 0 20px rgba(20, 184, 166, 0.25)',
         'glow-lg': '0 0 40px rgba(20, 184, 166, 0.35)',
         card: '0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03)',
-        'card-hover': '0 4px 16px -4px rgba(15, 23, 42, 0.1), 0 2px 6px -2px rgba(15, 23, 42, 0.06)',
-        'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+        'card-hover': '0 2px 8px -2px rgba(15, 23, 42, 0.08), 0 1px 3px -1px rgba(15, 23, 42, 0.05)',
+        'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+        /* 分层阴影：低海拔贴近、中海拔用于弹层、高海拔用于模态框。
+         * 阴影本质是“光源下的高度”，层级越高投影越散越柔。 */
+        'depth-sm': '0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 4px rgba(15, 23, 42, 0.03)',
+        'depth-md': '0 4px 12px -4px rgba(15, 23, 42, 0.08), 0 2px 6px -2px rgba(15, 23, 42, 0.05)',
+        'depth-lg': '0 16px 40px -12px rgba(15, 23, 42, 0.18), 0 4px 12px -4px rgba(15, 23, 42, 0.08)',
+        'depth-xl': '0 24px 64px -16px rgba(15, 23, 42, 0.24), 0 8px 24px -8px rgba(15, 23, 42, 0.1)'
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',

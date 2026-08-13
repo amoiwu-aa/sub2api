@@ -376,7 +376,7 @@ onUnmounted(() => {
 <style scoped>
 .custom-page-layout {
   @apply flex flex-col;
-  height: calc(100vh - 64px - 4rem);
+  height: calc(100vh - 56px - 4rem); /* header 高度 h-14，与 AppHeader 保持一致 */
 }
 
 .toc-sidebar {

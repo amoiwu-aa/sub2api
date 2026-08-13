@@ -52,6 +52,10 @@ const messages: Record<string, string> = {
   'keys.status.expired': 'Expired',
   'keys.status.inactive': 'Inactive',
   'keys.status.quota_exhausted': 'Quota exhausted',
+  'keys.today': 'Today',
+  'keys.total': 'Last 30d',
+  'keys.tokens': 'tokens',
+  'keys.tokenUsageHint': '{count} tokens total',
   'keys.usage': 'Usage',
 }
 
@@ -100,7 +104,13 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messages[key] ?? key,
+      t: (key: string, params?: Record<string, string | number>) => {
+        const value = messages[key] ?? key
+        return Object.entries(params ?? {}).reduce(
+          (text, [name, replacement]) => text.replace(`{${name}}`, String(replacement)),
+          value
+        )
+      },
     }),
   }
 })
@@ -172,6 +182,9 @@ const DataTableStub = {
         <slot name="cell-name" :value="row.name" :row="row" />
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
+        </div>
+        <div data-test="usage">
+          <slot name="cell-usage" :row="row" />
         </div>
         <div
           v-if="columns.some((col) => col.key === 'last_used_ip')"
@@ -392,6 +405,30 @@ describe('user KeysView column settings', () => {
     const wrapper = await mountView()
 
     expect(wrapper.get('[data-test="current-concurrency"]').text()).toBe('3')
+  })
+
+  it('renders compact today and 30-day token usage beside cost', async () => {
+    getDashboardApiKeysUsage.mockResolvedValueOnce({
+      stats: {
+        '1': {
+          api_key_id: 1,
+          today_actual_cost: 0.1234,
+          total_actual_cost: 2.3456,
+          today_tokens: 1_234_567,
+          total_tokens: 9_876_543,
+        },
+      },
+    })
+
+    const wrapper = await mountView()
+    const usage = wrapper.get('[data-test="usage"]')
+
+    expect(usage.text()).toContain('Today: $0.1234 · 1.2M tokens')
+    expect(usage.text()).toContain('Last 30d: $2.3456 · 9.9M tokens')
+    expect(usage.findAll('[title]').map((item) => item.attributes('title'))).toEqual([
+      '1,234,567 tokens total',
+      '9,876,543 tokens total',
+    ])
   })
 
   it('marks current concurrency as sortable', async () => {

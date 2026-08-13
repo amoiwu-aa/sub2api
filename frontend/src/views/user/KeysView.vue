@@ -188,17 +188,29 @@
           </template>
 
           <template #cell-usage="{ row }">
-            <div class="text-sm">
-              <div class="flex items-center gap-1.5">
+            <div class="min-w-[170px] text-sm">
+              <div class="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
+                <span class="font-medium tabular-nums text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
                 </span>
+                <span
+                  class="whitespace-nowrap text-[11px] tabular-nums text-gray-400 dark:text-gray-500"
+                  :title="tokenUsageTitle(usageStats[row.id]?.today_tokens)"
+                >
+                  · {{ formatCompactNumber(usageStats[row.id]?.today_tokens ?? 0) }} {{ t('keys.tokens') }}
+                </span>
               </div>
-              <div class="mt-0.5 flex items-center gap-1.5">
+              <div class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
+                <span class="font-medium tabular-nums text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
+                </span>
+                <span
+                  class="whitespace-nowrap text-[11px] tabular-nums text-gray-400 dark:text-gray-500"
+                  :title="tokenUsageTitle(usageStats[row.id]?.total_tokens)"
+                >
+                  · {{ formatCompactNumber(usageStats[row.id]?.total_tokens ?? 0) }} {{ t('keys.tokens') }}
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
@@ -1175,7 +1187,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
-import { formatDateTime } from '@/utils/format'
+import { formatCompactNumber, formatDateTime } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
   buildCcSwitchImportDeeplink,
@@ -1193,6 +1205,9 @@ const formatDateTimeLocal = (isoDate: string): string => {
   const pad = (n: number) => n.toString().padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
+
+const tokenUsageTitle = (tokens?: number): string =>
+  t('keys.tokenUsageHint', { count: (tokens ?? 0).toLocaleString() })
 
 interface GroupOption {
   value: number
