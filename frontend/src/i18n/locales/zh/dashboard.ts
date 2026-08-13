@@ -123,6 +123,8 @@ export default {
     usage: '用量',
     today: '今日',
     total: '近30天',
+    tokens: 'Token',
+    tokenUsageHint: '共 {count} Token（输入、输出和缓存合计）',
     quota: '额度',
     lastUsedAt: '上次使用时间',
     lastUsedIP: '最近使用 IP',

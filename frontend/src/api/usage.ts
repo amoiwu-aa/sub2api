@@ -15,7 +15,8 @@ import type {
   UsageRequestType,
   UserErrorRequest,
   UserErrorRequestDetail,
-  UserErrorListParams
+  UserErrorListParams,
+  CacheObservationFields
 } from '@/types'
 
 // ==================== Dashboard Types ====================
@@ -38,6 +39,12 @@ export interface UserDashboardStats {
   total_output_tokens: number
   total_cache_creation_tokens: number
   total_cache_read_tokens: number
+  total_provider_cache_read_tokens?: number
+  total_cache_hit_requests?: number
+  total_forced_cache_read_tokens?: number
+  total_reported_requests?: number
+  total_estimated_requests?: number
+  total_unavailable_requests?: number
   total_tokens: number
   total_cost: number // 标准计费
   total_actual_cost: number // 实际扣除
@@ -46,6 +53,12 @@ export interface UserDashboardStats {
   today_output_tokens: number
   today_cache_creation_tokens: number
   today_cache_read_tokens: number
+  today_provider_cache_read_tokens?: number
+  today_cache_hit_requests?: number
+  today_forced_cache_read_tokens?: number
+  today_reported_requests?: number
+  today_estimated_requests?: number
+  today_unavailable_requests?: number
   today_tokens: number
   today_cost: number // 今日标准计费
   today_actual_cost: number // 今日实际扣除
@@ -82,7 +95,7 @@ export interface ModelStatsResponse {
   end_date: string
 }
 
-export interface ApiKeyDailyUsagePoint {
+export interface ApiKeyDailyUsagePoint extends CacheObservationFields {
   date: string
   requests: number
   input_tokens: number
@@ -324,6 +337,8 @@ export interface BatchApiKeyUsageStats {
   api_key_id: number
   today_actual_cost: number
   total_actual_cost: number
+  today_tokens: number
+  total_tokens: number
 }
 
 export interface BatchApiKeysUsageResponse {

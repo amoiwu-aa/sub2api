@@ -123,6 +123,8 @@ export default {
     usage: 'Usage',
     today: 'Today',
     total: 'Last 30d',
+    tokens: 'tokens',
+    tokenUsageHint: '{count} tokens total (input, output, and cache)',
     quota: 'Quota',
     lastUsedAt: 'Last Used',
     lastUsedIP: 'Last Used IP',

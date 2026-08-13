@@ -1944,6 +1944,21 @@ export interface RedeemCodeRequest {
 
 // ==================== Dashboard & Statistics ====================
 
+export interface CacheObservationFields {
+  /** Cache-read tokens reported by the upstream provider, excluding accounting-only adjustments. */
+  provider_cache_read_tokens?: number
+  /** Provider-reported requests whose cache-read token count is greater than zero. */
+  cache_hit_requests?: number
+  /** Tokens moved into the cache-read billing bucket by local accounting policy. */
+  forced_cache_read_tokens?: number
+  /** Requests whose cache usage was reported by the upstream provider. */
+  reported_requests?: number
+  /** Requests whose cache usage was estimated locally. */
+  estimated_requests?: number
+  /** Requests for which cache usage could not be observed. */
+  unavailable_requests?: number
+}
+
 export interface DashboardStats {
   // 用户统计
   total_users: number
@@ -1970,6 +1985,12 @@ export interface DashboardStats {
   total_output_tokens: number
   total_cache_creation_tokens: number
   total_cache_read_tokens: number
+  total_provider_cache_read_tokens?: number
+  total_cache_hit_requests?: number
+  total_forced_cache_read_tokens?: number
+  total_reported_requests?: number
+  total_estimated_requests?: number
+  total_unavailable_requests?: number
   total_tokens: number
   total_cost: number // 累计标准计费
   total_actual_cost: number // 累计实际扣除
@@ -1981,6 +2002,12 @@ export interface DashboardStats {
   today_output_tokens: number
   today_cache_creation_tokens: number
   today_cache_read_tokens: number
+  today_provider_cache_read_tokens?: number
+  today_cache_hit_requests?: number
+  today_forced_cache_read_tokens?: number
+  today_reported_requests?: number
+  today_estimated_requests?: number
+  today_unavailable_requests?: number
   today_tokens: number
   today_cost: number // 今日标准计费
   today_actual_cost: number // 今日实际扣除
@@ -2003,6 +2030,12 @@ export interface UsageStatsResponse {
   total_cache_tokens: number
   total_cache_read_tokens: number
   total_cache_creation_tokens: number
+  total_provider_cache_read_tokens?: number
+  cache_hit_requests?: number
+  total_forced_cache_read_tokens?: number
+  reported_requests?: number
+  estimated_requests?: number
+  unavailable_requests?: number
   total_tokens: number
   total_cost: number // 标准计费
   total_actual_cost: number // 实际扣除
@@ -2015,7 +2048,7 @@ export interface UsageStatsResponse {
 
 // ==================== Trend & Chart Types ====================
 
-export interface TrendDataPoint {
+export interface TrendDataPoint extends CacheObservationFields {
   date: string
   requests: number
   input_tokens: number
@@ -2027,7 +2060,7 @@ export interface TrendDataPoint {
   actual_cost: number // 实际扣除
 }
 
-export interface ModelStat {
+export interface ModelStat extends CacheObservationFields {
   model: string
   requests: number
   input_tokens: number

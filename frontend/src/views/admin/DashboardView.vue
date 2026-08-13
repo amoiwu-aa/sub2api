@@ -7,126 +7,175 @@
       </div>
 
       <template v-else-if="stats">
-        <!-- 统计概览：统一使用 StatCard；宽屏下 10 项排成两行。 -->
-        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-5">
-          <StatCard icon="key" :label="t('admin.dashboard.apiKeys')" :value="stats.total_api_keys">
-            <template #footnote>
-              <span :class="stats.active_api_keys > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''">
-                {{ stats.active_api_keys }} {{ t('common.active') }}
+        <!-- 今日概览：回答「现在服务怎么样」的五个生命体征组成一条 stat band。
+             原来 10 张等权卡片没有主角——大数字直接排版在一张表面上，
+             细分隔线负责分组，数字本身是唯一的视觉焦点。 -->
+        <section class="card dash-hero" :aria-label="t('admin.dashboard.todayPeriod')">
+          <div class="dash-hero__grid">
+            <div class="dash-hero__metric">
+              <span class="dash-hero__label">{{ t('admin.dashboard.todayRequests') }}</span>
+              <span class="dash-hero__value">{{ formatNumber(stats.today_requests) }}</span>
+              <span class="dash-hero__foot">{{ t('common.total') }} {{ formatNumber(stats.total_requests) }}</span>
+            </div>
+
+            <div class="dash-hero__metric">
+              <span class="dash-hero__label">{{ t('admin.dashboard.todayTokens') }}</span>
+              <span class="dash-hero__value">{{ formatTokens(stats.today_tokens) }}</span>
+              <span class="dash-hero__foot">
+                <CostTriplet
+                  :actual="formatCost(stats.today_actual_cost)"
+                  :account="formatCost(stats.today_account_cost)"
+                  :standard="formatCost(stats.today_cost)"
+                />
               </span>
-            </template>
-          </StatCard>
+            </div>
 
-          <StatCard icon="server" :label="t('admin.dashboard.accounts')" :value="stats.total_accounts">
-            <template #footnote>
-              <span :class="stats.normal_accounts > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''">
-                {{ stats.normal_accounts }} {{ t('common.active') }}
+            <div class="dash-hero__metric">
+              <span
+                class="dash-hero__label"
+                :title="t('admin.dashboard.cacheReadCoverageTooltip')"
+              >
+                {{ t('admin.dashboard.todayCacheReadCoverage') }}
               </span>
-              <!-- 异常数是这一屏里最该被看见的东西，所以只有它用红色，且为 0 时不出现。 -->
-              <span v-if="stats.error_accounts > 0" class="ml-1.5 font-medium text-red-600 dark:text-red-400">
-                {{ stats.error_accounts }} {{ t('common.error') }}
+              <span
+                data-testid="today-cache-coverage-value"
+                class="dash-hero__value"
+                :title="t('admin.dashboard.cacheReadCoverageTooltip')"
+              >
+                {{ formatCacheCoverage(todayCacheMetrics) }}
               </span>
-            </template>
-          </StatCard>
+              <span class="dash-hero__foot">
+                {{ t('admin.dashboard.providerCacheReadShort') }}
+                {{ formatTokens(todayCacheMetrics.providerRead) }}
+                · {{ t('admin.dashboard.cacheCreateShort') }} {{ formatTokens(stats.today_cache_creation_tokens) }}
+              </span>
+              <span
+                v-if="todayCacheMetrics.observability.available"
+                data-testid="today-cache-observability"
+                class="dash-hero__foot"
+                :title="t('admin.dashboard.cacheObservabilityTooltip')"
+              >
+                {{
+                  todayCacheMetrics.observability.unobservable
+                    ? t('admin.dashboard.cacheUnobservable')
+                    : todayCacheMetrics.observability.partiallyObservable
+                      ? t('admin.dashboard.cachePartiallyObservable')
+                      : t('admin.dashboard.observableRequests')
+                }}
+                {{ formatCacheObservability(todayCacheMetrics.observability) }}
+              </span>
+              <span
+                v-if="todayCacheMetrics.forcedAdjustment > 0"
+                data-testid="today-cache-billing-adjustment"
+                class="dash-hero__foot"
+                :title="t('admin.dashboard.billingAdjustmentTooltip')"
+              >
+                {{ t('admin.dashboard.billingAdjustmentTokens') }}
+                {{ formatTokens(todayCacheMetrics.forcedAdjustment) }}
+              </span>
+            </div>
 
-          <StatCard icon="chart" :label="t('admin.dashboard.todayRequests')" :value="stats.today_requests">
-            <template #footnote>
-              {{ t('common.total') }} {{ formatNumber(stats.total_requests) }}
-            </template>
-          </StatCard>
+            <div class="dash-hero__metric">
+              <span class="dash-hero__label">{{ t('admin.dashboard.performance') }}</span>
+              <span class="dash-hero__value">{{ formatTokens(stats.rpm) }}<span class="dash-hero__unit">RPM</span></span>
+              <span class="dash-hero__foot">{{ formatTokens(stats.tpm) }} TPM</span>
+            </div>
 
-          <StatCard
-            icon="userPlus"
-            :label="t('admin.dashboard.users')"
-            :value="stats.today_new_users"
-            :prefix="stats.today_new_users > 0 ? '+' : ''"
-          >
-            <template #footnote>
-              {{ t('common.total') }} {{ formatNumber(stats.total_users) }}
-            </template>
-          </StatCard>
+            <div class="dash-hero__metric">
+              <span class="dash-hero__label">{{ t('admin.dashboard.avgResponse') }}</span>
+              <span class="dash-hero__value">{{ formatDuration(stats.average_duration_ms) }}</span>
+              <span class="dash-hero__foot">{{ stats.active_users }} {{ t('admin.dashboard.activeUsers') }}</span>
+            </div>
+          </div>
+        </section>
 
-          <StatCard icon="cube" :label="t('admin.dashboard.todayTokens')" :value="formatTokens(stats.today_tokens)">
-            <template #footnote>
-              <CostTriplet
-                :actual="formatCost(stats.today_actual_cost)"
-                :account="formatCost(stats.today_account_cost)"
-                :standard="formatCost(stats.today_cost)"
-              />
-            </template>
-          </StatCard>
+        <!-- 库存与累计：变化缓慢的参考数字，不需要卡片。一行文字扫过即可，
+             唯一保留彩色的是异常账号数——它是这行里唯一需要立刻处理的信息。 -->
+        <section class="dash-inventory" :aria-label="t('admin.dashboard.totalPeriod')">
+          <div class="dash-inventory__group">
+            <span class="dash-inventory__label">{{ t('admin.dashboard.apiKeys') }}</span>
+            <span class="dash-inventory__value">{{ formatNumber(stats.total_api_keys) }}</span>
+            <span class="dash-inventory__meta" :class="stats.active_api_keys > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''">
+              {{ stats.active_api_keys }} {{ t('common.active') }}
+            </span>
+          </div>
 
-          <StatCard icon="database" :label="t('admin.dashboard.totalTokens')" :value="formatTokens(stats.total_tokens)">
-            <template #footnote>
+          <div class="dash-inventory__group">
+            <span class="dash-inventory__label">{{ t('admin.dashboard.accounts') }}</span>
+            <span class="dash-inventory__value">{{ formatNumber(stats.total_accounts) }}</span>
+            <span class="dash-inventory__meta" :class="stats.normal_accounts > 0 ? 'text-emerald-600 dark:text-emerald-400' : ''">
+              {{ stats.normal_accounts }} {{ t('common.active') }}
+            </span>
+            <span v-if="stats.error_accounts > 0" class="dash-inventory__meta font-medium text-red-600 dark:text-red-400">
+              {{ stats.error_accounts }} {{ t('common.error') }}
+            </span>
+          </div>
+
+          <div class="dash-inventory__group">
+            <span class="dash-inventory__label">{{ t('admin.dashboard.users') }}</span>
+            <span class="dash-inventory__value">{{ formatNumber(stats.total_users) }}</span>
+            <span v-if="stats.today_new_users > 0" class="dash-inventory__meta">
+              +{{ formatNumber(stats.today_new_users) }} {{ t('admin.dashboard.todayPeriod') }}
+            </span>
+          </div>
+
+          <div class="dash-inventory__group">
+            <span class="dash-inventory__label">{{ t('admin.dashboard.totalTokens') }}</span>
+            <span class="dash-inventory__value">{{ formatTokens(stats.total_tokens) }}</span>
+            <span class="dash-inventory__meta">
               <CostTriplet
                 :actual="formatCost(stats.total_actual_cost)"
                 :account="formatCost(stats.total_account_cost)"
                 :standard="formatCost(stats.total_cost)"
               />
-            </template>
-          </StatCard>
+            </span>
+          </div>
 
-          <StatCard
-            icon="sync"
-            :label="t('admin.dashboard.todayCacheHitRate')"
-            :value="formatCacheHitRate(
-              stats.today_cache_read_tokens,
-              stats.today_input_tokens,
-              stats.today_cache_creation_tokens
-            )"
-          >
-            <template #footnote>
-              <span class="text-sky-600 dark:text-sky-400">
-                {{ t('admin.dashboard.cacheReadShort') }}
-                {{ formatTokens(stats.today_cache_read_tokens) }}
-              </span>
-              <span class="ml-1.5">
-                {{ t('admin.dashboard.cacheCreateShort') }}
-                {{ formatTokens(stats.today_cache_creation_tokens) }}
-              </span>
-            </template>
-          </StatCard>
-
-          <StatCard
-            icon="sync"
-            :label="t('admin.dashboard.totalCacheHitRate')"
-            :value="formatCacheHitRate(
-              stats.total_cache_read_tokens,
-              stats.total_input_tokens,
-              stats.total_cache_creation_tokens
-            )"
-          >
-            <template #footnote>
-              <span class="text-sky-600 dark:text-sky-400">
-                {{ t('admin.dashboard.cacheReadShort') }}
-                {{ formatTokens(stats.total_cache_read_tokens) }}
-              </span>
-              <span class="ml-1.5">
-                {{ t('admin.dashboard.cacheCreateShort') }}
-                {{ formatTokens(stats.total_cache_creation_tokens) }}
-              </span>
-            </template>
-          </StatCard>
-
-          <StatCard
-            icon="bolt"
-            :label="t('admin.dashboard.performance')"
-            :value="formatTokens(stats.rpm)"
-            unit="RPM"
-          >
-            <template #footnote>{{ formatTokens(stats.tpm) }} TPM</template>
-          </StatCard>
-
-          <StatCard
-            icon="clock"
-            :label="t('admin.dashboard.avgResponse')"
-            :value="formatDuration(stats.average_duration_ms)"
-          >
-            <template #footnote>
-              {{ stats.active_users }} {{ t('admin.dashboard.activeUsers') }}
-            </template>
-          </StatCard>
-        </div>
+          <div class="dash-inventory__group">
+            <span
+              class="dash-inventory__label"
+              :title="t('admin.dashboard.cacheReadCoverageTooltip')"
+            >
+              {{ t('admin.dashboard.totalCacheReadCoverage') }}
+            </span>
+            <span
+              data-testid="total-cache-coverage-value"
+              class="dash-inventory__value"
+              :title="t('admin.dashboard.cacheReadCoverageTooltip')"
+            >
+              {{ formatCacheCoverage(totalCacheMetrics) }}
+            </span>
+            <span class="dash-inventory__meta">
+              {{ t('admin.dashboard.providerCacheReadShort') }}
+              {{ formatTokens(totalCacheMetrics.providerRead) }}
+              · {{ t('admin.dashboard.cacheCreateShort') }} {{ formatTokens(stats.total_cache_creation_tokens) }}
+            </span>
+            <span
+              v-if="totalCacheMetrics.observability.available"
+              data-testid="total-cache-observability"
+              class="dash-inventory__meta"
+              :title="t('admin.dashboard.cacheObservabilityTooltip')"
+            >
+              {{
+                totalCacheMetrics.observability.unobservable
+                  ? t('admin.dashboard.cacheUnobservable')
+                  : totalCacheMetrics.observability.partiallyObservable
+                    ? t('admin.dashboard.cachePartiallyObservable')
+                    : t('admin.dashboard.observableRequests')
+              }}
+              {{ formatCacheObservability(totalCacheMetrics.observability) }}
+            </span>
+            <span
+              v-if="totalCacheMetrics.forcedAdjustment > 0"
+              data-testid="total-cache-billing-adjustment"
+              class="dash-inventory__meta"
+              :title="t('admin.dashboard.billingAdjustmentTooltip')"
+            >
+              {{ t('admin.dashboard.billingAdjustmentTokens') }}
+              {{ formatTokens(totalCacheMetrics.forcedAdjustment) }}
+            </span>
+          </div>
+        </section>
 
         <CacheHitRateChart
           :stats="stats"
@@ -137,35 +186,32 @@
           @user-change="onCacheHitRateUserChange"
         />
 
-        <!-- Charts Section -->
+        <!-- Charts Section：控制条不再包一层卡片，直接排在图表上方 -->
         <div class="space-y-6">
-          <!-- Date Range Filter -->
-          <div class="card p-4">
-            <div class="flex flex-wrap items-center gap-4">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >{{ t('admin.dashboard.timeRange') }}:</span
-                >
-                <DateRangePicker
-                  v-model:start-date="startDate"
-                  v-model:end-date="endDate"
-                  @change="onDateRangeChange"
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-gray-500 dark:text-dark-400"
+                >{{ t('admin.dashboard.timeRange') }}</span
+              >
+              <DateRangePicker
+                v-model:start-date="startDate"
+                v-model:end-date="endDate"
+                @change="onDateRangeChange"
+              />
+            </div>
+            <button @click="loadDashboardStats" :disabled="chartsLoading" class="btn btn-secondary btn-sm">
+              {{ t('common.refresh') }}
+            </button>
+            <div class="ml-auto flex items-center gap-2">
+              <span class="text-xs font-medium text-gray-500 dark:text-dark-400"
+                >{{ t('admin.dashboard.granularity') }}</span
+              >
+              <div class="w-28">
+                <Select
+                  v-model="granularity"
+                  :options="granularityOptions"
+                  @change="loadChartData"
                 />
-              </div>
-              <button @click="loadDashboardStats" :disabled="chartsLoading" class="btn btn-secondary">
-                {{ t('common.refresh') }}
-              </button>
-              <div class="ml-auto flex items-center gap-2">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >{{ t('admin.dashboard.granularity') }}:</span
-                >
-                <div class="w-28">
-                  <Select
-                    v-model="granularity"
-                    :options="granularityOptions"
-                    @change="loadChartData"
-                  />
-                </div>
               </div>
             </div>
           </div>
@@ -229,9 +275,13 @@ import type {
   UserUsageTrendPoint,
   UserSpendingRankingItem
 } from '@/types'
+import {
+  formatCacheObservability,
+  getCacheCoverageMetrics,
+  type CacheCoverageMetrics
+} from '@/utils/cacheCoverage'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import StatCard from '@/components/dashboard/StatCard.vue'
 import ChartEmptyState from '@/components/common/ChartEmptyState.vue'
 import CostTriplet from '@/components/dashboard/CostTriplet.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
@@ -289,6 +339,47 @@ let rankingLoadSeq = 0
 let cacheHitRateUserLoadSeq = 0
 const rankingLimit = 12
 
+const getDashboardCacheMetrics = (
+  dashboardStats: DashboardStats | null,
+  period: 'today' | 'total'
+): CacheCoverageMetrics => {
+  if (!dashboardStats) {
+    return getCacheCoverageMetrics({})
+  }
+
+  const isToday = period === 'today'
+  return getCacheCoverageMetrics({
+    requests: isToday ? dashboardStats.today_requests : dashboardStats.total_requests,
+    input_tokens: isToday
+      ? dashboardStats.today_input_tokens
+      : dashboardStats.total_input_tokens,
+    cache_creation_tokens: isToday
+      ? dashboardStats.today_cache_creation_tokens
+      : dashboardStats.total_cache_creation_tokens,
+    cache_read_tokens: isToday
+      ? dashboardStats.today_cache_read_tokens
+      : dashboardStats.total_cache_read_tokens,
+    provider_cache_read_tokens: isToday
+      ? dashboardStats.today_provider_cache_read_tokens
+      : dashboardStats.total_provider_cache_read_tokens,
+    forced_cache_read_tokens: isToday
+      ? dashboardStats.today_forced_cache_read_tokens
+      : dashboardStats.total_forced_cache_read_tokens,
+    reported_requests: isToday
+      ? dashboardStats.today_reported_requests
+      : dashboardStats.total_reported_requests,
+    estimated_requests: isToday
+      ? dashboardStats.today_estimated_requests
+      : dashboardStats.total_estimated_requests,
+    unavailable_requests: isToday
+      ? dashboardStats.today_unavailable_requests
+      : dashboardStats.total_unavailable_requests
+  })
+}
+
+const todayCacheMetrics = computed(() => getDashboardCacheMetrics(stats.value, 'today'))
+const totalCacheMetrics = computed(() => getDashboardCacheMetrics(stats.value, 'total'))
+
 // Helper function to format date in local timezone
 const formatLocalDate = (date: Date): string => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -320,10 +411,10 @@ const isDarkMode = computed(() => {
   return document.documentElement.classList.contains('dark')
 })
 
-// Chart colors
+// Chart colors：网格线降到 5%/12% 透明度，只在需要读数时能被看见
 const chartColors = computed(() => ({
-  text: isDarkMode.value ? '#e5e7eb' : '#374151',
-  grid: isDarkMode.value ? '#374151' : '#e5e7eb'
+  text: isDarkMode.value ? '#94a3b8' : '#6e6e73',
+  grid: isDarkMode.value ? 'rgba(148, 163, 184, 0.12)' : 'rgba(15, 23, 42, 0.05)'
 }))
 
 // Line chart options (for user trend chart)
@@ -471,19 +562,12 @@ const formatNumber = (value: number | null | undefined): string => {
   return toFiniteNumber(value).toLocaleString()
 }
 
-const formatCacheHitRate = (
-  cacheReadTokens: number | null | undefined,
-  inputTokens: number | null | undefined,
-  cacheCreationTokens: number | null | undefined
-): string => {
-  const cacheRead = Math.max(toFiniteNumber(cacheReadTokens), 0)
-  const promptTokens =
-    Math.max(toFiniteNumber(inputTokens), 0) +
-    Math.max(toFiniteNumber(cacheCreationTokens), 0) +
-    cacheRead
-
-  return promptTokens > 0 ? `${((cacheRead / promptTokens) * 100).toFixed(1)}%` : '0.0%'
-}
+const formatCacheCoverage = (metrics: CacheCoverageMetrics): string =>
+  metrics.observability.unobservable
+    ? t('admin.dashboard.cacheUnobservable')
+    : metrics.observability.partiallyObservable
+      ? t('admin.dashboard.cachePartiallyObservable')
+      : `${metrics.coverage.toFixed(1)}%`
 
 const formatCost = (value: number | null | undefined): string => {
   const safeValue = toFiniteNumber(value)
@@ -692,4 +776,112 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ===== 今日 stat band =====
+ * 数字是唯一的主角：label 压低到 xs 中灰，footnote 再降半档。
+ * 分隔只用 1px 发丝线，且只在 xl 单行排列时出现。 */
+.dash-hero {
+  padding: 1.25rem 0.5rem;
+}
+
+.dash-hero__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dash-hero__metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.35rem 1.25rem;
+}
+
+@media (min-width: 1024px) {
+  .dash-hero__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .dash-hero__grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .dash-hero__metric + .dash-hero__metric {
+    border-left: 1px solid var(--separator);
+  }
+}
+
+.dash-hero__label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.dash-hero__value {
+  overflow: hidden;
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-hero__unit {
+  margin-left: 0.3em;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.dash-hero__foot {
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== 库存行 =====
+ * 参考性数字不包卡片：一条安静的文字行，分隔靠间距和发丝线。 */
+.dash-inventory {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 1.75rem;
+  row-gap: 0.5rem;
+  padding: 0 0.25rem;
+}
+
+.dash-inventory__group {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.dash-inventory__label {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.dash-inventory__value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-inventory__meta {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
 </style>

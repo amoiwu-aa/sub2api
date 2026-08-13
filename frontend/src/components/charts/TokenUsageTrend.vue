@@ -1,8 +1,35 @@
 <template>
   <div class="card p-4">
-    <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
-      {{ t('admin.dashboard.tokenUsageTrend') }}
-    </h3>
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+        {{ t('admin.dashboard.tokenUsageTrend') }}
+      </h3>
+      <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+        <span
+          v-if="observabilitySummary.available"
+          data-testid="cache-observability-summary"
+          class="text-xs text-gray-500 dark:text-dark-400"
+          :title="t('admin.dashboard.cacheObservabilityTooltip')"
+        >
+          {{
+            observabilitySummary.unobservable
+              ? t('admin.dashboard.cacheUnobservable')
+              : observabilitySummary.partiallyObservable
+                ? t('admin.dashboard.cachePartiallyObservable')
+                : t('admin.dashboard.observableRequests')
+          }}
+          {{ formatCacheObservability(observabilitySummary) }}
+        </span>
+        <span
+          v-if="forcedAdjustmentTotal > 0"
+          class="text-xs text-gray-500 dark:text-dark-400"
+          :title="t('admin.dashboard.billingAdjustmentTooltip')"
+        >
+          {{ t('admin.dashboard.billingAdjustmentTokens') }}
+          {{ formatTokens(forcedAdjustmentTotal) }}
+        </span>
+      </div>
+    </div>
     <div v-if="loading" class="flex h-48 items-center justify-center">
       <LoadingSpinner />
     </div>
@@ -37,6 +64,11 @@ import {
 import { Line } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import type { TrendDataPoint } from '@/types'
+import {
+  formatCacheObservability,
+  getCacheCoverageMetrics,
+  getCacheObservability
+} from '@/utils/cacheCoverage'
 
 ChartJS.register(
   CategoryScale,
@@ -61,14 +93,44 @@ const isDarkMode = computed(() => {
 })
 
 const chartColors = computed(() => ({
-  text: isDarkMode.value ? '#e5e7eb' : '#374151',
-  grid: isDarkMode.value ? '#374151' : '#e5e7eb',
+  text: isDarkMode.value ? '#94a3b8' : '#6e6e73',
+  grid: isDarkMode.value ? 'rgba(148, 163, 184, 0.12)' : 'rgba(15, 23, 42, 0.05)',
   input: '#3b82f6',
   output: '#10b981',
   cacheCreation: '#f59e0b',
   cacheRead: '#06b6d4',
-  cacheHitRate: '#8b5cf6'
+  cacheAdjustment: '#64748b',
+  cacheCoverage: '#8b5cf6'
 }))
+
+const trendMetrics = computed(() => props.trendData.map((point) => getCacheCoverageMetrics(point)))
+const forcedAdjustmentTotal = computed(() =>
+  trendMetrics.value.reduce((total, metrics) => total + metrics.forcedAdjustment, 0)
+)
+
+const observabilitySummary = computed(() => {
+  const hasObservationFields = props.trendData.some((point) =>
+    [point.reported_requests, point.estimated_requests, point.unavailable_requests].some(
+      (value) => value !== undefined && value !== null
+    )
+  )
+  const totals = trendMetrics.value.reduce(
+    (result, metrics) => {
+      result.reported += metrics.observability.reported
+      result.estimated += metrics.observability.estimated
+      result.unavailable += metrics.observability.unavailable
+      return result
+    },
+    { reported: 0, estimated: 0, unavailable: 0 }
+  )
+
+  return getCacheObservability({
+    requests: props.trendData.reduce((total, point) => total + point.requests, 0),
+    reported_requests: hasObservationFields ? totals.reported : undefined,
+    estimated_requests: hasObservationFields ? totals.estimated : undefined,
+    unavailable_requests: hasObservationFields ? totals.unavailable : undefined
+  })
+})
 
 const chartData = computed(() => {
   if (!props.trendData?.length) return null
@@ -101,21 +163,31 @@ const chartData = computed(() => {
         tension: 0.3
       },
       {
-        label: t('admin.dashboard.cacheReadShort'),
-        data: props.trendData.map((d) => d.cache_read_tokens),
+        label: t('admin.dashboard.providerCacheReadShort'),
+        data: trendMetrics.value.map((metrics) => metrics.providerRead),
         borderColor: chartColors.value.cacheRead,
         backgroundColor: `${chartColors.value.cacheRead}20`,
         fill: true,
         tension: 0.3
       },
       {
-        label: t('admin.dashboard.cacheHitRate'),
-        data: props.trendData.map((d) => {
-          const totalPromptTokens = d.input_tokens + d.cache_read_tokens + d.cache_creation_tokens
-          return totalPromptTokens > 0 ? (d.cache_read_tokens / totalPromptTokens) * 100 : 0
-        }),
-        borderColor: chartColors.value.cacheHitRate,
-        backgroundColor: `${chartColors.value.cacheHitRate}20`,
+        label: t('admin.dashboard.billingAdjustmentTokens'),
+        data: trendMetrics.value.map((metrics) => metrics.forcedAdjustment),
+        borderColor: chartColors.value.cacheAdjustment,
+        backgroundColor: `${chartColors.value.cacheAdjustment}20`,
+        borderDash: [3, 3],
+        fill: false,
+        tension: 0.3
+      },
+      {
+        label: t('admin.dashboard.cacheReadCoverage'),
+        data: trendMetrics.value.map((metrics) =>
+          metrics.observability.unobservable || metrics.observability.partiallyObservable
+            ? null
+            : metrics.coverage
+        ),
+        borderColor: chartColors.value.cacheCoverage,
+        backgroundColor: `${chartColors.value.cacheCoverage}20`,
         borderDash: [5, 5],
         fill: false,
         tension: 0.3,
@@ -149,6 +221,14 @@ const lineOptions = computed(() => ({
       callbacks: {
         label: (context: any) => {
           if (context.dataset.yAxisID === 'yPercent') {
+            if (context.raw === null || context.raw === undefined) {
+              const observability = trendMetrics.value[context.dataIndex]?.observability
+              return `${context.dataset.label}: ${
+                observability?.partiallyObservable
+                  ? t('admin.dashboard.cachePartiallyObservable')
+                  : t('admin.dashboard.cacheUnobservable')
+              }`
+            }
             return `${context.dataset.label}: ${context.raw.toFixed(1)}%`
           }
           return `${context.dataset.label}: ${formatTokens(context.raw)}`
@@ -157,7 +237,27 @@ const lineOptions = computed(() => ({
           const dataIndex = tooltipItems[0]?.dataIndex
           if (dataIndex !== undefined && props.trendData[dataIndex]) {
             const data = props.trendData[dataIndex]
-            return `${t('admin.dashboard.actual')}: $${formatCost(data.actual_cost)} | ${t('admin.dashboard.standard')}: $${formatCost(data.cost)}`
+            const metrics = trendMetrics.value[dataIndex]
+            const lines = [
+              `${t('admin.dashboard.actual')}: $${formatCost(data.actual_cost)} | ${t('admin.dashboard.standard')}: $${formatCost(data.cost)}`
+            ]
+            if (metrics.observability.available) {
+              lines.push(
+                `${
+                  metrics.observability.partiallyObservable
+                    ? t('admin.dashboard.cachePartiallyObservable')
+                    : metrics.observability.unobservable
+                      ? t('admin.dashboard.cacheUnobservable')
+                      : t('admin.dashboard.observableRequests')
+                }: ${formatCacheObservability(metrics.observability)}`
+              )
+            }
+            if (metrics.forcedAdjustment > 0) {
+              lines.push(
+                `${t('admin.dashboard.billingAdjustmentTokens')}: ${formatTokens(metrics.forcedAdjustment)}`
+              )
+            }
+            return lines
           }
           return ''
         }
@@ -196,7 +296,7 @@ const lineOptions = computed(() => ({
         drawOnChartArea: false
       },
       ticks: {
-        color: chartColors.value.cacheHitRate,
+        color: chartColors.value.cacheCoverage,
         font: {
           size: 10
         },

@@ -1,8 +1,11 @@
 <template>
   <section class="card p-4" data-testid="cache-hit-rate-chart">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
-        {{ t('admin.dashboard.cacheHitChartTitle') }}
+      <h3
+        class="text-sm font-semibold text-gray-900 dark:text-white"
+        :title="t('admin.dashboard.cacheReadCoverageTooltip')"
+      >
+        {{ t('admin.dashboard.cacheReadCoverageChartTitle') }}
       </h3>
 
       <div class="flex flex-wrap items-center justify-end gap-2">
@@ -95,11 +98,28 @@
         />
 
         <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span class="text-3xl font-semibold tabular-nums text-gray-900 dark:text-white">
-            {{ formatPercent(metrics.hitRate) }}
+          <span
+            data-testid="cache-coverage-value"
+            class="text-center font-semibold tabular-nums text-gray-900 dark:text-white"
+            :class="
+              metrics.observability.unobservable || metrics.observability.partiallyObservable
+                ? 'max-w-36 text-lg'
+                : 'text-3xl'
+            "
+          >
+            {{
+              metrics.observability.unobservable
+                ? t('admin.dashboard.cacheUnobservable')
+                : metrics.observability.partiallyObservable
+                  ? t('admin.dashboard.cachePartiallyObservable')
+                  : formatPercent(metrics.coverage)
+            }}
           </span>
-          <span class="mt-1 text-xs text-gray-500 dark:text-dark-400">
-            {{ t('admin.dashboard.cacheHitRate') }}
+          <span
+            class="mt-1 text-xs text-gray-500 dark:text-dark-400"
+            :title="t('admin.dashboard.cacheReadCoverageTooltip')"
+          >
+            {{ t('admin.dashboard.cacheReadCoverage') }}
           </span>
         </div>
       </div>
@@ -135,6 +155,38 @@
             {{ formatTokens(metrics.total) }}
           </span>
         </div>
+
+        <div
+          v-if="metrics.observability.available"
+          data-testid="cache-observability"
+          class="flex items-center justify-between gap-4 pt-3 text-xs text-gray-500 dark:text-dark-400"
+          :title="t('admin.dashboard.cacheObservabilityTooltip')"
+        >
+          <span>
+            {{
+              metrics.observability.unobservable
+                ? t('admin.dashboard.cacheUnobservable')
+                : metrics.observability.partiallyObservable
+                  ? t('admin.dashboard.cachePartiallyObservable')
+                  : t('admin.dashboard.observableRequests')
+            }}
+          </span>
+          <span class="font-medium tabular-nums">
+            {{ formatCacheObservability(metrics.observability) }}
+          </span>
+        </div>
+
+        <div
+          v-if="metrics.forcedAdjustment > 0"
+          data-testid="cache-billing-adjustment"
+          class="flex items-center justify-between gap-4 pt-3 text-xs text-gray-500 dark:text-dark-400"
+          :title="t('admin.dashboard.billingAdjustmentTooltip')"
+        >
+          <span>{{ t('admin.dashboard.billingAdjustmentTokens') }}</span>
+          <span class="font-medium tabular-nums">
+            {{ formatTokens(metrics.forcedAdjustment) }}
+          </span>
+        </div>
       </div>
     </div>
   </section>
@@ -155,6 +207,12 @@ import { adminAPI } from '@/api/admin'
 import Select from '@/components/common/Select.vue'
 import type { SimpleUser } from '@/api/admin/usage'
 import type { DashboardStats, ModelStat } from '@/types'
+import {
+  formatCacheObservability,
+  getCacheCoverageMetrics,
+  getCacheObservability,
+  type CacheCoverageMetrics
+} from '@/utils/cacheCoverage'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -181,7 +239,7 @@ let userSearchTimer: ReturnType<typeof setTimeout> | undefined
 let userSearchSequence = 0
 
 const colors = {
-  hit: '#06b6d4',
+  providerRead: '#06b6d4',
   creation: '#f59e0b',
   input: '#94a3b8'
 } as const
@@ -264,66 +322,95 @@ onBeforeUnmount(() => {
   }
 })
 
-const toTokenCount = (value: unknown): number => {
-  const numberValue = Number(value)
-  return Number.isFinite(numberValue) ? Math.max(numberValue, 0) : 0
+const combineModelMetrics = (items: ModelStat[]): CacheCoverageMetrics => {
+  let hasObservationFields = false
+  const totals = items.reduce(
+    (result, item) => {
+      const itemMetrics = getCacheCoverageMetrics(item)
+      const observationFields = [
+        item.reported_requests,
+        item.estimated_requests,
+        item.unavailable_requests
+      ]
+      hasObservationFields ||= observationFields.some(
+        (value) => value !== undefined && value !== null
+      )
+
+      result.input += itemMetrics.input
+      result.creation += itemMetrics.creation
+      result.providerRead += itemMetrics.providerRead
+      result.forcedAdjustment += itemMetrics.forcedAdjustment
+      result.reported += itemMetrics.observability.reported
+      result.estimated += itemMetrics.observability.estimated
+      result.unavailable += itemMetrics.observability.unavailable
+      result.requests += item.requests
+      return result
+    },
+    {
+      input: 0,
+      creation: 0,
+      providerRead: 0,
+      forcedAdjustment: 0,
+      reported: 0,
+      estimated: 0,
+      unavailable: 0,
+      requests: 0
+    }
+  )
+  const total = totals.input + totals.creation + totals.providerRead
+  const observability = getCacheObservability({
+    requests: totals.requests,
+    reported_requests: hasObservationFields ? totals.reported : undefined,
+    estimated_requests: hasObservationFields ? totals.estimated : undefined,
+    unavailable_requests: hasObservationFields ? totals.unavailable : undefined
+  })
+
+  return {
+    input: totals.input,
+    creation: totals.creation,
+    providerRead: totals.providerRead,
+    forcedAdjustment: totals.forcedAdjustment,
+    total,
+    coverage: total > 0 ? (totals.providerRead / total) * 100 : 0,
+    observability
+  }
 }
 
 const metrics = computed(() => {
   if (selectedModelStats.value) {
-    const input = toTokenCount(selectedModelStats.value.input_tokens)
-    const creation = toTokenCount(selectedModelStats.value.cache_creation_tokens)
-    const hit = toTokenCount(selectedModelStats.value.cache_read_tokens)
-    const total = input + creation + hit
-
-    return {
-      input,
-      creation,
-      hit,
-      total,
-      hitRate: total > 0 ? (hit / total) * 100 : 0
-    }
+    return getCacheCoverageMetrics(selectedModelStats.value)
   }
 
   if (props.selectedUser) {
-    const totals = scopedModelStats.value.reduce(
-      (result, item) => ({
-        input: result.input + toTokenCount(item.input_tokens),
-        creation: result.creation + toTokenCount(item.cache_creation_tokens),
-        hit: result.hit + toTokenCount(item.cache_read_tokens)
-      }),
-      { input: 0, creation: 0, hit: 0 }
-    )
-    const total = totals.input + totals.creation + totals.hit
-
-    return {
-      ...totals,
-      total,
-      hitRate: total > 0 ? (totals.hit / total) * 100 : 0
-    }
+    return combineModelMetrics(scopedModelStats.value)
   }
 
   const isToday = period.value === 'today'
-  const input = toTokenCount(
-    isToday ? props.stats.today_input_tokens : props.stats.total_input_tokens
-  )
-  const creation = toTokenCount(
-    isToday
+  return getCacheCoverageMetrics({
+    requests: isToday ? props.stats.today_requests : props.stats.total_requests,
+    input_tokens: isToday ? props.stats.today_input_tokens : props.stats.total_input_tokens,
+    cache_creation_tokens: isToday
       ? props.stats.today_cache_creation_tokens
-      : props.stats.total_cache_creation_tokens
-  )
-  const hit = toTokenCount(
-    isToday ? props.stats.today_cache_read_tokens : props.stats.total_cache_read_tokens
-  )
-  const total = input + creation + hit
-
-  return {
-    input,
-    creation,
-    hit,
-    total,
-    hitRate: total > 0 ? (hit / total) * 100 : 0
-  }
+      : props.stats.total_cache_creation_tokens,
+    cache_read_tokens: isToday
+      ? props.stats.today_cache_read_tokens
+      : props.stats.total_cache_read_tokens,
+    provider_cache_read_tokens: isToday
+      ? props.stats.today_provider_cache_read_tokens
+      : props.stats.total_provider_cache_read_tokens,
+    forced_cache_read_tokens: isToday
+      ? props.stats.today_forced_cache_read_tokens
+      : props.stats.total_forced_cache_read_tokens,
+    reported_requests: isToday
+      ? props.stats.today_reported_requests
+      : props.stats.total_reported_requests,
+    estimated_requests: isToday
+      ? props.stats.today_estimated_requests
+      : props.stats.total_estimated_requests,
+    unavailable_requests: isToday
+      ? props.stats.today_unavailable_requests
+      : props.stats.total_unavailable_requests
+  })
 })
 
 const showCurrentRange = computed(() => Boolean(selectedModel.value || props.selectedUser))
@@ -347,14 +434,14 @@ const clearSelectedUser = () => {
 
 const chartData = computed(() => ({
   labels: [
-    t('admin.dashboard.cacheHitTokens'),
+    t('admin.dashboard.providerCacheReadTokens'),
     t('admin.dashboard.cacheCreationTokens'),
     t('admin.dashboard.uncachedInputTokens')
   ],
   datasets: [
     {
-      data: [metrics.value.hit, metrics.value.creation, metrics.value.input],
-      backgroundColor: [colors.hit, colors.creation, colors.input],
+      data: [metrics.value.providerRead, metrics.value.creation, metrics.value.input],
+      backgroundColor: [colors.providerRead, colors.creation, colors.input],
       borderWidth: 0,
       hoverOffset: 4
     }
@@ -383,11 +470,11 @@ const chartOptions = computed<ChartOptions<'doughnut'>>(() => ({
 
 const legendItems = computed(() => [
   {
-    key: 'hit',
-    label: t('admin.dashboard.cacheHitTokens'),
-    value: metrics.value.hit,
-    ratio: metrics.value.hitRate,
-    color: colors.hit
+    key: 'provider-read',
+    label: t('admin.dashboard.providerCacheReadTokens'),
+    value: metrics.value.providerRead,
+    ratio: metrics.value.coverage,
+    color: colors.providerRead
   },
   {
     key: 'creation',

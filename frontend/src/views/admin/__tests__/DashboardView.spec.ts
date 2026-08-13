@@ -148,15 +148,25 @@ describe('admin DashboardView', () => {
     }))
   })
 
-  it('shows today and total cache hit rates from dashboard token stats', async () => {
+  it('shows provider cache read coverage, observability, and separate billing adjustments', async () => {
     getSnapshotV2.mockResolvedValue({
       stats: createDashboardStats({
-        today_input_tokens: 600,
-        today_cache_creation_tokens: 200,
-        today_cache_read_tokens: 200,
-        total_input_tokens: 5000,
-        total_cache_creation_tokens: 1000,
-        total_cache_read_tokens: 4000
+        today_input_tokens: 100,
+        today_cache_creation_tokens: 100,
+        today_cache_read_tokens: 900,
+        today_provider_cache_read_tokens: 300,
+        today_forced_cache_read_tokens: 600,
+        today_reported_requests: 1,
+        today_estimated_requests: 1,
+        today_unavailable_requests: 1,
+        total_input_tokens: 400,
+        total_cache_creation_tokens: 200,
+        total_cache_read_tokens: 1000,
+        total_provider_cache_read_tokens: 400,
+        total_forced_cache_read_tokens: 600,
+        total_reported_requests: 8,
+        total_estimated_requests: 1,
+        total_unavailable_requests: 1
       }),
       trend: [],
       models: []
@@ -180,10 +190,91 @@ describe('admin DashboardView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('admin.dashboard.todayCacheHitRate')
-    expect(wrapper.text()).toContain('20.0%')
-    expect(wrapper.text()).toContain('admin.dashboard.totalCacheHitRate')
-    expect(wrapper.text()).toContain('40.0%')
+    expect(wrapper.text()).toContain('admin.dashboard.todayCacheReadCoverage')
+    expect(wrapper.get('[data-testid="today-cache-coverage-value"]').text()).toBe(
+      'admin.dashboard.cachePartiallyObservable'
+    )
+    expect(wrapper.text()).toContain('admin.dashboard.totalCacheReadCoverage')
+    expect(wrapper.get('[data-testid="total-cache-coverage-value"]').text()).toBe(
+      'admin.dashboard.cachePartiallyObservable'
+    )
+    expect(wrapper.get('[data-testid="today-cache-observability"]').text()).toContain(
+      '1/3 (33.3%)'
+    )
+    expect(wrapper.get('[data-testid="today-cache-billing-adjustment"]').text()).toContain('600')
+  })
+
+  it('falls back to legacy cache reads minus forced adjustments', async () => {
+    getSnapshotV2.mockResolvedValue({
+      stats: createDashboardStats({
+        today_input_tokens: 100,
+        today_cache_creation_tokens: 100,
+        today_cache_read_tokens: 500,
+        today_forced_cache_read_tokens: 200
+      }),
+      trend: [],
+      models: []
+    })
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          CacheHitRateChart: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="today-cache-coverage-value"]').text()).toBe('42.9%')
+  })
+
+  it('shows cache as unobservable instead of warning zero coverage', async () => {
+    getSnapshotV2.mockResolvedValue({
+      stats: createDashboardStats({
+        today_cache_read_tokens: 500,
+        today_provider_cache_read_tokens: 0,
+        today_forced_cache_read_tokens: 500,
+        today_reported_requests: 0,
+        today_estimated_requests: 2,
+        today_unavailable_requests: 1
+      }),
+      trend: [],
+      models: []
+    })
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          CacheHitRateChart: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const coverageValue = wrapper.get('[data-testid="today-cache-coverage-value"]')
+    expect(coverageValue.text()).toBe('admin.dashboard.cacheUnobservable')
+    expect(coverageValue.text()).not.toContain('0.0%')
+    const observability = wrapper.get('[data-testid="today-cache-observability"]')
+    expect(observability.text()).toContain('0/3')
+    expect(observability.text()).not.toContain('0.0%')
   })
 
   it('loads cache statistics for a selected user without changing global dashboard stats', async () => {
