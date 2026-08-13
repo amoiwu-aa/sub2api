@@ -24,7 +24,7 @@ func parseImageDataURI(raw string) (AttachedImage, error) {
 	value := strings.TrimSpace(raw)
 	if !strings.HasPrefix(strings.ToLower(value), "data:") {
 		return AttachedImage{}, fmt.Errorf(
-			"Cursor image input currently requires a base64 data URL; remote image URLs are not fetched",
+			"cursor image input currently requires a base64 data URL; remote image URLs are not fetched",
 		)
 	}
 
@@ -49,7 +49,7 @@ func parseImageDataURI(raw string) (AttachedImage, error) {
 		}
 	}
 	if !base64Encoded {
-		return AttachedImage{}, fmt.Errorf("Cursor image input requires base64-encoded image data")
+		return AttachedImage{}, fmt.Errorf("cursor image input requires base64-encoded image data")
 	}
 
 	if MaxImageBytes > 0 && base64.StdEncoding.DecodedLen(len(payload)) > MaxImageBytes {

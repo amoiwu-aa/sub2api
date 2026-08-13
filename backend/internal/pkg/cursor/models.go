@@ -209,11 +209,11 @@ func ResolveModelWithOptions(
 	}
 
 	if selection.ModelID == AutoModelID {
-		return ModelSelection{}, fmt.Errorf("Cursor model options require a named model, not cursor/default")
+		return ModelSelection{}, fmt.Errorf("cursor model options require a named model, not cursor/default")
 	}
 	if !supportsRequestModelOptions(selection.ModelID) {
 		return ModelSelection{}, fmt.Errorf(
-			"Cursor model options are not verified for %q; supported models are cursor/grok-4.6, cursor/grok-4.5 and cursor/composer-2.5",
+			"cursor model options are not verified for %q; supported models are cursor/grok-4.6, cursor/grok-4.5 and cursor/composer-2.5",
 			PublicModelID(selection.ModelID),
 		)
 	}

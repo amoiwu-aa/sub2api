@@ -8,6 +8,13 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func mustCast[T any](t *testing.T, value any) T {
+	t.Helper()
+	typed, ok := value.(T)
+	require.Truef(t, ok, "expected %T, got %T", typed, value)
+	return typed
+}
+
 func TestOpenAIExplicitPromptCacheCapabilityUsesPlatformAndModel(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -105,14 +112,17 @@ func TestStripPromptCacheBreakpointsLeavesOtherCacheFieldsUntouched(t *testing.T
 	require.True(t, stripPromptCacheBreakpoints(payload))
 	require.Equal(t, "stable-key", payload["prompt_cache_key"])
 	require.NotNil(t, payload["prompt_cache_options"])
-	content := payload["input"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	inputs := mustCast[[]any](t, payload["input"])
+	message := mustCast[map[string]any](t, inputs[0])
+	content := mustCast[map[string]any](t, mustCast[[]any](t, message["content"])[0])
 	require.NotNil(t, content["cache_control"])
 	require.NotContains(t, content, "prompt_cache_breakpoint")
 	require.NotContains(t, content, "breakpoint")
-	toolInput := payload["input"].([]any)[1].(map[string]any)["input"].(map[string]any)
+	toolInput := mustCast[map[string]any](t, mustCast[map[string]any](t, inputs[1])["input"])
 	require.Equal(t, "user-supplied-value", toolInput["breakpoint"])
-	properties := payload["tools"].([]any)[0].(map[string]any)["function"].(map[string]any)["parameters"].(map[string]any)["properties"].(map[string]any)
-	require.Contains(t, properties, "breakpoint")
+	tool := mustCast[map[string]any](t, mustCast[[]any](t, payload["tools"])[0])
+	parameters := mustCast[map[string]any](t, mustCast[map[string]any](t, tool["function"])["parameters"])
+	require.Contains(t, mustCast[map[string]any](t, parameters["properties"]), "breakpoint")
 }
 
 func TestApplyOpenAIPromptCachePolicyToBodyStripsAllExplicitCacheVocabulary(t *testing.T) {

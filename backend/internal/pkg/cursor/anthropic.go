@@ -317,37 +317,6 @@ func anthropicImage(source *anthropicImageSource) (AttachedImage, error) {
 	}
 }
 
-func anthropicTextLegacy(raw json.RawMessage) string {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" || trimmed == "null" {
-		return ""
-	}
-	if trimmed[0] == '"' {
-		var text string
-		if err := json.Unmarshal(raw, &text); err == nil {
-			return text
-		}
-		return ""
-	}
-	if blocks, ok := anthropicBlocks(raw); ok {
-		parts := make([]string, 0, len(blocks))
-		for _, block := range blocks {
-			if block.Text != "" {
-				parts = append(parts, block.Text)
-			}
-		}
-		return strings.Join(parts, "\n")
-	}
-	// 单个对象：可能是 {"type":"text","text":"..."}，也可能是任意 JSON
-	// （tool_result 的 content 允许是结构化数据）。后者原样交给模型，
-	// 丢掉比给一段它能读懂的 JSON 更糟。
-	var block anthropicContentBlock
-	if err := json.Unmarshal(raw, &block); err == nil && block.Text != "" {
-		return block.Text
-	}
-	return trimmed
-}
-
 // ---------------------------------------------------------------------------
 // 出站：Messages 响应与 SSE 事件
 // ---------------------------------------------------------------------------
