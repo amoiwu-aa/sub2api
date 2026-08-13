@@ -202,6 +202,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	gateway.GET("/sub2api/usage", h.Gateway.SessionUsage)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)
 	{

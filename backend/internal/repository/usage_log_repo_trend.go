@@ -234,6 +234,16 @@ func (r *usageLogRepository) GetUserUsageTrendByUserID(ctx context.Context, user
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
 			COALESCE(SUM(actual_cost), 0) as actual_cost
@@ -295,6 +305,16 @@ func (r *usageLogRepository) getUsageTrendWithFilters(ctx context.Context, start
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
 			COALESCE(SUM(actual_cost), 0) as actual_cost
@@ -382,6 +402,12 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 				output_tokens,
 				cache_creation_tokens,
 				cache_read_tokens,
+				provider_cache_read_tokens,
+				cache_hit_requests,
+				forced_cache_read_tokens,
+				reported_requests,
+				estimated_requests,
+				unavailable_requests,
 				(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as total_tokens,
 				total_cost as cost,
 				actual_cost
@@ -398,6 +424,12 @@ func (r *usageLogRepository) getUsageTrendFromAggregates(ctx context.Context, st
 				output_tokens,
 				cache_creation_tokens,
 				cache_read_tokens,
+				provider_cache_read_tokens,
+				cache_hit_requests,
+				forced_cache_read_tokens,
+				reported_requests,
+				estimated_requests,
+				unavailable_requests,
 				(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) as total_tokens,
 				total_cost as cost,
 				actual_cost
@@ -459,6 +491,16 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 			COALESCE(SUM(output_tokens), 0) as output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as unavailable_requests,
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
 			%s,
@@ -785,6 +827,12 @@ func scanTrendRows(rows *sql.Rows) ([]TrendDataPoint, error) {
 			&row.OutputTokens,
 			&row.CacheCreationTokens,
 			&row.CacheReadTokens,
+			&row.ProviderCacheReadTokens,
+			&row.CacheHitRequests,
+			&row.ForcedCacheReadTokens,
+			&row.ReportedRequests,
+			&row.EstimatedRequests,
+			&row.UnavailableRequests,
 			&row.TotalTokens,
 			&row.Cost,
 			&row.ActualCost,
@@ -810,6 +858,12 @@ func scanModelStatsRows(rows *sql.Rows) ([]ModelStat, error) {
 			&row.OutputTokens,
 			&row.CacheCreationTokens,
 			&row.CacheReadTokens,
+			&row.ProviderCacheReadTokens,
+			&row.CacheHitRequests,
+			&row.ForcedCacheReadTokens,
+			&row.ReportedRequests,
+			&row.EstimatedRequests,
+			&row.UnavailableRequests,
 			&row.TotalTokens,
 			&row.Cost,
 			&row.ActualCost,

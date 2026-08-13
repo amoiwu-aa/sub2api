@@ -200,6 +200,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(provider_cache_read_tokens), 0) as total_provider_cache_read_tokens,
+			COALESCE(SUM(cache_hit_requests), 0) as total_cache_hit_requests,
+			COALESCE(SUM(forced_cache_read_tokens), 0) as total_forced_cache_read_tokens,
+			COALESCE(SUM(reported_requests), 0) as total_reported_requests,
+			COALESCE(SUM(estimated_requests), 0) as total_estimated_requests,
+			COALESCE(SUM(unavailable_requests), 0) as total_unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(SUM(account_cost), 0) as total_account_cost,
@@ -217,6 +223,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.TotalCacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.TotalReportedRequests,
+		&stats.TotalEstimatedRequests,
+		&stats.TotalUnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.TotalAccountCost,
@@ -236,6 +248,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 			output_tokens as today_output_tokens,
 			cache_creation_tokens as today_cache_creation_tokens,
 			cache_read_tokens as today_cache_read_tokens,
+			provider_cache_read_tokens as today_provider_cache_read_tokens,
+			cache_hit_requests as today_cache_hit_requests,
+			forced_cache_read_tokens as today_forced_cache_read_tokens,
+			reported_requests as today_reported_requests,
+			estimated_requests as today_estimated_requests,
+			unavailable_requests as today_unavailable_requests,
 			total_cost as today_cost,
 			actual_cost as today_actual_cost,
 			account_cost as today_account_cost,
@@ -253,6 +271,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 		&stats.TodayOutputTokens,
 		&stats.TodayCacheCreationTokens,
 		&stats.TodayCacheReadTokens,
+		&stats.TodayProviderCacheReadTokens,
+		&stats.TodayCacheHitRequests,
+		&stats.TodayForcedCacheReadTokens,
+		&stats.TodayReportedRequests,
+		&stats.TodayEstimatedRequests,
+		&stats.TodayUnavailableRequests,
 		&stats.TodayCost,
 		&stats.TodayActualCost,
 		&stats.TodayAccountCost,
@@ -289,6 +313,8 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 				output_tokens,
 				cache_creation_tokens,
 				cache_read_tokens,
+				cache_usage_source,
+				forced_cache_read_tokens,
 				total_cost,
 				actual_cost,
 				COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1) AS account_cost,
@@ -303,6 +329,18 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz AND cache_usage_source = 'reported'), 0) AS total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz
+				  AND cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) AS total_cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0))
+				FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz AND cache_usage_source = 'reported') AS total_reported_requests,
+			COUNT(*) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz AND cache_usage_source = 'estimated') AS total_estimated_requests,
+			COUNT(*) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz AND cache_usage_source = 'unavailable') AS total_unavailable_requests,
 			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_actual_cost,
 			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz), 0) AS total_account_cost,
@@ -312,6 +350,18 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			COALESCE(SUM(output_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_output_tokens,
 			COALESCE(SUM(cache_creation_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz AND cache_usage_source = 'reported'), 0) AS today_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz
+				  AND cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) AS today_cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0))
+				FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz AND cache_usage_source = 'reported') AS today_reported_requests,
+			COUNT(*) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz AND cache_usage_source = 'estimated') AS today_estimated_requests,
+			COUNT(*) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz AND cache_usage_source = 'unavailable') AS today_unavailable_requests,
 			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_actual_cost,
 			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_account_cost
@@ -328,6 +378,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.TotalCacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.TotalReportedRequests,
+		&stats.TotalEstimatedRequests,
+		&stats.TotalUnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.TotalAccountCost,
@@ -337,6 +393,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		&stats.TodayOutputTokens,
 		&stats.TodayCacheCreationTokens,
 		&stats.TodayCacheReadTokens,
+		&stats.TodayProviderCacheReadTokens,
+		&stats.TodayCacheHitRequests,
+		&stats.TodayForcedCacheReadTokens,
+		&stats.TodayReportedRequests,
+		&stats.TodayEstimatedRequests,
+		&stats.TodayUnavailableRequests,
 		&stats.TodayCost,
 		&stats.TodayActualCost,
 		&stats.TodayAccountCost,
@@ -410,6 +472,16 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as total_cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as total_reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as total_estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as total_unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
@@ -426,6 +498,12 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.TotalCacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.TotalReportedRequests,
+		&stats.TotalEstimatedRequests,
+		&stats.TotalUnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -442,6 +520,16 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 			COALESCE(SUM(output_tokens), 0) as today_output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as today_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as today_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as today_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as today_cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as today_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as today_reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as today_estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as today_unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as today_cost,
 			COALESCE(SUM(actual_cost), 0) as today_actual_cost
 		FROM usage_logs
@@ -457,6 +545,12 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 		&stats.TodayOutputTokens,
 		&stats.TodayCacheCreationTokens,
 		&stats.TodayCacheReadTokens,
+		&stats.TodayProviderCacheReadTokens,
+		&stats.TodayCacheHitRequests,
+		&stats.TodayForcedCacheReadTokens,
+		&stats.TodayReportedRequests,
+		&stats.TodayEstimatedRequests,
+		&stats.TodayUnavailableRequests,
 		&stats.TodayCost,
 		&stats.TodayActualCost,
 	); err != nil {
@@ -562,6 +656,16 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as total_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as total_cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as total_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as total_reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as total_estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as total_unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(duration_ms), 0) as avg_duration_ms
@@ -578,6 +682,12 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheCreationTokens,
 		&stats.TotalCacheReadTokens,
+		&stats.TotalProviderCacheReadTokens,
+		&stats.TotalCacheHitRequests,
+		&stats.TotalForcedCacheReadTokens,
+		&stats.TotalReportedRequests,
+		&stats.TotalEstimatedRequests,
+		&stats.TotalUnavailableRequests,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -594,6 +704,16 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 			COALESCE(SUM(output_tokens), 0) as today_output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) as today_cache_creation_tokens,
 			COALESCE(SUM(cache_read_tokens), 0) as today_cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) as today_provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) as today_cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) as today_forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') as today_reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') as today_estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') as today_unavailable_requests,
 			COALESCE(SUM(total_cost), 0) as today_cost,
 			COALESCE(SUM(actual_cost), 0) as today_actual_cost
 		FROM usage_logs
@@ -609,6 +729,12 @@ func (r *usageLogRepository) GetAPIKeyDashboardStats(ctx context.Context, apiKey
 		&stats.TodayOutputTokens,
 		&stats.TodayCacheCreationTokens,
 		&stats.TodayCacheReadTokens,
+		&stats.TodayProviderCacheReadTokens,
+		&stats.TodayCacheHitRequests,
+		&stats.TodayForcedCacheReadTokens,
+		&stats.TodayReportedRequests,
+		&stats.TodayEstimatedRequests,
+		&stats.TodayUnavailableRequests,
 		&stats.TodayCost,
 		&stats.TodayActualCost,
 	); err != nil {

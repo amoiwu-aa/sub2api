@@ -45,6 +45,14 @@ func ExtractClientSessionID(c *gin.Context) string {
 	return ""
 }
 
+// NormalizeClientSessionID validates a session identifier supplied outside an
+// inbound gateway request. It shares the exact persistence rules used by
+// ExtractClientSessionID, so usage queries cannot target an identifier that
+// the gateway would never record.
+func NormalizeClientSessionID(raw string) string {
+	return sanitizeSessionID(raw)
+}
+
 // sanitizeSessionID normalizes a raw client-supplied session identifier for safe
 // persistence: it trims surrounding whitespace, rejects the value outright if it
 // contains any control character (CR/LF/tab/NUL/…) so a log- or header-injection style
