@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -1067,6 +1068,9 @@ type TestAccountRequest struct {
 	ModelID string `json:"model_id"`
 	Prompt  string `json:"prompt"`
 	Mode    string `json:"mode"`
+	// CursorOptions mirrors the public gateway's cursor_options extension so
+	// the admin test exercises the same RequestedModel combination.
+	CursorOptions *cursor.ModelOptions `json:"cursor_options,omitempty"`
 	// Optional media for Grok (and future) real generation tests.
 	// ImageDataURL / AudioDataURL are data:<mime>;base64,... payloads.
 	ImageDataURL string `json:"image_data_url"`
@@ -1098,11 +1102,21 @@ func (h *AccountHandler) Test(c *gin.Context) {
 
 	var req TestAccountRequest
 	// Allow empty body, model_id is optional
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if req.CursorOptions != nil {
+		if _, err := cursor.ResolveModelWithOptions(req.ModelID, nil, req.CursorOptions); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
 
 	opts := service.AccountTestOptions{
-		ImageDataURL: req.ImageDataURL,
-		AudioDataURL: req.AudioDataURL,
+		ImageDataURL:  req.ImageDataURL,
+		AudioDataURL:  req.AudioDataURL,
+		CursorOptions: req.CursorOptions,
 	}
 
 	// Use AccountTestService to test the account with SSE streaming

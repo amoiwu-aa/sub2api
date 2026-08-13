@@ -1227,6 +1227,52 @@
         </div>
       </div>
 
+      <!-- Cursor force-use override -->
+      <div
+        v-if="account?.platform === 'cursor'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="cursor-force-use-section"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label id="cursor-force-use-label" class="input-label mb-0">{{
+              t('admin.accounts.cursor.forceUse')
+            }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.cursor.forceUseDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="cursorForceUseEnabled"
+            aria-labelledby="cursor-force-use-label"
+            data-testid="cursor-force-use-toggle"
+            @click="cursorForceUseEnabled = !cursorForceUseEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2',
+              cursorForceUseEnabled ? 'bg-amber-500' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                cursorForceUseEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+        <div
+          v-if="cursorForceUseEnabled"
+          class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/60 dark:bg-amber-900/20"
+        >
+          <p class="text-xs leading-5 text-amber-800 dark:text-amber-300">
+            <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
+            {{ t('admin.accounts.cursor.forceUseWarning') }}
+          </p>
+        </div>
+      </div>
+
       <!-- Temp Unschedulable Rules -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
         <div class="mb-3 flex items-center justify-between">
@@ -2895,6 +2941,7 @@ const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
+const cursorForceUseEnabled = ref(false)
 const antigravityProjectId = ref('')
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
@@ -3389,9 +3436,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load mixed scheduling setting (only for antigravity accounts)
   mixedScheduling.value = false
   allowOverages.value = false
+  cursorForceUseEnabled.value = false
 	const extra = newAccount.extra as Record<string, unknown> | undefined
 	mixedScheduling.value = extra?.mixed_scheduling === true
 	allowOverages.value = extra?.allow_overages === true
+  cursorForceUseEnabled.value =
+    newAccount.platform === 'cursor' && extra?.cursor_force_use === true
 	autoPause5hThreshold.value = typeof extra?.auto_pause_5h_threshold === 'number' ? extra.auto_pause_5h_threshold * 100 : null
 	autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
@@ -4595,6 +4645,22 @@ const handleSubmit = async () => {
         newExtra.allow_overages = true
       } else {
         delete newExtra.allow_overages
+      }
+      updatePayload.extra = newExtra
+    }
+
+    // Cursor: bypass only RingStar's local quota gate. Upstream 429/auth/concurrency
+    // handling remains active.
+    if (props.account.platform === 'cursor') {
+      const currentExtra =
+        (updatePayload.extra as Record<string, unknown>) ||
+        (props.account.extra as Record<string, unknown>) ||
+        {}
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      if (cursorForceUseEnabled.value) {
+        newExtra.cursor_force_use = true
+      } else {
+        delete newExtra.cursor_force_use
       }
       updatePayload.extra = newExtra
     }

@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountNotFound          = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrAccountNilInput          = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback     = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrCursorForceUseUpdatePath = infraerrors.BadRequest("CURSOR_FORCE_USE_UPDATE_PATH_REQUIRED", "cursor_force_use must be changed through the full account update path")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -142,6 +143,14 @@ type AccountBillingSettingsRepository interface {
 		rateSyncEnabled *bool,
 		rateMultiplier *float64,
 	) error
+}
+
+// CursorQuotaParkRepository applies Cursor quota exhaustion parking with a
+// database-side force-use and runtime-state guard. The conditional mutation is
+// deliberately separate from generic temporary blocking so a stale quota
+// fetch cannot overwrite a newer auth/transport block.
+type CursorQuotaParkRepository interface {
+	SetCursorQuotaParkIfAllowed(ctx context.Context, id int64, until time.Time, reason string) (bool, error)
 }
 
 // AdminAccountRepository makes the account-duplication write capability an explicit

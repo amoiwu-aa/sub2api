@@ -70,6 +70,98 @@
         />
       </div>
 
+      <div
+        v-if="showCursorModelOptions"
+        data-testid="cursor-model-options"
+        class="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-dark-500 dark:bg-dark-700/60"
+      >
+        <div>
+          <p class="text-sm font-medium text-gray-800 dark:text-gray-200">
+            {{ t('admin.accounts.cursor.modelOptions') }}
+          </p>
+          <p class="mt-0.5 text-xs leading-5 text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.cursor.modelOptionsHint') }}
+          </p>
+        </div>
+
+        <div class="space-y-1.5">
+          <label
+            for="cursor-effort-select"
+            class="text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            {{ t('admin.accounts.cursor.effort') }}
+          </label>
+          <Select
+            id="cursor-effort-select"
+            v-model="cursorEffort"
+            :options="cursorEffortOptions"
+            :disabled="status === 'connecting'"
+            :aria-label="t('admin.accounts.cursor.effort')"
+            data-testid="cursor-effort-select"
+          />
+        </div>
+
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="cursorFast"
+            :aria-label="t('admin.accounts.cursor.fast')"
+            :disabled="status === 'connecting'"
+            data-testid="cursor-fast-toggle"
+            class="flex min-h-11 cursor-pointer items-center justify-between rounded-lg border border-gray-200 bg-white px-3 text-left transition-colors duration-200 hover:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-500 dark:bg-dark-700 dark:hover:border-primary-600"
+            @click="cursorFast = !cursorFast"
+          >
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.accounts.cursor.fast') }}
+            </span>
+            <span
+              aria-hidden="true"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors duration-200',
+                cursorFast ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-500'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 translate-y-0.5 transform rounded-full bg-white shadow transition duration-200',
+                  cursorFast ? 'translate-x-5' : 'translate-x-0.5'
+                ]"
+              />
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="cursorMaxMode"
+            :aria-label="t('admin.accounts.cursor.maxMode')"
+            :disabled="status === 'connecting'"
+            data-testid="cursor-max-mode-toggle"
+            class="flex min-h-11 cursor-pointer items-center justify-between rounded-lg border border-gray-200 bg-white px-3 text-left transition-colors duration-200 hover:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-500 dark:bg-dark-700 dark:hover:border-primary-600"
+            @click="cursorMaxMode = !cursorMaxMode"
+          >
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.accounts.cursor.maxMode') }}
+            </span>
+            <span
+              aria-hidden="true"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors duration-200',
+                cursorMaxMode ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-500'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 translate-y-0.5 transform rounded-full bg-white shadow transition duration-200',
+                  cursorMaxMode ? 'translate-x-5' : 'translate-x-0.5'
+                ]"
+              />
+            </span>
+          </button>
+        </div>
+      </div>
+
       <div v-if="isOpenAIAccount" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
           {{ t('admin.accounts.openai.testMode') }}
@@ -390,6 +482,8 @@ interface PreviewMedia {
   mimeType?: string
 }
 
+type CursorEffort = 'low' | 'medium' | 'high' | 'xhigh'
+
 const props = defineProps<{
   show: boolean
   account: Account | null
@@ -415,6 +509,9 @@ const generatedVideos = ref<PreviewMedia[]>([])
 const previewImageUrl = ref('')
 const testMode = ref<'default' | 'compact'>('default')
 const grokTestMode = ref<'text' | 'image' | 'video' | 'search' | 'tts' | 'stt' | 'realtime'>('text')
+const cursorEffort = ref<CursorEffort>('high')
+const cursorFast = ref(true)
+const cursorMaxMode = ref(false)
 const uploadImageDataURL = ref('')
 const uploadImagePreview = ref('')
 const uploadImageName = ref('')
@@ -424,6 +521,25 @@ const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
+const isCursorAccount = computed(() => props.account?.platform === 'cursor')
+const cursorBaseModelID = computed(() => selectedModelId.value.toLowerCase().replace(/-max$/, ''))
+const showCursorModelOptions = computed(
+  () =>
+    isCursorAccount.value &&
+    (cursorBaseModelID.value === 'cursor/grok-4.6' ||
+      cursorBaseModelID.value === 'cursor/grok-4.5')
+)
+const cursorEffortOptions = computed(() => {
+  const options = [
+    { value: 'low', label: t('admin.accounts.cursor.effortLow') },
+    { value: 'medium', label: t('admin.accounts.cursor.effortMedium') },
+    { value: 'high', label: t('admin.accounts.cursor.effortHigh') }
+  ]
+  if (cursorBaseModelID.value === 'cursor/grok-4.6') {
+    options.push({ value: 'xhigh', label: t('admin.accounts.cursor.effortXHigh') })
+  }
+  return options
+})
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
@@ -483,6 +599,11 @@ const showModelSelect = computed(() => {
 })
 
 const modelOptionsForMode = computed(() => {
+  if (isCursorAccount.value) {
+    // MAX 现在是独立开关；保留后端的 -max 别名兼容旧客户端，但测试下拉不再
+    // 显示两份相同基础模型。
+    return availableModels.value.filter((m) => !m.id.toLowerCase().endsWith('-max'))
+  }
   if (!isGrokAccount.value) return availableModels.value
   if (grokTestMode.value === 'image') {
     return availableModels.value.filter((m) => isGrokImageModel(m.id))
@@ -740,6 +861,9 @@ watch(
       testPrompt.value = ''
       testMode.value = 'default'
       grokTestMode.value = 'text'
+      cursorEffort.value = 'high'
+      cursorFast.value = true
+      cursorMaxMode.value = false
       resetState()
       await loadAvailableModels()
       if (isGrokAccount.value) {
@@ -758,6 +882,16 @@ watch(grokTestMode, () => {
   clearMediaUploads()
   pickDefaultModelForMode()
   applyDefaultPromptForMode()
+})
+
+watch(selectedModelId, (modelID) => {
+  if (!isCursorAccount.value) return
+  if (modelID.toLowerCase().endsWith('-max')) {
+    cursorMaxMode.value = true
+  }
+  if (cursorBaseModelID.value === 'cursor/grok-4.5' && cursorEffort.value === 'xhigh') {
+    cursorEffort.value = 'high'
+  }
 })
 
 const loadAvailableModels = async () => {
@@ -850,12 +984,24 @@ const startTest = async () => {
       mode?: string
       image_data_url?: string
       audio_data_url?: string
+      cursor_options?: {
+        effort: CursorEffort
+        fast: boolean
+        max_mode: boolean
+      }
     } = {
       model_id: showModelSelect.value ? selectedModelId.value : '',
       prompt: supportsPromptInput.value ? testPrompt.value.trim() : ''
     }
     if (isOpenAIAccount.value) {
       requestBody.mode = testMode.value
+    }
+    if (showCursorModelOptions.value) {
+      requestBody.cursor_options = {
+        effort: cursorEffort.value,
+        fast: cursorFast.value,
+        max_mode: cursorMaxMode.value
+      }
     }
     if (isGrokAccount.value) {
       // Always send explicit Grok mode. search/tts/stt/realtime are standalone

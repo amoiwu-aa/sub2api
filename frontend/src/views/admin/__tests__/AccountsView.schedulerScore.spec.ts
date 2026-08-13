@@ -230,9 +230,23 @@ describe('admin AccountsView scheduler score column', () => {
     expect(JSON.parse(localStorage.getItem('account-hidden-columns') || '[]')).toContain('scheduler_score')
   })
 
-  it('requests scheduler scores when the migrated column settings explicitly show the column', async () => {
+  it('collapses diagnostic columns once when migrating old saved layouts to minimal defaults', async () => {
     localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats']))
     localStorage.setItem('account-hidden-columns-version', 'scheduler-score-hidden-by-default')
+
+    mountView()
+    await flushPromises()
+
+    const hidden = JSON.parse(localStorage.getItem('account-hidden-columns') || '[]') as string[]
+    for (const key of ['scheduler_score', 'id', 'capacity', 'upstream_billing_rate', 'last_used_at', 'created_at', 'expires_at']) {
+      expect(hidden).toContain(key)
+    }
+    expect(localStorage.getItem('account-hidden-columns-version')).toBe('minimal-defaults-v2')
+  })
+
+  it('requests scheduler scores when the migrated column settings explicitly show the column', async () => {
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats']))
+    localStorage.setItem('account-hidden-columns-version', 'minimal-defaults-v2')
 
     mountView()
     await flushPromises()

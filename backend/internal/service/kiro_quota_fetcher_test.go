@@ -263,17 +263,29 @@ func TestKiroCreditsLowWatermarkLeavesHeadroom(t *testing.T) {
 // 本测试只关心暂停调度这一个行为。
 type parkRecorder struct {
 	AccountRepository
-	calls  int
-	id     int64
-	until  time.Time
-	reason string
-	err    error
+	calls                 int
+	id                    int64
+	until                 time.Time
+	reason                string
+	err                   error
+	rejectCursorQuotaPark bool
 }
 
 func (r *parkRecorder) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
 	r.calls++
 	r.id, r.until, r.reason = id, until, reason
 	return r.err
+}
+
+func (r *parkRecorder) SetCursorQuotaParkIfAllowed(
+	_ context.Context,
+	id int64,
+	until time.Time,
+	reason string,
+) (bool, error) {
+	r.calls++
+	r.id, r.until, r.reason = id, until, reason
+	return r.err == nil && !r.rejectCursorQuotaPark, r.err
 }
 
 func TestParkExhaustedKiroAccount(t *testing.T) {

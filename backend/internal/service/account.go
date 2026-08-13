@@ -88,6 +88,11 @@ type OpenAIEndpointCapability string
 const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
 
 const (
+	CursorForceUseExtraKey      = "cursor_force_use"
+	CursorQuotaParkReasonPrefix = "cursor quota exhausted"
+)
+
+const (
 	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
 	OpenAIEndpointCapabilityAlphaSearch     OpenAIEndpointCapability = "alpha_search"
@@ -150,6 +155,22 @@ func (a *Account) IsSyntheticUITest() bool {
 	return ok && enabled
 }
 
+// IsCursorForceUseEnabled reports whether the administrator explicitly chose
+// to bypass RingStar's local Cursor quota gate for this account.
+//
+// It does not bypass upstream authentication, concurrency, or rate-limit
+// responses. Cursor can still reject the request, and on-demand charges may
+// apply after included quota is exhausted.
+func (a *Account) IsCursorForceUseEnabled() bool {
+	return a != nil && a.Platform == PlatformCursor && a.getExtraBool(CursorForceUseExtraKey)
+}
+
+func isCursorQuotaParkReason(reason string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(reason))
+	return normalized == CursorQuotaParkReasonPrefix ||
+		strings.HasPrefix(normalized, CursorQuotaParkReasonPrefix+" (")
+}
+
 // BillingRateMultiplier 返回账号计费倍率。
 // - nil 表示未配置/旧缓存缺字段，按 1.0 处理
 // - 允许 0，表示该账号计费为 0
@@ -192,7 +213,9 @@ func (a *Account) IsSchedulable() bool {
 		return false
 	}
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
-		return false
+		if !a.IsCursorForceUseEnabled() || !isCursorQuotaParkReason(a.TempUnschedulableReason) {
+			return false
+		}
 	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
 		return false

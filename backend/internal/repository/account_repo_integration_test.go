@@ -1026,6 +1026,63 @@ func (s *AccountRepoSuite) TestSetTempUnschedulableSkipsOutboxWhenWindowDoesNotE
 	s.Require().WithinDuration(until, *got.TempUnschedulableUntil, time.Second)
 }
 
+func (s *AccountRepoSuite) TestCursorQuotaParkNeverReplacesOrMasksNonQuotaBlock() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "cursor-quota-park-ordering",
+		Platform:    service.PlatformCursor,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Extra:       map[string]any{},
+	})
+	quotaUntil := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	nonQuotaUntil := time.Now().Add(10 * time.Minute).UTC().Truncate(time.Second)
+	quotaReason := service.CursorQuotaParkReasonPrefix + " (auto 100.0%, api 100.0%)"
+	nonQuotaReason := "token refresh failed on request path: unauthorized"
+
+	applied, err := s.repo.SetCursorQuotaParkIfAllowed(
+		s.ctx, account.ID, quotaUntil, quotaReason,
+	)
+	s.Require().NoError(err)
+	s.Require().True(applied)
+	s.Require().NoError(s.repo.SetTempUnschedulable(
+		s.ctx, account.ID, nonQuotaUntil, nonQuotaReason,
+	))
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(nonQuotaReason, got.TempUnschedulableReason)
+	s.Require().NotNil(got.TempUnschedulableUntil)
+	s.Require().WithinDuration(nonQuotaUntil, *got.TempUnschedulableUntil, time.Second)
+
+	s.Require().NoError(s.repo.ClearTempUnschedulable(s.ctx, account.ID))
+	s.Require().NoError(s.repo.SetTempUnschedulable(
+		s.ctx, account.ID, nonQuotaUntil, nonQuotaReason,
+	))
+	applied, err = s.repo.SetCursorQuotaParkIfAllowed(
+		s.ctx, account.ID, quotaUntil, quotaReason,
+	)
+	s.Require().NoError(err)
+	s.Require().False(applied)
+
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(nonQuotaReason, got.TempUnschedulableReason)
+	s.Require().NotNil(got.TempUnschedulableUntil)
+	s.Require().WithinDuration(nonQuotaUntil, *got.TempUnschedulableUntil, time.Second)
+
+	// Even a caller that mistakenly sends a quota reason through the generic
+	// mutation must not replace a shorter, still-active auth/transport block.
+	s.Require().NoError(s.repo.SetTempUnschedulable(
+		s.ctx, account.ID, quotaUntil.Add(time.Hour), quotaReason,
+	))
+	got, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(nonQuotaReason, got.TempUnschedulableReason)
+	s.Require().NotNil(got.TempUnschedulableUntil)
+	s.Require().WithinDuration(nonQuotaUntil, *got.TempUnschedulableUntil, time.Second)
+}
+
 func (s *AccountRepoSuite) TestClearModelRateLimits_SyncsSchedulerSnapshot() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "acc-clear-model-rate",

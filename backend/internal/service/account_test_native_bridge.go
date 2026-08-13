@@ -104,7 +104,12 @@ func (s *AccountTestService) testKiroAccountConnection(c *gin.Context, account *
 // 它的上游是 HTTP/2 双向流 + 手写 protobuf + 逆向出来的 checksum，
 // 任何一环错了都只在真实发起一轮时才暴露。所以这里发一个极短的 prompt，
 // 用 Auto 模型（具名模型可能受套餐限制），把真实回复透出来。
-func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account *Account, modelID string) error {
+func (s *AccountTestService) testCursorAccountConnection(
+	c *gin.Context,
+	account *Account,
+	modelID string,
+	modelOptions *cursor.ModelOptions,
+) error {
 	ctx := c.Request.Context()
 
 	if s.cursorGatewayService == nil {
@@ -117,9 +122,12 @@ func (s *AccountTestService) testCursorAccountConnection(c *gin.Context, account
 	if publicModel == "" {
 		publicModel = cursor.PublicModelPrefix + cursor.AutoModelID
 	}
-	selection := cursor.ResolveModel(publicModel)
 
 	s.setupSSEHeaders(c)
+	selection, err := cursor.ResolveModelWithOptions(publicModel, nil, modelOptions)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Cursor model options: %s", err.Error()))
+	}
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: publicModel})
 
 	started := time.Now()

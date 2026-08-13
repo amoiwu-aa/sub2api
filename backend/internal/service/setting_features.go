@@ -1114,10 +1114,17 @@ func (s *SettingService) GetAccountSchedulingThresholds(ctx context.Context) map
 
 		raw, err := s.settingRepo.GetValue(dbCtx, SettingKeyAccountSchedulingThresholds)
 		if err != nil {
-			slog.Warn("failed to get account scheduling thresholds, falling back to defaults", "error", err)
+			// 该设置是可选项；尚未配置时使用默认阈值是正常路径，不应在
+			// 网关热路径中持续产生 WARN 或每 5 秒重查数据库。真正的存储
+			// 故障仍使用较短负缓存并保留告警。
+			ttl := accountSchedulingThresholdsCacheTTL
+			if !errors.Is(err, ErrSettingNotFound) {
+				slog.Warn("failed to get account scheduling thresholds, falling back to defaults", "error", err)
+				ttl = accountSchedulingThresholdsErrorTTL
+			}
 			accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{
 				thresholds: cloneAccountSchedulingThresholds(thresholds),
-				expiresAt:  time.Now().Add(accountSchedulingThresholdsErrorTTL).UnixNano(),
+				expiresAt:  time.Now().Add(ttl).UnixNano(),
 			})
 			return cloneAccountSchedulingThresholds(thresholds), nil
 		}

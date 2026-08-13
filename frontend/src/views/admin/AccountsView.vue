@@ -2,15 +2,15 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
-          <AccountTableFilters
-            v-model:searchQuery="params.search"
-            :filters="params"
-            :groups="groups"
-            @update:filters="(newFilters) => Object.assign(params, newFilters)"
-            @change="debouncedReload"
-            @update:searchQuery="debouncedReload"
-          />
+        <AccountTableFilters
+          v-model:searchQuery="params.search"
+          :filters="params"
+          :groups="groups"
+          @update:filters="(newFilters) => Object.assign(params, newFilters)"
+          @change="debouncedReload"
+          @update:searchQuery="debouncedReload"
+        >
+          <template #trailing>
           <AccountTableActions
             :loading="loading"
             @refresh="handleManualRefresh"
@@ -160,7 +160,8 @@
               </div>
             </template>
           </AccountTableActions>
-        </div>
+          </template>
+        </AccountTableFilters>
         <div
           v-if="hasPendingListSync"
           class="mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
@@ -203,7 +204,7 @@
           default-sort-key="name"
           default-sort-order="asc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
-          :estimate-row-height="156"
+          :estimate-row-height="140"
           :overscan="5"
           :virtualize-threshold="50"
         >
@@ -218,6 +219,89 @@
           </template>
           <template #cell-select="{ row }">
             <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+          </template>
+          <!-- 移动端卡片：身份摘要 + 状态/用量 主线，低频字段收进「展开详情」 -->
+          <template #mobile-card="{ row }">
+            <div class="space-y-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex min-w-0 items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    :checked="isSelected(row.id)"
+                    @click.stop
+                    @change="toggleSel(row.id)"
+                  />
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ row.name }}</div>
+                    <div v-if="accountDisplayEmail(row)" class="truncate text-xs text-gray-500 dark:text-gray-400" :title="accountDisplayEmail(row)">
+                      {{ accountDisplayEmail(row) }}
+                    </div>
+                  </div>
+                </div>
+                <PlatformTypeBadge
+                  :platform="row.platform"
+                  :type="row.type"
+                  :auth-mode="getOpenAIAuthMode(row)"
+                  :plan-type="getAccountPlanType(row)"
+                  :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
+                  :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at"
+                />
+              </div>
+
+              <div class="flex items-center justify-between gap-3">
+                <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+                <button @click.stop="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50" :class="[row.schedulable ? 'bg-primary-500' : 'bg-gray-200 dark:bg-dark-600']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+                  <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
+                </button>
+              </div>
+
+              <AccountUsageCell
+                :account="row"
+                :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
+                :today-stats-loading="todayStatsLoading"
+                :manual-refresh-token="usageManualRefreshToken"
+                :batched-usage="usageBatchByAccountId[String(row.id)] ?? null"
+                :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"
+                :batched-usage-loading="usageBatchLoadingByAccountId[String(row.id)] === true"
+                :request-batched-usage="isDesktopViewport ? queueBatchedUsage : null"
+                @account-updated="handleAccountUpdated"
+                @usage-loaded="handleAccountUsageLoaded(row.id, $event)"
+              />
+
+              <button
+                type="button"
+                class="flex w-full items-center justify-center gap-1 rounded-lg border border-gray-200 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-dark-700 dark:text-gray-300 dark:hover:bg-dark-800"
+                @click.stop="toggleMobileDetails(row.id)"
+              >
+                {{ isMobileDetailsExpanded(row.id) ? t('admin.accounts.mobileHideDetails') : t('admin.accounts.mobileShowDetails') }}
+                <Icon name="chevronDown" size="xs" :class="['transition-transform', isMobileDetailsExpanded(row.id) ? 'rotate-180' : '']" />
+              </button>
+
+              <div v-if="isMobileDetailsExpanded(row.id)" class="space-y-2 border-t border-gray-100 pt-2 dark:border-dark-800">
+                <div v-if="!authStore.isSimpleMode" class="flex items-start justify-between gap-3">
+                  <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.columns.groups') }}</span>
+                  <AccountGroupsCell :groups="row.groups" :max-display="4" />
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.columns.lastUsed') }}</span>
+                  <span class="text-xs text-gray-700 dark:text-gray-300">{{ formatRelativeTime(row.last_used_at) }}</span>
+                </div>
+                <div v-if="row.expires_at" class="flex items-center justify-between gap-3">
+                  <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.columns.expiresAt') }}</span>
+                  <span class="text-xs text-gray-700 dark:text-gray-300">{{ formatExpiresAt(row.expires_at) }}</span>
+                </div>
+                <div v-if="row.notes" class="flex items-start justify-between gap-3">
+                  <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.accounts.columns.notes') }}</span>
+                  <span class="max-w-[60%] truncate text-xs text-gray-700 dark:text-gray-300" :title="row.notes">{{ row.notes }}</span>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-end gap-1.5 border-t border-gray-100 pt-2 dark:border-dark-800">
+                <button @click.stop="handleEdit(row)" class="btn btn-secondary btn-sm">{{ t('common.edit') }}</button>
+                <button @click.stop="openMenu(row, $event)" class="btn btn-ghost btn-sm">{{ t('common.more') }}</button>
+              </div>
+            </div>
           </template>
           <template #cell-id="{ value }">
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
@@ -458,19 +542,24 @@
               </div>
             </div>
           </template>
+          <!-- 行内只保留高频的「编辑」；删除等低频/危险操作统一进省略号菜单 -->
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
+            <div class="flex items-center gap-0.5">
+              <button
+                @click="handleEdit(row)"
+                class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :title="t('common.edit')"
+                :aria-label="t('common.edit')"
+              >
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
-                <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                <span class="text-xs">{{ t('common.delete') }}</span>
-              </button>
-              <button @click="openMenu(row, $event)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
+              <button
+                @click="openMenu(row, $event)"
+                class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white"
+                :title="t('common.more')"
+                :aria-label="t('common.more')"
+              >
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
-                <span class="text-xs">{{ t('common.more') }}</span>
               </button>
             </div>
           </template>
@@ -485,7 +574,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @delete="handleDelete" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -744,11 +833,38 @@ const accountToolsDropdownStyle = computed(() => ({
   width: `${accountToolsDropdownPosition.width}px`
 }))
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'priority', 'scheduler_score', 'rate_multiplier']
+// 默认只展示「身份 / 平台 / 状态 / 可调度 / 用量 / 分组 / 操作」这条主线；
+// 诊断类列（ID、容量、计费探测、时间戳等）收进列设置，按需开启。
+const DEFAULT_HIDDEN_COLUMNS = [
+  'id',
+  'capacity',
+  'today_stats',
+  'proxy',
+  'notes',
+  'priority',
+  'scheduler_score',
+  'rate_multiplier',
+  'upstream_billing_rate',
+  'last_used_at',
+  'created_at',
+  'expires_at'
+]
+// 版本迁移时并入已保存布局的隐藏列（老用户手动开启过的列会随之收起一次，可在列设置里重新打开）
+const MIGRATION_HIDDEN_KEYS = [
+  'scheduler_score',
+  'id',
+  'capacity',
+  'upstream_billing_rate',
+  'last_used_at',
+  'created_at',
+  'expires_at'
+]
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
-// One-time migration: hide scheduler score for existing admins too, because showing it opt-ins to heavy backend scoring.
+// Version history:
+//  - 'scheduler-score-hidden-by-default': hide scheduler score (showing it opt-ins to heavy backend scoring)
+//  - 'minimal-defaults-v2': Apple-minimal defaults, diagnostic columns collapsed
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
-const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
+const HIDDEN_COLUMNS_CURRENT_VERSION = 'minimal-defaults-v2'
 
 // Sorting settings
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
@@ -807,6 +923,19 @@ const todayStatsReqSeq = ref(0)
 const pendingTodayStatsRefresh = ref(false)
 const usageManualRefreshToken = ref(0)
 
+// 移动端卡片的「展开详情」状态（按账号 id 记录）
+const expandedMobileRows = ref<Set<number>>(new Set())
+const isMobileDetailsExpanded = (id: number) => expandedMobileRows.value.has(id)
+const toggleMobileDetails = (id: number) => {
+  const next = new Set(expandedMobileRows.value)
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    next.add(id)
+  }
+  expandedMobileRows.value = next
+}
+
 const desktopViewportQuery = '(min-width: 768px)'
 const isDesktopViewport = ref(
   typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
@@ -833,6 +962,8 @@ const buildDefaultTodayStats = (): WindowStats => ({
   user_cost: 0
 })
 
+// 必须与 AccountUsageCell 的 shouldFetchUsage 平台列表保持一致：
+// 桌面端 cell 完全托管给批量查询，平台不在这里就永远不会发起用量请求。
 const accountSupportsBatchUsage = (account: Account) => {
   if (account.platform === 'anthropic') {
     return account.type === 'oauth' || account.type === 'setup-token'
@@ -841,6 +972,8 @@ const accountSupportsBatchUsage = (account: Account) => {
   if (account.platform === 'antigravity') return account.type === 'oauth'
   if (account.platform === 'openai') return account.type === 'oauth'
   if (account.platform === 'grok') return account.type === 'oauth'
+  if (account.platform === 'kiro') return account.type === 'oauth'
+  if (account.platform === 'cursor') return account.type === 'oauth'
   return false
 }
 
@@ -1055,9 +1188,11 @@ const loadSavedColumns = () => {
       parsed.forEach(key => {
         hiddenColumns.add(key)
       })
-      // Older saved column layouts may have scheduler_score visible; migrate them to the new safe default once.
+      // Older saved column layouts predate the current defaults; merge the newly hidden-by-default keys once.
       if (localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY) !== HIDDEN_COLUMNS_CURRENT_VERSION) {
-        hiddenColumns.add('scheduler_score')
+        MIGRATION_HIDDEN_KEYS.forEach(key => {
+          hiddenColumns.add(key)
+        })
         localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
         localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
       }

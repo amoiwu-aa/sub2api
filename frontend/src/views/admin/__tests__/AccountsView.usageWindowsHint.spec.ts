@@ -180,6 +180,9 @@ describe('admin AccountsView usage windows hint', () => {
   })
 
   it('renders the upstream billing trust warning next to the declared-rate column', async () => {
+    // upstream_billing_rate 在 minimal-defaults-v2 中默认收起；保存的布局显式展示后表头才渲染
+    localStorage.setItem('account-hidden-columns', JSON.stringify([]))
+    localStorage.setItem('account-hidden-columns-version', 'minimal-defaults-v2')
     const wrapper = mountView()
     await flushPromises()
 

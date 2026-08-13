@@ -77,7 +77,10 @@ function mountModal(account: Record<string, unknown> = {
     global: {
       stubs: {
         BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
-        Select: { template: '<div class="select-stub"></div>' },
+        Select: {
+          props: ['id', 'ariaLabel'],
+          template: '<button type="button" class="select-stub" :id="id" :aria-label="ariaLabel"></button>'
+        },
         TextArea: {
           props: ['modelValue'],
           emits: ['update:modelValue'],
@@ -218,6 +221,57 @@ describe('AccountTestModal', () => {
       model_id: 'gpt-5.4',
       prompt: '',
       mode: 'compact'
+    })
+  })
+
+  it('Cursor Grok 4.6 测试会发送 Effort、Fast 与 MAX 的独立组合', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'cursor/grok-4.6', display_name: 'Cursor Grok 4.6' },
+      { id: 'cursor/grok-4.6-max', display_name: 'Cursor Grok 4.6 (MAX)' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"cursor/grok-4.6"}\n',
+        'data: {"type":"content","text":"ok"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({
+      id: 46,
+      name: 'Cursor Account',
+      platform: 'cursor',
+      type: 'oauth',
+      status: 'active'
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="cursor-model-options"]').exists()).toBe(true)
+    expect(wrapper.find('label[for="cursor-effort-select"]').exists()).toBe(true)
+    expect(wrapper.find('#cursor-effort-select').attributes('aria-label')).toBe(
+      'admin.accounts.cursor.effort'
+    )
+    expect((wrapper.vm as any).modelOptionsForMode.map((model: { id: string }) => model.id)).toEqual([
+      'cursor/grok-4.6'
+    ])
+
+    ;(wrapper.vm as any).cursorEffort = 'xhigh'
+    ;(wrapper.vm as any).cursorFast = false
+    ;(wrapper.vm as any).cursorMaxMode = true
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'cursor/grok-4.6',
+      prompt: '',
+      cursor_options: {
+        effort: 'xhigh',
+        fast: false,
+        max_mode: true
+      }
     })
   })
 })

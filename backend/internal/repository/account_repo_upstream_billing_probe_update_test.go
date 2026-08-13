@@ -361,6 +361,111 @@ func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUpdateWithAccountBillingSettingsAtomicallyClearsCursorQuotaPark(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	accountID := int64(37)
+	until := time.Now().Add(24 * time.Hour)
+	reason := service.CursorQuotaParkReasonPrefix + " (auto 100.0%, api 100.0%)"
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
+		WithArgs(accountID, service.PlatformCursor, service.AccountTypeOAuth, `{}`, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil))
+	mock.ExpectExec(`(?s)UPDATE .*accounts.*SET.*WHERE .*id.*`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)SELECT .* FROM "accounts" WHERE "id" = \$1`).
+		WithArgs(accountID).
+		WillReturnRows(updatedCursorAccountRows(accountID, `{"cursor_force_use":true}`))
+	mock.ExpectExec(`(?s)UPDATE accounts\s+SET temp_unschedulable_until = NULL`).
+		WithArgs(
+			accountID,
+			service.PlatformCursor,
+			service.CursorQuotaParkReasonPrefix,
+			service.CursorQuotaParkReasonPrefix+" (%",
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
+		WithArgs(service.SchedulerOutboxEventAccountChanged, accountID, nil, nil, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+	account := &service.Account{
+		ID:                      accountID,
+		Name:                    "test",
+		Platform:                service.PlatformCursor,
+		Type:                    service.AccountTypeOAuth,
+		Credentials:             map[string]any{},
+		Extra:                   map[string]any{service.CursorForceUseExtraKey: true},
+		Concurrency:             1,
+		Priority:                1,
+		Status:                  service.StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &until,
+		TempUnschedulableReason: reason,
+	}
+
+	err = repo.UpdateWithAccountBillingSettings(context.Background(), account, nil, nil, nil)
+
+	require.NoError(t, err)
+	require.Nil(t, account.TempUnschedulableUntil)
+	require.Empty(t, account.TempUnschedulableReason)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUpdateWithAccountBillingSettingsRollsBackCursorForceUseWhenQuotaParkClearFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	accountID := int64(38)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
+		WithArgs(accountID, service.PlatformCursor, service.AccountTypeOAuth, `{}`, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil))
+	mock.ExpectExec(`(?s)UPDATE .*accounts.*SET.*WHERE .*id.*`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)SELECT .* FROM "accounts" WHERE "id" = \$1`).
+		WithArgs(accountID).
+		WillReturnRows(updatedCursorAccountRows(accountID, `{"cursor_force_use":true}`))
+	mock.ExpectExec(`(?s)UPDATE accounts\s+SET temp_unschedulable_until = NULL`).
+		WithArgs(
+			accountID,
+			service.PlatformCursor,
+			service.CursorQuotaParkReasonPrefix,
+			service.CursorQuotaParkReasonPrefix+" (%",
+		).
+		WillReturnError(errors.New("clear failed"))
+	mock.ExpectRollback()
+
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+	account := &service.Account{
+		ID:          accountID,
+		Name:        "test",
+		Platform:    service.PlatformCursor,
+		Type:        service.AccountTypeOAuth,
+		Credentials: map[string]any{},
+		Extra:       map[string]any{service.CursorForceUseExtraKey: true},
+		Concurrency: 1,
+		Priority:    1,
+		Status:      service.StatusActive,
+		Schedulable: true,
+	}
+
+	err = repo.UpdateWithAccountBillingSettings(context.Background(), account, nil, nil, nil)
+
+	require.EqualError(t, err, "clear failed")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestUpdateWithAccountBillingSettingsRollsBackWhenOutboxFails(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -477,6 +582,16 @@ func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
 		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
 		[]byte(`{"api_key":"sk-test"}`), []byte(extra), nil, nil, 1, nil, 1, 1.0,
+		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, service.QuotaDimensionGlobal,
+	)
+}
+
+func updatedCursorAccountRows(id int64, extra string) *sqlmock.Rows {
+	now := time.Now()
+	return sqlmock.NewRows(dbaccount.Columns).AddRow(
+		id, now, now, nil, "test", nil, service.PlatformCursor, service.AccountTypeOAuth,
+		[]byte(`{}`), []byte(extra), nil, nil, 1, nil, 1, 1.0,
 		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,
 	)

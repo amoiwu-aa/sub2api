@@ -1,10 +1,13 @@
 package service
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +28,7 @@ func gateWith(usage *UsageInfo, ok bool) *CursorGatewayService {
 // 每个请求直接进无上限的 on-demand 账单；反过来只是少放行一些请求。所以未知
 // 模型必须落到 API 档。
 func TestCursorModelUsesAutoQuota(t *testing.T) {
-	for _, m := range []string{cursor.AutoModelID, "grok-4.5", "composer-2.5"} {
+	for _, m := range []string{cursor.AutoModelID, "grok-4.6", "grok-4.5", "composer-2.5"} {
 		require.True(t, cursorModelUsesAutoQuota(m), "%s 应算 Auto 档", m)
 	}
 	for _, m := range []string{"claude-sonnet-5", "claude-opus-4-8", "gpt-5.6-sol", "gpt-5.6-terra"} {
@@ -33,8 +36,8 @@ func TestCursorModelUsesAutoQuota(t *testing.T) {
 	}
 
 	// MAX 变体经 ResolveModel 后归一到基础模型名，不必单独登记。
-	require.Equal(t, "grok-4.5", cursor.ResolveModel("cursor/grok-4.5"+cursor.MaxModeSuffix).ModelID)
-	require.True(t, cursorModelUsesAutoQuota(cursor.ResolveModel("cursor/grok-4.5"+cursor.MaxModeSuffix).ModelID))
+	require.Equal(t, "grok-4.6", cursor.ResolveModel("cursor/grok-4.6"+cursor.MaxModeSuffix).ModelID)
+	require.True(t, cursorModelUsesAutoQuota(cursor.ResolveModel("cursor/grok-4.6"+cursor.MaxModeSuffix).ModelID))
 
 	// 没见过的新模型一律按 API 档，保守拦截。
 	require.False(t, cursorModelUsesAutoQuota("some-future-model"))
@@ -53,7 +56,7 @@ func TestQuotaBlockReasonIsolatesDimensions(t *testing.T) {
 	account := cursorParkAccount()
 
 	t.Run("走 Auto 额度的模型照常放行", func(t *testing.T) {
-		for _, m := range []string{cursor.AutoModelID, "grok-4.5", "composer-2.5"} {
+		for _, m := range []string{cursor.AutoModelID, "grok-4.6", "grok-4.5", "composer-2.5"} {
 			require.Empty(t, s.quotaBlockReason(account, m), "%s 不该被 API 额度连累", m)
 		}
 	})
@@ -64,6 +67,7 @@ func TestQuotaBlockReasonIsolatesDimensions(t *testing.T) {
 		require.Contains(t, reason, "API 额度已用尽")
 		// 得告诉用户还能用什么，否则只知道被拒。
 		require.Contains(t, reason, "cursor/default")
+		require.Contains(t, reason, "cursor/grok-4.6")
 		// 带上重置时间，用户才知道要等多久。
 		require.Contains(t, reason, cycleEnd.Local().Format("2006-01-02"))
 	})
@@ -83,6 +87,42 @@ func TestQuotaBlockReasonAutoExhausted(t *testing.T) {
 
 	// 反过来，API 档还有余量就该放行。
 	require.Empty(t, s.quotaBlockReason(account, "claude-sonnet-5"))
+}
+
+func TestQuotaBlockReasonForceUseBypassesLocalQuotaGate(t *testing.T) {
+	full := &UsageInfo{
+		CursorAutoUsage: &UsageProgress{Utilization: 100},
+		CursorAPIUsage:  &UsageProgress{Utilization: 100},
+	}
+	account := cursorParkAccount()
+	account.Extra = map[string]any{CursorForceUseExtraKey: true}
+
+	require.Empty(t, gateWith(full, true).quotaBlockReason(account, "claude-sonnet-5"))
+	require.Empty(t, gateWith(full, true).quotaBlockReason(account, cursor.AutoModelID))
+}
+
+// 配额 429 的错误体必须与各入口的协议一致：Anthropic 客户端解析的是
+// {"type":"error","error":{...}}，塞给它 OpenAI 形状会显示不出错误详情。
+func TestEnsureModelQuotaUsesProtocolSpecificErrorBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	apiExhausted := &UsageInfo{
+		CursorAutoUsage: &UsageProgress{Utilization: 10},
+		CursorAPIUsage:  &UsageProgress{Utilization: 100},
+	}
+	s := gateWith(apiExhausted, true)
+	account := cursorParkAccount()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	err := s.ensureModelQuota(account, "claude-sonnet-5", func(status int, errType, message string) error {
+		return s.writeAnthropicError(c, status, errType, message)
+	})
+	require.Error(t, err)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Contains(t, rec.Body.String(), `"type":"error"`)
+	require.Contains(t, rec.Body.String(), `"quota_exceeded"`)
 }
 
 // TestQuotaBlockReasonFailsOpen 额度状态未知时必须放行：

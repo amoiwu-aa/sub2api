@@ -16,6 +16,7 @@ import (
 func TestSelectedModelMapsToUpstream(t *testing.T) {
 	require.Equal(t, "claude-sonnet-5", cursor.UpstreamModelID("cursor/claude-sonnet-5"))
 	require.Equal(t, "gpt-5.6-sol", cursor.UpstreamModelID("cursor/gpt-5.6-sol"))
+	require.Equal(t, "grok-4.6", cursor.UpstreamModelID("cursor/grok-4.6"))
 	// 空值与未知名回退到 Auto，不把客户端随手写的名字打给上游。
 	require.Equal(t, cursor.AutoModelID, cursor.UpstreamModelID(""))
 	require.Equal(t, cursor.AutoModelID, cursor.UpstreamModelID("cursor/not-a-real-model"))
@@ -29,8 +30,8 @@ func TestCursorTestSelectionMatchesGatewayRules(t *testing.T) {
 	require.Empty(t, cursor.ResolveModel(cursor.PublicModelPrefix+cursor.AutoModelID).Params)
 	require.NotEmpty(t, cursor.ResolveModel("cursor/claude-sonnet-5").Params)
 
-	maxSelection := cursor.ResolveModel("cursor/grok-4.5" + cursor.MaxModeSuffix)
-	require.Equal(t, "grok-4.5", maxSelection.ModelID)
+	maxSelection := cursor.ResolveModel("cursor/grok-4.6" + cursor.MaxModeSuffix)
+	require.Equal(t, "grok-4.6", maxSelection.ModelID)
 	require.NotNil(t, maxSelection.MaxMode)
 	require.True(t, *maxSelection.MaxMode)
 }

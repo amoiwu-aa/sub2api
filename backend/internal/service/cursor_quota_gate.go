@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
-	"github.com/gin-gonic/gin"
 )
 
 // cursorQuotaSnapshotReader 读账号的 Cursor 额度快照。
@@ -23,10 +22,11 @@ type cursorQuotaSnapshotReader interface {
 // Auto 才 56.67%。所以不能用一个开关把账号整个关掉：那会把还剩四成的 Auto 额度
 // 一起作废，而这部分是已经付过钱的。
 //
-// 键用的是 ResolveModel 之后的 upstream modelID，所以 MAX 变体（grok-4.5-max）
-// 会被归到同一个 grok-4.5 上，不必单独列。
+// 键用的是 ResolveModel 之后的 upstream modelID，所以 MAX 变体（grok-4.6-max）
+// 会被归到同一个 grok-4.6 上，不必单独列。
 var cursorAutoQuotaModels = map[string]struct{}{
 	cursor.AutoModelID: {},
+	"grok-4.6":         {},
 	"grok-4.5":         {},
 	"composer-2.5":     {},
 }
@@ -47,7 +47,7 @@ func cursorModelUsesAutoQuota(modelID string) bool {
 //
 // 拿不到快照时一律放行：宁可漏拦一次，也不能因为额度状态未知就把通道封死。
 func (s *CursorGatewayService) quotaBlockReason(account *Account, modelID string) string {
-	if s.quotaReader == nil || account == nil {
+	if s.quotaReader == nil || account == nil || account.IsCursorForceUseEnabled() {
 		return ""
 	}
 	usage, ok := s.quotaReader.CursorQuotaSnapshot(account.ID)
@@ -71,16 +71,22 @@ func (s *CursorGatewayService) quotaBlockReason(account *Account, modelID string
 
 	if usage.CursorAPIUsage != nil && usage.CursorAPIUsage.Utilization >= cursorUsageParkWatermark {
 		return fmt.Sprintf(
-			"Cursor API 额度已用尽（%.1f%%%s）。%s 走 API 额度，可改用 cursor/default、cursor/grok-4.5、cursor/composer-2.5 等走 Auto 额度的模型。",
+			"Cursor API 额度已用尽（%.1f%%%s）。%s 走 API 额度，可改用 cursor/default、cursor/grok-4.6、cursor/composer-2.5 等走 Auto 额度的模型。",
 			usage.CursorAPIUsage.Utilization, resetHint, modelID)
 	}
 	return ""
 }
 
 // ensureModelQuota 是 chat completions / messages 两个入口的便捷包装。
-func (s *CursorGatewayService) ensureModelQuota(c *gin.Context, account *Account, modelID string) error {
+// writeQuotaError 由各入口传自己的错误渲染器（OpenAI 与 Anthropic 的错误体
+// 包装不同），保持与该入口其它错误一致的形状。
+func (s *CursorGatewayService) ensureModelQuota(
+	account *Account,
+	modelID string,
+	writeQuotaError func(status int, errType, message string) error,
+) error {
 	if reason := s.quotaBlockReason(account, modelID); reason != "" {
-		return s.writeError(c, http.StatusTooManyRequests, "quota_exceeded", reason)
+		return writeQuotaError(http.StatusTooManyRequests, "quota_exceeded", reason)
 	}
 	return nil
 }

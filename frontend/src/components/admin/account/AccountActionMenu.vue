@@ -4,7 +4,7 @@
       <!-- Backdrop: click anywhere outside to close -->
       <div class="fixed inset-0 z-[9998]" @click="emit('close')"></div>
       <div
-        class="action-menu-content fixed z-[9999] w-52 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
+        class="action-menu-content fixed z-[9999] w-52 overflow-hidden rounded-xl border border-gray-200/90 bg-white/95 backdrop-blur-xl dark:border-dark-700/80 dark:bg-dark-800/95"
         :style="{ top: position.top + 'px', left: position.left + 'px' }"
         @click.stop
       >
@@ -55,12 +55,32 @@
               <Icon name="refresh" size="sm" />
               {{ t('admin.accounts.resetQuota') }}
             </button>
+            <!-- 删除从行内按钮移入菜单：危险操作与常规操作分隔，避免误触 -->
+            <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+            <button @click="$emit('delete', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20">
+              <Icon name="trash" size="sm" />
+              {{ t('admin.accounts.deleteAccount') }}
+            </button>
           </template>
         </div>
       </div>
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.action-menu-content {
+  box-shadow:
+    0 16px 40px -12px rgb(15 23 42 / 0.16),
+    0 4px 12px -4px rgb(15 23 42 / 0.06);
+}
+
+.dark .action-menu-content {
+  box-shadow:
+    0 16px 40px -12px rgb(0 0 0 / 0.5),
+    0 4px 12px -4px rgb(0 0 0 / 0.3);
+}
+</style>
 
 <script setup lang="ts">
 import { computed, watch, onUnmounted } from 'vue'
@@ -70,7 +90,7 @@ import { supportsConnectionTest, supportsReAuthorize } from '@/components/accoun
 import type { Account } from '@/types'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'delete'])
 const { t } = useI18n()
 // cursor/kiro 在后端 account_test_service 里直接早退,测试入口必然是死路。
 const canTestConnection = computed(() => supportsConnectionTest(props.account?.platform))

@@ -11,6 +11,7 @@ import (
 
 func TestAccountIsSchedulable_QuotaExceeded(t *testing.T) {
 	now := time.Now()
+	cursorParkUntil := now.Add(time.Hour)
 
 	tests := []struct {
 		name    string
@@ -110,6 +111,30 @@ func TestAccountIsSchedulable_QuotaExceeded(t *testing.T) {
 					"quota_limit": 200.0,
 					"quota_used":  200.0,
 				},
+			},
+			want: false,
+		},
+		{
+			name: "cursor force use bypasses quota exhaustion park",
+			account: &Account{
+				Platform:                PlatformCursor,
+				Status:                  StatusActive,
+				Schedulable:             true,
+				TempUnschedulableUntil:  &cursorParkUntil,
+				TempUnschedulableReason: CursorQuotaParkReasonPrefix + " (auto 100.0%, api 100.0%)",
+				Extra:                   map[string]any{CursorForceUseExtraKey: true},
+			},
+			want: true,
+		},
+		{
+			name: "cursor force use keeps non quota temporary block",
+			account: &Account{
+				Platform:                PlatformCursor,
+				Status:                  StatusActive,
+				Schedulable:             true,
+				TempUnschedulableUntil:  &cursorParkUntil,
+				TempUnschedulableReason: "token refresh retry exhausted: unauthorized",
+				Extra:                   map[string]any{CursorForceUseExtraKey: true},
 			},
 			want: false,
 		},

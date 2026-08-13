@@ -5,10 +5,19 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+type missingThresholdSettingRepo struct {
+	*mockSettingRepo
+}
+
+func (r *missingThresholdSettingRepo) GetValue(context.Context, string) (string, error) {
+	return "", ErrSettingNotFound
+}
 
 func newSettingServiceForPlatformThresholdTest(seed map[string]string) *SettingService {
 	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
@@ -148,4 +157,23 @@ func TestGetAccountSchedulingThresholds_NilRepoReturnsDefaults(t *testing.T) {
 		PlatformAnthropic: 100,
 		PlatformGrok:      100,
 	}, got)
+}
+
+func TestGetAccountSchedulingThresholds_MissingOptionalSettingUsesNormalCacheTTL(t *testing.T) {
+	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
+	accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{})
+	svc := NewSettingService(&missingThresholdSettingRepo{newMockSettingRepo()}, &config.Config{})
+	before := time.Now()
+
+	got := svc.GetAccountSchedulingThresholds(context.Background())
+
+	require.Equal(t, defaultAccountSchedulingThresholds(), got)
+	cached, ok := accountSchedulingThresholdsCache.Load().(*cachedAccountSchedulingThresholds)
+	require.True(t, ok)
+	require.NotNil(t, cached)
+	require.GreaterOrEqual(
+		t,
+		time.Unix(0, cached.expiresAt).Sub(before),
+		accountSchedulingThresholdsCacheTTL-time.Second,
+	)
 }

@@ -22,8 +22,72 @@ func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox
 	err := repo.SetTempUnschedulable(context.Background(), 42, until, "retry")
 	require.NoError(t, err)
 	require.Len(t, exec.execQueries, 1)
-	require.Contains(t, exec.execQueries[0], "UPDATE accounts")
+	normalized := normalizeSQLWhitespace(exec.execQueries[0])
+	require.Contains(t, normalized, "UPDATE accounts")
+	require.Contains(t, normalized, "temp_unschedulable_until IS NULL OR temp_unschedulable_until <= NOW()")
+	require.Contains(t, normalized, "NOT ($2 = $5 OR $2 LIKE $6) AND temp_unschedulable_until < $1")
+	require.Contains(t, normalized, "platform = $4")
+	require.Contains(t, normalized, "temp_unschedulable_reason = $5 OR temp_unschedulable_reason LIKE $6")
+	require.Contains(t, normalized, "NOT ($2 = $5 OR $2 LIKE $6) OR temp_unschedulable_until < $1")
+	require.Equal(t, 2, strings.Count(normalized, "temp_unschedulable_until < $1"))
+	require.Len(t, exec.execArgs[0], 6)
+	require.Equal(t, service.PlatformCursor, exec.execArgs[0][3])
+	require.Equal(t, service.CursorQuotaParkReasonPrefix, exec.execArgs[0][4])
+	require.Equal(t, service.CursorQuotaParkReasonPrefix+" (%", exec.execArgs[0][5])
 	require.NotContains(t, strings.Join(exec.execQueries, "\n"), "scheduler_outbox")
+}
+
+func TestAccountRepository_GenericExtraMutationsRejectCursorForceUse(t *testing.T) {
+	t.Run("single account extra merge", func(t *testing.T) {
+		exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+		repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+		err := repo.UpdateExtra(context.Background(), 42, map[string]any{
+			service.CursorForceUseExtraKey: true,
+		})
+
+		require.ErrorIs(t, err, service.ErrCursorForceUseUpdatePath)
+		require.Empty(t, exec.execQueries)
+	})
+
+	t.Run("bulk extra merge", func(t *testing.T) {
+		exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
+		repo := newAccountRepositoryWithSQL(nil, exec, nil)
+
+		rows, err := repo.BulkUpdate(context.Background(), []int64{42}, service.AccountBulkUpdate{
+			Extra: map[string]any{service.CursorForceUseExtraKey: false},
+		})
+
+		require.ErrorIs(t, err, service.ErrCursorForceUseUpdatePath)
+		require.Zero(t, rows)
+		require.Empty(t, exec.execQueries)
+	})
+}
+
+func TestAccountRepository_SetCursorQuotaParkIfAllowedUsesAtomicStateGuards(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	until := time.Now().Add(24 * time.Hour)
+	reason := service.CursorQuotaParkReasonPrefix + " (auto 100.0%, api 100.0%)"
+
+	applied, err := repo.SetCursorQuotaParkIfAllowed(context.Background(), 42, until, reason)
+
+	require.NoError(t, err)
+	require.False(t, applied)
+	require.Len(t, exec.execQueries, 1, "quota park and scheduler outbox must be one statement")
+	normalized := normalizeSQLWhitespace(exec.execQueries[0])
+	require.Contains(t, normalized, "WITH updated AS ( UPDATE accounts AS a")
+	require.Contains(t, normalized, "(a.extra -> $5) IS DISTINCT FROM 'true'::jsonb")
+	require.Contains(t, normalized, "a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= NOW()")
+	require.Contains(t, normalized, "a.temp_unschedulable_reason = $6 OR a.temp_unschedulable_reason LIKE $7")
+	require.Contains(t, normalized, "a.temp_unschedulable_until < $1")
+	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
+	require.Len(t, exec.execArgs[0], 8)
+	require.Equal(t, service.PlatformCursor, exec.execArgs[0][3])
+	require.Equal(t, service.CursorForceUseExtraKey, exec.execArgs[0][4])
+	require.Equal(t, service.CursorQuotaParkReasonPrefix, exec.execArgs[0][5])
+	require.Equal(t, service.CursorQuotaParkReasonPrefix+" (%", exec.execArgs[0][6])
+	require.Equal(t, service.SchedulerOutboxEventAccountChanged, exec.execArgs[0][7])
 }
 
 func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomicallyPropagated(t *testing.T) {

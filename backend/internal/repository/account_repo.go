@@ -456,6 +456,18 @@ func (r *accountRepository) updateAccount(
 	if err != nil {
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
+	cursorQuotaParkCleared := false
+	if account.IsCursorForceUseEnabled() {
+		cleared, clearErr := clearCursorQuotaParkLocked(ctx, client, account.ID)
+		if clearErr != nil {
+			return clearErr
+		}
+		if cleared {
+			cursorQuotaParkCleared = true
+			account.TempUnschedulableUntil = nil
+			account.TempUnschedulableReason = ""
+		}
+	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		return err
 	}
@@ -468,10 +480,42 @@ func (r *accountRepository) updateAccount(
 	account.UpdatedAt = updated.UpdatedAt
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
-	if contextTx == nil {
+	// Cursor 额度停调的解除例外：单账号快照并不会把账号重新加入分桶，而且一个
+	// 较慢的“已解除”写还可能覆盖并发产生的鉴权/传输封禁。此路径只依赖同事务
+	// outbox 读取最新 DB 状态并同时重建账号快照与分桶，保持恢复与安全状态一致。
+	if contextTx == nil && !cursorQuotaParkCleared {
 		r.syncSchedulerAccountSnapshot(baseCtx, account.ID)
 	}
 	return nil
+}
+
+// clearCursorQuotaParkLocked runs after updateLockedAccount has locked and
+// updated the account row in the same transaction. The reason predicate is
+// evaluated against current database state, so a concurrent non-quota block is
+// never cleared. Any failure rolls back both the force-use flag and this clear.
+func clearCursorQuotaParkLocked(ctx context.Context, client *dbent.Client, accountID int64) (bool, error) {
+	result, err := client.ExecContext(ctx, `
+		UPDATE accounts
+		SET temp_unschedulable_until = NULL,
+			temp_unschedulable_reason = NULL
+		WHERE id = $1
+			AND platform = $2
+			AND deleted_at IS NULL
+			AND (
+				temp_unschedulable_reason = $3
+				OR temp_unschedulable_reason LIKE $4
+			)
+	`,
+		accountID,
+		service.PlatformCursor,
+		service.CursorQuotaParkReasonPrefix,
+		service.CursorQuotaParkReasonPrefix+" (%",
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
 }
 
 func (r *accountRepository) updateLockedAccount(
@@ -2275,8 +2319,30 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 			updated_at = NOW()
 		WHERE id = $3
 			AND deleted_at IS NULL
-			AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until < $1)
-	`, until, reason, id)
+			AND (
+				temp_unschedulable_until IS NULL
+				OR temp_unschedulable_until <= NOW()
+				OR (
+					NOT ($2 = $5 OR $2 LIKE $6)
+					AND temp_unschedulable_until < $1
+				)
+				OR (
+					platform = $4
+					AND (temp_unschedulable_reason = $5 OR temp_unschedulable_reason LIKE $6)
+					AND (
+						NOT ($2 = $5 OR $2 LIKE $6)
+						OR temp_unschedulable_until < $1
+					)
+				)
+			)
+	`,
+		until,
+		reason,
+		id,
+		service.PlatformCursor,
+		service.CursorQuotaParkReasonPrefix,
+		service.CursorQuotaParkReasonPrefix+" (%",
+	)
 	if err != nil {
 		return err
 	}
@@ -2292,6 +2358,60 @@ func (r *accountRepository) SetTempUnschedulable(ctx context.Context, id int64, 
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
+}
+
+// SetCursorQuotaParkIfAllowed atomically parks an exhausted Cursor account only
+// while force-use is still disabled and no newer non-quota temporary block is
+// active. This protects against a quota fetch that started before an
+// administrator enabled force-use, and prevents quota state from overwriting
+// auth, transport, or custom-rule isolation.
+func (r *accountRepository) SetCursorQuotaParkIfAllowed(
+	ctx context.Context,
+	id int64,
+	until time.Time,
+	reason string,
+) (bool, error) {
+	result, err := r.sql.ExecContext(ctx, `
+		WITH updated AS (
+			UPDATE accounts AS a
+			SET temp_unschedulable_until = $1,
+				temp_unschedulable_reason = $2,
+				updated_at = NOW()
+			WHERE a.id = $3
+				AND a.deleted_at IS NULL
+				AND a.platform = $4
+				AND (a.extra -> $5) IS DISTINCT FROM 'true'::jsonb
+				AND (
+					a.temp_unschedulable_until IS NULL
+					OR a.temp_unschedulable_until <= NOW()
+					OR (
+						(a.temp_unschedulable_reason = $6 OR a.temp_unschedulable_reason LIKE $7)
+						AND a.temp_unschedulable_until < $1
+					)
+				)
+			RETURNING a.id
+		)
+		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+		SELECT $8, updated.id, NULL, NULL FROM updated
+	`,
+		until,
+		reason,
+		id,
+		service.PlatformCursor,
+		service.CursorForceUseExtraKey,
+		service.CursorQuotaParkReasonPrefix,
+		service.CursorQuotaParkReasonPrefix+" (%",
+		service.SchedulerOutboxEventAccountChanged,
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected == 0 {
+		return false, err
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	return true, nil
 }
 
 func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
@@ -2522,6 +2642,12 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	if len(updates) == 0 {
 		return nil
+	}
+	if _, exists := updates[service.CursorForceUseExtraKey]; exists {
+		// Enabling this flag must atomically clear only a Cursor quota park.
+		// Keep that invariant on the full account update path instead of
+		// allowing generic JSON merge callers to create a split state.
+		return service.ErrCursorForceUseUpdatePath
 	}
 
 	// 使用 JSONB 合并操作实现原子更新，避免读-改-写的并发丢失更新问题
@@ -2792,6 +2918,9 @@ func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
+	}
+	if _, exists := updates.Extra[service.CursorForceUseExtraKey]; exists {
+		return 0, service.ErrCursorForceUseUpdatePath
 	}
 
 	setClauses := make([]string, 0, 8)

@@ -202,7 +202,10 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
   })
 
-  it('renders the created_at column by default', async () => {
+  it('renders the created_at column when the saved layout opts it in', async () => {
+    // created_at 在 minimal-defaults-v2 中默认收起；显式保存的布局可以重新展示它
+    localStorage.setItem('account-hidden-columns', JSON.stringify([]))
+    localStorage.setItem('account-hidden-columns-version', 'minimal-defaults-v2')
     listAccounts.mockResolvedValue({
       items: [
         {

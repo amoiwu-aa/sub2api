@@ -279,6 +279,21 @@ function buildGrokAPIKeyAccount() {
   } as any
 }
 
+function buildCursorAccount() {
+  return {
+    ...buildAccount(),
+    id: 7,
+    name: 'Cursor OAuth',
+    platform: 'cursor',
+    type: 'oauth',
+    credentials: {
+      access_token: 'cursor-access-token',
+      user_id: 'cursor-user'
+    },
+    extra: {}
+  } as any
+}
+
 function buildOpenAISetupTokenAccount() {
   return {
     ...buildAccount(),
@@ -1177,5 +1192,54 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty(
       'antigravity_project_id'
     )
+  })
+
+  it('enables and submits the Cursor force-use quota override', async () => {
+    const account = buildCursorAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="cursor-force-use-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).toContain('admin.accounts.cursor.forceUseWarning')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      cursor_force_use: true
+    })
+  })
+
+  it('rehydrates and disables Cursor force-use without dropping other extra fields', async () => {
+    const account = buildCursorAccount()
+    account.extra = {
+      cursor_force_use: true,
+      preserved_setting: 'keep'
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="cursor-force-use-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(toggle.attributes('aria-labelledby')).toBe('cursor-force-use-label')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      preserved_setting: 'keep'
+    })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('cursor_force_use')
   })
 })

@@ -80,6 +80,26 @@ func TestParkExhaustedCursorAccount(t *testing.T) {
 		require.Zero(t, repo.calls)
 	})
 
+	t.Run("数据库仍启用强制使用时由原子写拒绝停车", func(t *testing.T) {
+		repo := &parkRecorder{rejectCursorQuotaPark: true}
+		s := &AccountUsageService{accountRepo: repo}
+		account := cursorParkAccount()
+		account.Extra = map[string]any{CursorForceUseExtraKey: true}
+
+		require.False(t, s.parkExhaustedCursorAccount(account, cursorUsageAt(100, 100, nil)))
+		require.Equal(t, 1, repo.calls)
+	})
+
+	t.Run("查询期间关闭强制使用时不受旧账号快照阻止", func(t *testing.T) {
+		repo := &parkRecorder{}
+		s := &AccountUsageService{accountRepo: repo}
+		staleAccount := cursorParkAccount()
+		staleAccount.Extra = map[string]any{CursorForceUseExtraKey: true}
+
+		require.True(t, s.parkExhaustedCursorAccount(staleAccount, cursorUsageAt(100, 100, nil)))
+		require.Equal(t, 1, repo.calls)
+	})
+
 	t.Run("拿不到周期结束时用兜底时长", func(t *testing.T) {
 		repo := &parkRecorder{}
 		s := &AccountUsageService{accountRepo: repo}

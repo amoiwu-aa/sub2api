@@ -1497,11 +1497,26 @@ func (s *AccountUsageService) parkExhaustedCursorAccount(account *Account, usage
 		until = *usage.CursorBillingCycleEnd
 	}
 
-	reason := fmt.Sprintf("cursor quota exhausted (%s), on-demand used $%.2f, parked until billing cycle end",
+	reason := fmt.Sprintf("%s (%s), on-demand used $%.2f, parked until billing cycle end",
+		CursorQuotaParkReasonPrefix,
 		strings.Join(hit, ", "), usage.CursorOnDemandUsed)
 
-	if err := s.accountRepo.SetTempUnschedulable(context.Background(), account.ID, until, reason); err != nil {
+	// Do not trust account.Extra from the usage-query snapshot here: an admin
+	// may have toggled force-use while the upstream request was in flight.
+	// The conditional repository write checks the current DB value atomically.
+	quotaParkRepo, ok := s.accountRepo.(CursorQuotaParkRepository)
+	if !ok {
+		slog.Error("cursor.quota_park_repository_unavailable", "account_id", account.ID)
+		return false
+	}
+	applied, err := quotaParkRepo.SetCursorQuotaParkIfAllowed(
+		context.Background(), account.ID, until, reason,
+	)
+	if err != nil {
 		slog.Warn("cursor.park_exhausted_account_failed", "account_id", account.ID, "error", err)
+		return false
+	}
+	if !applied {
 		return false
 	}
 	slog.Info("cursor.account_parked_until_cycle_end",

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -34,6 +36,14 @@ func setupAvailableModelsRouter(adminSvc service.AdminService) *gin.Engine {
 	router := gin.New()
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router.GET("/api/v1/admin/accounts/:id/models", handler.GetAvailableModels)
+	return router
+}
+
+func setupAccountTestValidationRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	handler := NewAccountHandler(newStubAdminService(), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router.POST("/api/v1/admin/accounts/:id/test", handler.Test)
 	return router
 }
 
@@ -142,6 +152,76 @@ func TestAccountHandlerGetAvailableModels_GrokDefaultsToXAIModelsWithoutMapping(
 	}
 	require.Contains(t, ids, "grok-4.3")
 	require.Contains(t, ids, "grok-build-0.1")
+}
+
+func TestAccountHandlerGetAvailableModels_CursorIncludesGrok46Variants(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:       46,
+			Name:     "cursor-oauth",
+			Platform: service.PlatformCursor,
+			Type:     service.AccountTypeOAuth,
+			Status:   service.StatusActive,
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/46/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	models := make(map[string]string, len(resp.Data))
+	for _, model := range resp.Data {
+		models[model.ID] = model.DisplayName
+	}
+	require.Equal(t, "Cursor Grok 4.6", models["cursor/grok-4.6"])
+	require.Equal(t, "Cursor Grok 4.6 (MAX)", models["cursor/grok-4.6-max"])
+}
+
+func TestAccountTestRequestParsesCursorModelOptions(t *testing.T) {
+	var req TestAccountRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model_id":"cursor/grok-4.6",
+		"cursor_options":{"effort":"xhigh","fast":false,"max_mode":true}
+	}`), &req))
+
+	require.NotNil(t, req.CursorOptions)
+	require.NotNil(t, req.CursorOptions.Effort)
+	require.Equal(t, cursor.ModelEffortXHigh, *req.CursorOptions.Effort)
+	require.NotNil(t, req.CursorOptions.Fast)
+	require.False(t, *req.CursorOptions.Fast)
+	require.NotNil(t, req.CursorOptions.MaxMode)
+	require.True(t, *req.CursorOptions.MaxMode)
+}
+
+func TestAccountHandlerTestRejectsInvalidCursorOptionsBeforeSSE(t *testing.T) {
+	router := setupAccountTestValidationRouter()
+
+	for _, body := range []string{
+		`{"model_id":"cursor/grok-4.6","cursor_options":{"fast":"yes"}}`,
+		`{"model_id":"cursor/grok-4.6","cursor_options":{"effort":"  "}}`,
+		`{"model_id":"cursor/grok-4.6","cursor_options":{"effort":"max"}}`,
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/46/test", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code, body)
+		require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+	}
 }
 
 func TestAccountHandlerGetAvailableModels_OpenAIOAuthUsesExplicitModelMapping(t *testing.T) {
