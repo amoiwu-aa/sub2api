@@ -67,25 +67,29 @@ func TestGetModelPricing_UnknownNamespacedModelFallsBackInsteadOfFailing(t *test
 	require.ErrorIs(t, err, ErrModelPricingUnavailable)
 }
 
-// MAX 变体（cursor/grok-4.5-max）在任何价目表里都没有条目。它必须按基础模型
+// MAX 变体（如 cursor/grok-4.6-max）在任何价目表里都没有条目。它必须按基础模型
 // 计价，而不是掉进 cursor/kiro 的 Sonnet 兜底锚点——同一个模型开不开 MAX 落在
 // 两个差很远的单价上，账单没法解释。
 func TestGetModelPricing_MaxVariantPricesLikeItsBaseModel(t *testing.T) {
 	svc := newTestBillingService()
 
-	got, err := svc.GetModelPricing("cursor/grok-4.5-max")
-	require.NoError(t, err)
-	want, err := svc.GetModelPricing("cursor/grok-4.5")
-	require.NoError(t, err)
+	for _, base := range []string{"cursor/grok-4.6", "cursor/grok-4.5"} {
+		t.Run(base, func(t *testing.T) {
+			got, err := svc.GetModelPricing(base + "-max")
+			require.NoError(t, err)
+			want, err := svc.GetModelPricing(base)
+			require.NoError(t, err)
 
-	require.Equal(t, want.InputPricePerToken, got.InputPricePerToken)
-	require.Equal(t, want.OutputPricePerToken, got.OutputPricePerToken)
+			require.Equal(t, want.InputPricePerToken, got.InputPricePerToken)
+			require.Equal(t, want.OutputPricePerToken, got.OutputPricePerToken)
 
-	// 反证：确实没有走 Sonnet 锚点，否则这条断言会失效。
-	anchor, err := svc.GetModelPricing(autoModelPricingAlias)
-	require.NoError(t, err)
-	require.NotEqual(t, anchor.InputPricePerToken, got.InputPricePerToken,
-		"grok 与 sonnet 单价相同的话本用例就失去意义了，换一个基础模型")
+			// 反证：确实没有走 Sonnet 锚点，否则这条断言会失效。
+			anchor, err := svc.GetModelPricing(autoModelPricingAlias)
+			require.NoError(t, err)
+			require.NotEqual(t, anchor.InputPricePerToken, got.InputPricePerToken,
+				"grok 与 sonnet 单价相同的话本用例就失去意义了，换一个基础模型")
+		})
+	}
 }
 
 // 剥前缀后必须命中裸名对应的真实价格，而不是滑到某个更便宜的同族回退。

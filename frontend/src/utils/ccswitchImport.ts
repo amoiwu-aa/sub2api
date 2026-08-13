@@ -12,6 +12,8 @@ export const CURSOR_CC_SWITCH_MODEL = 'cursor/default'
  */
 export const CURSOR_CC_SWITCH_MODEL_FALLBACKS = [
   'cursor/default',
+  'cursor/grok-4.6',
+  'cursor/grok-4.6-max',
   'cursor/grok-4.5',
   'cursor/grok-4.5-max',
   'cursor/composer-2.5'

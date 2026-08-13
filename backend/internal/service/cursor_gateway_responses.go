@@ -78,6 +78,15 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	}
 
 	conversation := openAIReq.Conversation()
+	if err := conversation.ValidationError(); err != nil {
+		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools)
+	if err != nil {
+		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	conversation.Tools = mcpTools
+	conversation.NativeToolBridge = nativeBridge
 	prompt := conversation.Render()
 	if strings.TrimSpace(prompt) == "" {
 		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error",
@@ -88,7 +97,22 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 			cursorPromptTooLargeMessage(prompt))
 	}
 
-	selection := cursor.ResolveModel(publicModel)
+	var effortEnvelope struct {
+		Reasoning *struct {
+			Effort *string `json:"effort,omitempty"`
+		} `json:"reasoning,omitempty"`
+	}
+	if err := json.Unmarshal(body, &effortEnvelope); err != nil {
+		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", "Invalid reasoning.effort")
+	}
+	var standardEffort *string
+	if effortEnvelope.Reasoning != nil {
+		standardEffort = effortEnvelope.Reasoning.Effort
+	}
+	selection, err := resolveCursorModelSelection(body, publicModel, standardEffort)
+	if err != nil {
+		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
 	if reason := s.quotaBlockReason(account, selection.ModelID); reason != "" {
 		return nil, s.writeResponsesError(c, http.StatusTooManyRequests, "quota_exceeded", reason)
 	}
@@ -102,12 +126,14 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	defer cancel()
 
 	input := cursor.AgentTurnInput{
-		Text:           prompt,
-		ConversationID: cursorConversationID(c, account, conversation),
-		ModelID:        selection.ModelID,
-		ModelParams:    selection.Params,
-		MaxMode:        selection.MaxMode,
-		Tools:          conversation.Tools,
+		Text:             prompt,
+		ConversationID:   resolveCursorConversationID(c, account, conversation, responsesReq.ID),
+		Images:           conversation.Images(),
+		ModelID:          selection.ModelID,
+		ModelParams:      selection.Params,
+		MaxMode:          selection.MaxMode,
+		Tools:            conversation.Tools,
+		NativeToolBridge: conversation.NativeToolBridge,
 	}
 
 	bridge := &cursorResponsesBridge{
@@ -120,12 +146,17 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	bridge.state.ToolSearchDeclared = bridge.toolSearch
 	bridge.state.NamespaceTools = bridge.namespaceTools
 
+	var result *ForwardResult
 	if responsesReq.Stream {
-		return s.forwardResponsesStreaming(agentCtx, c, account, options, input, bridge,
+		includeUsage := responsesReq.StreamOptions != nil && responsesReq.StreamOptions.IncludeUsage
+		result, err = s.forwardResponsesStreaming(agentCtx, c, account, options, input, bridge,
+			publicModel, selection.ModelID, prompt, startTime, includeUsage)
+	} else {
+		result, err = s.forwardResponsesBuffered(agentCtx, c, account, options, input, bridge,
 			publicModel, selection.ModelID, prompt, startTime)
 	}
-	return s.forwardResponsesBuffered(agentCtx, c, account, options, input, bridge,
-		publicModel, selection.ModelID, prompt, startTime)
+	annotateCursorModelSelection(result, selection)
+	return result, err
 }
 
 // cursorResponsesBridge 把 Agent 增量转成 Responses 事件。
@@ -177,6 +208,7 @@ func (s *CursorGatewayService) forwardResponsesStreaming(
 	bridge *cursorResponsesBridge,
 	publicModel, upstreamModel, prompt string,
 	startTime time.Time,
+	includeUsage bool,
 ) (*ForwardResult, error) {
 	var (
 		headersWritten bool
@@ -230,6 +262,9 @@ func (s *CursorGatewayService) forwardResponsesStreaming(
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
 
 	// 收尾事件必须发：Codex 在等 response.completed，缺了它会一直挂着。
+	if includeUsage {
+		bridge.state.Usage = cursorEstimatedResponsesUsage(prompt, result.Text)
+	}
 	if err := writeEvents(apicompat.FinalizeChatCompletionsResponsesStream(bridge.state)); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}

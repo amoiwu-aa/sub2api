@@ -108,6 +108,14 @@ type ModelPricing struct {
 	LongContextOutputMultiplier        float64 // 长上下文整次会话输出倍率
 	ImageOutputPricePerToken           float64 // 图片输出 token 价格 (USD)
 	ImageOutputPriceExplicit           bool    // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
+
+	// Fast 档（Cursor 的 fast speed tier，ServiceTier == "fast"）显式价格。
+	// 与 priority 档同构：配置了就整档换价，没配置则按标准价计（不做隐式倍数，
+	// 因为各模型的 fast 溢价并不统一：Grok 4.5/4.6 是 2x，Composer 2.5 输入 6x）。
+	InputPricePerTokenFast         float64 // fast 档每token输入价格 (USD)
+	OutputPricePerTokenFast        float64 // fast 档每token输出价格 (USD)
+	CacheReadPricePerTokenFast     float64 // fast 档缓存读取每token价格 (USD)
+	CacheCreationPricePerTokenFast float64 // fast 档缓存创建每token价格 (USD)
 }
 
 const (
@@ -126,6 +134,23 @@ func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bo
 	}
 	return pricing.InputPricePerTokenPriority > 0 || pricing.OutputPricePerTokenPriority > 0 ||
 		pricing.CacheCreationPricePerTokenPriority > 0 || pricing.CacheReadPricePerTokenPriority > 0
+}
+
+// ServiceTierFast / ServiceTierStandard 是 Cursor 速度档在用量日志
+// service_tier 字段里的取值。OpenAI 通道的归一化会把 "fast" 转写成
+// "priority"（见 normalizeOpenAIServiceTier / applyOpenAIFastPolicyToBody），
+// 落库时永远不会出现 "fast"，所以这两个值只会由 Cursor 通道写入。
+const (
+	ServiceTierFast     = "fast"
+	ServiceTierStandard = "standard"
+)
+
+func useFastServiceTierPricing(serviceTier string, pricing *ModelPricing) bool {
+	if pricing == nil || normalizeBillingServiceTier(serviceTier) != ServiceTierFast {
+		return false
+	}
+	return pricing.InputPricePerTokenFast > 0 || pricing.OutputPricePerTokenFast > 0 ||
+		pricing.CacheCreationPricePerTokenFast > 0 || pricing.CacheReadPricePerTokenFast > 0
 }
 
 func serviceTierCostMultiplier(serviceTier string) float64 {
@@ -585,12 +610,33 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:  false,
 	}
 
-	// xAI Grok 4.5 (official docs: $2 input / $0.50 cached input / $6 output per MTok)
+	// Cursor/SpaceXAI Grok 4.6 (cursor.com/docs/models/grok-4-6: standard
+	// $2 input / $0.50 cached input / $6 output per MTok; Fast $4 / $1 / $12).
+	// Fast 档价格在 ServiceTier == "fast" 时生效（Cursor 通道会把生效的
+	// fast 参数记进用量日志的 service_tier）。
+	s.fallbackPrices["grok-4.6"] = &ModelPricing{
+		InputPricePerToken:          2e-6,
+		OutputPricePerToken:         6e-6,
+		CacheReadPricePerToken:      0.5e-6,
+		SupportsCacheBreakdown:      false,
+		LongContextInputThreshold:   200000,
+		LongContextInputMultiplier:  2,
+		LongContextOutputMultiplier: 2,
+		InputPricePerTokenFast:      4e-6,
+		OutputPricePerTokenFast:     12e-6,
+		CacheReadPricePerTokenFast:  1e-6,
+	}
+
+	// xAI Grok 4.5 (cursor.com/docs/models-and-pricing: standard $2 input /
+	// $0.50 cached input / $6 output per MTok; Fast $4 / $1 / $12)
 	s.fallbackPrices["grok-4.5"] = &ModelPricing{
-		InputPricePerToken:     2e-6,
-		OutputPricePerToken:    6e-6,
-		CacheReadPricePerToken: 0.5e-6,
-		SupportsCacheBreakdown: false,
+		InputPricePerToken:         2e-6,
+		OutputPricePerToken:        6e-6,
+		CacheReadPricePerToken:     0.5e-6,
+		SupportsCacheBreakdown:     false,
+		InputPricePerTokenFast:     4e-6,
+		OutputPricePerTokenFast:    12e-6,
+		CacheReadPricePerTokenFast: 1e-6,
 	}
 
 	// xAI Grok 4.3 (official docs: $1.25 input / $2.50 output per MTok)
@@ -603,14 +649,26 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier: 1,
 	}
 	// xAI Grok Build 0.1 (official docs: $1 input / $0.20 cached input /
-	// $2 output per MTok). Composer is available only through Grok Build and
-	// has no standalone public API rate card, so its aliases use this coding
-	// model rate instead of silently billing at zero.
+	// $2 output per MTok). Grok Build 平台的 composer 系别名仍用这条编码
+	// 模型价；Cursor 的 composer-2.5 有官方牌价，见下面的独立条目。
 	s.fallbackPrices["grok-build-0.1"] = &ModelPricing{
 		InputPricePerToken:     1e-6,
 		OutputPricePerToken:    2e-6,
 		CacheReadPricePerToken: 0.2e-6,
 		SupportsCacheBreakdown: false,
+	}
+
+	// Cursor Composer 2.5 (cursor.com/docs/models-and-pricing: standard
+	// $0.50 input / $0.20 cached input / $2.50 output per MTok; Fast $3 /
+	// $0.50 / $15 —— fast 溢价不是均匀倍数，必须整档换价)。
+	s.fallbackPrices["composer-2.5"] = &ModelPricing{
+		InputPricePerToken:         0.5e-6,
+		OutputPricePerToken:        2.5e-6,
+		CacheReadPricePerToken:     0.2e-6,
+		SupportsCacheBreakdown:     false,
+		InputPricePerTokenFast:     3e-6,
+		OutputPricePerTokenFast:    15e-6,
+		CacheReadPricePerTokenFast: 0.5e-6,
 	}
 }
 
@@ -803,6 +861,8 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 
 	switch modelLower {
+	case "grok-4.6", "grok-4.6-latest":
+		return s.fallbackPrices["grok-4.6"]
 	case "grok", "grok-latest", "grok-4.5", "grok-4.5-latest", "grok-build-latest":
 		return s.fallbackPrices["grok-4.5"]
 	case "grok-4.3",
@@ -812,7 +872,13 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		"grok-4.20-reasoning",
 		"grok-4.20-non-reasoning":
 		return s.fallbackPrices["grok-4.3"]
-	case "grok-build", "grok-build-0.1", "grok-composer", "grok-composer-2.5-fast", "composer-2.5":
+	// 裸名 "composer-2.5" 被两个平台认领：Cursor 的 Composer 2.5（本条目）
+	// 与 xai/Grok Build 的客户端别名（→ grok-composer-2.5-fast）。价格表按
+	// 裸名索引无法两全，这里归 Cursor 牌价；xai 分组若按请求名计费需为该
+	// 别名配渠道价（默认按 canonical 名计费的分组不受影响）。
+	case "composer-2.5":
+		return s.fallbackPrices["composer-2.5"]
+	case "grok-build", "grok-build-0.1", "grok-composer", "grok-composer-2.5-fast":
 		return s.fallbackPrices["grok-build-0.1"]
 	}
 
@@ -886,7 +952,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 			price5m := litellmPricing.CacheCreationInputTokenCost
 			price1h := litellmPricing.CacheCreationInputTokenCostAbove1hr
 			enableBreakdown := price1h > 0 && price1h > price5m
-			return s.applyModelSpecificPricingPolicy(model, &ModelPricing{
+			pricing := s.applyModelSpecificPricingPolicy(model, &ModelPricing{
 				InputPricePerToken:                 litellmPricing.InputCostPerToken,
 				InputPricePerTokenPriority:         litellmPricing.InputCostPerTokenPriority,
 				OutputPricePerToken:                litellmPricing.OutputCostPerToken,
@@ -903,7 +969,8 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 				LongContextOutputMultiplier:        litellmPricing.LongContextOutputCostMultiplier,
 				ImageInputPricePerToken:            litellmPricing.InputCostPerImageToken,
 				ImageOutputPricePerToken:           litellmPricing.OutputCostPerImageToken,
-			}), nil
+			})
+			return s.ensureCursorFastTierPricing(model, pricing), nil
 		}
 	}
 
@@ -924,10 +991,10 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 	// fail-closed 等于整条请求不计费，配额限额随之失效。锚到 Sonnet 至少让用量
 	// 按一把统一的尺子分摊。
 	if namespaced {
-		// MAX 变体（cursor/grok-4.5-max）是对外拼出来的名字，价目表里不会有。
+		// MAX 变体（如 cursor/grok-4.6-max）是对外拼出来的名字，价目表里不会有。
 		// 先按基础模型再查一遍，而不是直接滑到 Sonnet 锚点——同一个模型开不开
 		// MAX 落在两个差很远的单价上，账单没法解释。
-		// 想给 MAX 单独定价的话，显式配一条 grok-4.5-max 即可：那样前面几步就
+		// 想给 MAX 单独定价的话，显式配一条 grok-4.6-max 即可：那样前面几步就
 		// 命中了，根本走不到这里。
 		if base, found := strings.CutSuffix(model, maxModePricingSuffix); found && base != "" {
 			if basePricing, baseErr := s.GetModelPricing(base); baseErr == nil {
@@ -1106,6 +1173,19 @@ func (s *BillingService) computeTokenBreakdown(
 		if pricing.CacheCreationPricePerTokenPriority > 0 {
 			cacheCreationPrice = pricing.CacheCreationPricePerTokenPriority
 		}
+	} else if useFastServiceTierPricing(serviceTier, pricing) {
+		if pricing.InputPricePerTokenFast > 0 {
+			inputPrice = pricing.InputPricePerTokenFast
+		}
+		if pricing.OutputPricePerTokenFast > 0 {
+			outputPrice = pricing.OutputPricePerTokenFast
+		}
+		if pricing.CacheReadPricePerTokenFast > 0 {
+			cacheReadPrice = pricing.CacheReadPricePerTokenFast
+		}
+		if pricing.CacheCreationPricePerTokenFast > 0 {
+			cacheCreationPrice = pricing.CacheCreationPricePerTokenFast
+		}
 	} else {
 		tierMultiplier = serviceTierCostMultiplier(serviceTier)
 	}
@@ -1274,6 +1354,45 @@ func (s *BillingService) calculateCostInternalWithPolicy(
 	}
 
 	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, longContextBillingEnabled), nil
+}
+
+// ensureCursorFastTierPricing 给 LiteLLM 动态价目补上 Cursor 速度档价格。
+//
+// fast 差价只存在于本文件的 fallback 条目里，LiteLLM 目录没有这个概念。
+// 若价目表恰好含裸 grok-4.6 / grok-4.5 / composer-2.5，动态条目会抢占
+// fallback，fast 档流量就会被静默按标准价计——把 fallback 的 fast 字段
+// 并进去堵住这条缝。已带 fast 价的条目（如渠道显式配置）不覆盖。
+func (s *BillingService) ensureCursorFastTierPricing(model string, pricing *ModelPricing) *ModelPricing {
+	if pricing == nil {
+		return nil
+	}
+	if pricing.InputPricePerTokenFast > 0 || pricing.OutputPricePerTokenFast > 0 ||
+		pricing.CacheReadPricePerTokenFast > 0 || pricing.CacheCreationPricePerTokenFast > 0 {
+		return pricing
+	}
+
+	var donorKey string
+	switch model {
+	case "grok-4.6", "grok-4.6-latest":
+		donorKey = "grok-4.6"
+	case "grok-4.5", "grok-4.5-latest":
+		donorKey = "grok-4.5"
+	case "composer-2.5":
+		donorKey = "composer-2.5"
+	default:
+		return pricing
+	}
+	donor := s.fallbackPrices[donorKey]
+	if donor == nil {
+		return pricing
+	}
+
+	cloned := *pricing
+	cloned.InputPricePerTokenFast = donor.InputPricePerTokenFast
+	cloned.OutputPricePerTokenFast = donor.OutputPricePerTokenFast
+	cloned.CacheReadPricePerTokenFast = donor.CacheReadPricePerTokenFast
+	cloned.CacheCreationPricePerTokenFast = donor.CacheCreationPricePerTokenFast
+	return &cloned
 }
 
 func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *ModelPricing) *ModelPricing {

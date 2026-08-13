@@ -169,6 +169,7 @@ func EncodeRequestContext(env RequestContextEnv) []byte {
 type RunRequestInput struct {
 	Text           string
 	ConversationID string
+	Images         []AttachedImage
 	// ConversationState 是上一轮 checkpoint 返回的字节，首轮为空。
 	ConversationState []byte
 	RequestContext    []byte
@@ -180,6 +181,33 @@ type RunRequestInput struct {
 	Tools []McpTool
 	// MessageID 留空时自动生成；测试里可固定以便对拍。
 	MessageID string
+}
+
+// encodeSelectedContext encodes agent.v1.SelectedContext with inline images:
+// SelectedContext.selected_images = field 1 (repeated SelectedImage)
+// SelectedImage.data = field 8, uuid = field 2, mime_type = field 7.
+func encodeSelectedContext(images []AttachedImage) []byte {
+	var selectedContext []byte
+	for _, image := range images {
+		if len(image.Data) == 0 {
+			continue
+		}
+		imageID := strings.TrimSpace(image.ID)
+		if imageID == "" {
+			imageID = uuid.NewString()
+		}
+		mimeType := strings.TrimSpace(image.MIMEType)
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		selectedImage := concat(
+			EncodeBytesField(8, image.Data),
+			EncodeStringField(2, imageID),
+			EncodeStringField(7, mimeType),
+		)
+		selectedContext = append(selectedContext, EncodeBytesField(1, selectedImage)...)
+	}
+	return selectedContext
 }
 
 // TipTap 富文本：UserMessage.field 8。官方客户端把同一段文本同时以纯文本
@@ -234,10 +262,11 @@ func EncodeRunRequest(input RunRequestInput) ([]byte, error) {
 		return nil, err
 	}
 
+	selectedContext := encodeSelectedContext(input.Images)
 	userMessage := concat(
 		EncodeStringField(1, input.Text),
 		EncodeStringField(2, messageID),
-		EncodeBytesField(3, nil),
+		EncodeBytesField(3, selectedContext),
 		EncodeVarintField(4, 1), // role = user
 		EncodeStringField(8, rich),
 	)

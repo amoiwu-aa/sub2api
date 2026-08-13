@@ -41,16 +41,19 @@ type ServerMessage struct {
 
 // ExecRequest 是一次工具调用请求。
 //
-// 我们只需要足够回一个 stub 成功回执的信息：id 与 execId 用于关联，
-// ArgFieldNum 决定回执要放在哪个结果字段上。
+// stub 回执只需要 id / execId / ArgFieldNum；ArgBytes 是入参的原始字节，
+// 原生工具桥（native_tools.go）解析它把调用转交客户端执行。
 type ExecRequest struct {
 	ID          uint64
 	ExecID      string
 	ArgFieldNum int
 	Kind        string
+	ArgBytes    []byte
 }
 
-// execArgFields 把 exec 参数的字段号映射成工具名。取自反代的 EXEC_ARG_FIELDS。
+// execArgFields 把 exec 参数的字段号映射成工具名。取自反代的 EXEC_ARG_FIELDS
+// （diagnostics / background_shell_spawn / fetch 在反代的扩展表
+// EXT_EXEC_ARG_FIELDS 里，原生工具桥需要识别它们）。
 var execArgFields = map[int]string{
 	2:  "shell",
 	3:  "write",
@@ -58,7 +61,10 @@ var execArgFields = map[int]string{
 	5:  "grep",
 	7:  "read",
 	8:  "ls",
+	9:  "diagnostics",
 	14: "shell_stream",
+	16: "background_shell_spawn",
+	20: "fetch",
 	29: "redacted_read",
 	37: "subagent_await",
 	41: "shell_allowlist_precheck",
@@ -180,6 +186,9 @@ func parseExecServerMessage(payload []byte) (*ExecRequest, *McpToolCall, error) 
 			if kind, ok := execArgFields[field.Number]; ok && exec.ArgFieldNum == 0 {
 				exec.ArgFieldNum = field.Number
 				exec.Kind = kind
+				if field.WireType == wireBytes {
+					exec.ArgBytes = field.Bytes
+				}
 			} else if field.WireType == wireBytes && unknownArgField == 0 {
 				unknownArgField = field.Number
 			}

@@ -14,16 +14,12 @@ import (
 
 // S6：effort 档位的现场取证。
 //
-// 背景：ResolveModel 对所有具名模型硬编码 effort=high + fast=true（见
-// DefaultModelParams），客户端没有任何办法降级。effort 决定模型生成多少推理
-// token，而推理 token 按输出计费，所以它是「同一个账号在网关上比在官方 IDE 里
-// 消耗更快」最直接的嫌疑对象。
+// 背景：Grok 4.6 官方文档已公开 low / medium / high / xhigh 四档，RingStar
+// 也已把它们映射到 RequestedModel.params。这个用例保留为私有 Agent wire 的
+// 现场回归，确认 Cursor 上游没有更改参数编码或套餐限制。
 //
-// 但把它做成分组可配之前，必须先用真实上游回答一个问题：**上游到底认哪些值**。
-// 反代参考实现（testdata/proto_reference.js）里只出现过 "high"，没有任何证据
-// 表明 "medium" / "low" 会被接受。如果上游对陌生 effort 的反应是整轮失败，那
-// 这个开关一填就是生产事故；如果是静默忽略，那开关看着生效、实际一分钱不省，
-// 比报错更糟。两种情况都必须在写代码之前排除。
+// 反代参考实现仍只出现过 "high"，因此正式发布只允许官方列出的档位；最后一轮
+// 继续发送一个伪值，用来观察上游究竟拒绝还是静默忽略。
 //
 // 本用例对每个档位实打一轮同样的题，观察三件事：
 //
@@ -41,8 +37,8 @@ import (
 //
 // 环境变量：
 //
-//	SPIKE_EFFORTS       选填，逗号分隔的档位列表，默认 high,medium,low
-//	SPIKE_EFFORT_MODEL  选填，打哪个模型，默认 cursor/grok-4.5（Auto 不吃 params，验不了）
+//	SPIKE_EFFORTS       选填，逗号分隔的档位列表，默认 xhigh,high,medium,low
+//	SPIKE_EFFORT_MODEL  选填，打哪个模型，默认 cursor/grok-4.6（Auto 不吃 params，验不了）
 //	SPIKE_EFFORT_BOGUS  选填，设为 0 可跳过「乱填一个值」那一轮
 
 // effortProbePrompt 要满足两个矛盾的要求：便宜（输出短）、又真的需要推理
@@ -74,7 +70,7 @@ type effortRound struct {
 func TestLiveSpikeModelEffort(t *testing.T) {
 	spikeToken(t)
 
-	modelID := spikeEnvString("SPIKE_EFFORT_MODEL", "cursor/grok-4.5")
+	modelID := spikeEnvString("SPIKE_EFFORT_MODEL", "cursor/grok-4.6")
 	selection := ResolveModel(modelID)
 	if selection.ModelID == AutoModelID {
 		t.Fatalf("SPIKE_EFFORT_MODEL=%q 解析成了 Auto；Auto 不带 params，量不出 effort 的作用", modelID)
@@ -92,7 +88,7 @@ func TestLiveSpikeModelEffort(t *testing.T) {
 		Params:  []ModelParam{},
 	}}
 
-	efforts := splitEfforts(spikeEnvString("SPIKE_EFFORTS", "high,medium,low"))
+	efforts := splitEfforts(spikeEnvString("SPIKE_EFFORTS", "xhigh,high,medium,low"))
 	if spikeEnvString("SPIKE_EFFORT_BOGUS", "1") != "0" {
 		// 放在最后：万一它把账号打出问题，前面几轮的数据已经拿到了。
 		efforts = append(efforts, "ringstar-not-a-real-effort")

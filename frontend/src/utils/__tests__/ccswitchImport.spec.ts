@@ -138,12 +138,12 @@ describe('ccswitchImport utils', () => {
         ...baseInput,
         platform: 'cursor',
         clientType: 'claude',
-        modelOverride: 'cursor/grok-4.5-max'
+        modelOverride: 'cursor/grok-4.6-max'
       })
     )
 
     expect(params.get('app')).toBe('opencode')
-    expect(params.get('model')).toBe('cursor/grok-4.5-max')
+    expect(params.get('model')).toBe('cursor/grok-4.6-max')
     // 覆盖模型不该动端点或用量基址
     expect(params.get('endpoint')).toBe('https://api.example.com/v1')
     expect(params.get('usageBaseUrl')).toBe('https://api.example.com')
@@ -167,6 +167,8 @@ describe('ccswitchImport utils', () => {
 
   it('lists only models that stay usable after the API quota runs out', () => {
     expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS).toContain(CURSOR_CC_SWITCH_MODEL)
+    expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS).toContain('cursor/grok-4.6')
+    expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS).toContain('cursor/grok-4.6-max')
     expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS).toContain('cursor/grok-4.5-max')
     expect(CURSOR_CC_SWITCH_MODEL_FALLBACKS.every((m) => m.startsWith('cursor/'))).toBe(true)
   })

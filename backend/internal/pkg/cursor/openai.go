@@ -2,7 +2,11 @@ package cursor
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // OpenAI Chat Completions 兼容层。
@@ -12,9 +16,16 @@ import (
 
 // OpenAIRequest 是 /v1/chat/completions 的请求体（只取需要的字段）。
 type OpenAIRequest struct {
+	ID       string          `json:"id,omitempty"`
 	Model    string          `json:"model"`
 	Messages []OpenAIMessage `json:"messages"`
 	Stream   bool            `json:"stream,omitempty"`
+	// ReasoningEffort 是 Chat Completions 的标准推理档位字段。Cursor 通道把它
+	// 映射到 RequestedModel.params["effort"]。
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	StreamOptions   *struct {
+		IncludeUsage bool `json:"include_usage,omitempty"`
+	} `json:"stream_options,omitempty"`
 	// Tools 是客户端声明的可调用工具。它们会作为 MCP 工具注册给 Cursor，
 	// 模型调用后翻译成 tool_calls 交回客户端执行——opencode / Codex 这类
 	// agent 客户端全靠这条通路。
@@ -99,14 +110,20 @@ func (r *OpenAIRequest) Conversation() *Conversation {
 		return &Conversation{}
 	}
 	turns := make([]Turn, 0, len(r.Messages))
+	var conversionErrors []error
 	for i := range r.Messages {
-		turns = append(turns, openAIMessageToTurn(r.Messages[i]))
+		turn, err := openAIMessageToTurn(r.Messages[i])
+		if err != nil {
+			conversionErrors = append(conversionErrors, fmt.Errorf("messages[%d]: %w", i, err))
+		}
+		turns = append(turns, turn)
 	}
-	return &Conversation{Turns: turns, Tools: r.McpTools()}
+	return &Conversation{Turns: turns, Tools: r.McpTools(), Err: errors.Join(conversionErrors...)}
 }
 
-func openAIMessageToTurn(message OpenAIMessage) Turn {
-	turn := Turn{Text: messageText(message.Content)}
+func openAIMessageToTurn(message OpenAIMessage) (Turn, error) {
+	text, images, err := openAIMessageContent(message.Content, true)
+	turn := Turn{Text: text, Images: images}
 	switch strings.ToLower(strings.TrimSpace(message.Role)) {
 	case "system", "developer":
 		turn.Role = RoleSystem
@@ -126,7 +143,7 @@ func openAIMessageToTurn(message OpenAIMessage) Turn {
 	default:
 		turn.Role = RoleUser
 	}
-	return turn
+	return turn, err
 }
 
 // ResolveConversationID 取客户端指定的会话 id（顶层优先于 metadata）。
@@ -171,35 +188,82 @@ func MessagesToAgentText(messages []OpenAIMessage) string {
 
 // messageText 接受 string 与 [{type:text,text}] 两种 content 形态。
 func messageText(raw json.RawMessage) string {
+	text, _, _ := openAIMessageContent(raw, false)
+	return text
+}
+
+type openAIContentBlock struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL json.RawMessage `json:"image_url,omitempty"`
+}
+
+func openAIMessageContent(raw json.RawMessage, includeImageMarkers bool) (string, []AttachedImage, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "", nil, nil
+	}
+	if trimmed[0] == '"' {
+		var text string
+		if err := json.Unmarshal(raw, &text); err == nil {
+			return text, nil, nil
+		}
+		return "", nil, nil
+	}
+
+	var blocks []openAIContentBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return "", nil, nil
+	}
+
+	parts := make([]string, 0, len(blocks))
+	images := make([]AttachedImage, 0, len(blocks))
+	var conversionErrors []error
+	for i, block := range blocks {
+		switch strings.ToLower(strings.TrimSpace(block.Type)) {
+		case "image_url", "input_image":
+			imageURL := decodeOpenAIImageURL(block.ImageURL)
+			if imageURL == "" {
+				conversionErrors = append(conversionErrors, fmt.Errorf("content[%d]: image_url is required", i))
+				continue
+			}
+			image, err := parseImageDataURI(imageURL)
+			if err != nil {
+				conversionErrors = append(conversionErrors, fmt.Errorf("content[%d]: %w", i, err))
+				continue
+			}
+			images = append(images, image)
+			if includeImageMarkers {
+				parts = append(parts, attachedImageMarker)
+			}
+		default:
+			if block.Text != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n"), images, errors.Join(conversionErrors...)
+}
+
+func decodeOpenAIImageURL(raw json.RawMessage) string {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
 		return ""
 	}
 	if trimmed[0] == '"' {
-		var text string
-		if err := json.Unmarshal(raw, &text); err == nil {
-			return text
+		var value string
+		if err := json.Unmarshal(raw, &value); err == nil {
+			return strings.TrimSpace(value)
 		}
 		return ""
 	}
-
-	var blocks []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+	var value struct {
+		URL string `json:"url"`
 	}
-	if err := json.Unmarshal(raw, &blocks); err != nil {
+	if err := json.Unmarshal(raw, &value); err != nil {
 		return ""
 	}
-	var builder strings.Builder
-	for _, block := range blocks {
-		if block.Text != "" {
-			if builder.Len() > 0 {
-				builder.WriteString("\n")
-			}
-			builder.WriteString(block.Text)
-		}
-	}
-	return builder.String()
+	return strings.TrimSpace(value.URL)
 }
 
 // OpenAIChunk 是一条 chat.completion.chunk。
@@ -209,6 +273,7 @@ type OpenAIChunk struct {
 	Created int64               `json:"created"`
 	Model   string              `json:"model"`
 	Choices []OpenAIChunkChoice `json:"choices"`
+	Usage   *OpenAIUsage        `json:"usage,omitempty"`
 }
 
 type OpenAIChunkChoice struct {
@@ -265,6 +330,23 @@ func NewOpenAIChunk(id, model string, created int64, content string) OpenAIChunk
 	}
 }
 
+// NewOpenAIUsageChunk 构造 include_usage 请求的终态基础用量帧。
+// Cursor 上游不返回缓存用量，因此只输出本地估算的基础 token 字段。
+func NewOpenAIUsageChunk(id, model string, created, promptTokens, completionTokens int64) OpenAIChunk {
+	return OpenAIChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []OpenAIChunkChoice{},
+		Usage: &OpenAIUsage{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
+		},
+	}
+}
+
 // NewOpenAIReasoningChunk 构造一条思考增量（DeepSeek 风格 reasoning_content）。
 // Cursor Agent 的 thinking_delta 必须外露，否则客户端会一直停在「思考中」。
 func NewOpenAIReasoningChunk(id, model string, created int64, reasoning string) OpenAIChunk {
@@ -299,7 +381,9 @@ const FinishReasonToolCalls = "tool_calls"
 func NewOpenAIToolCallID(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "call_unknown"
+		// 兜底必须唯一：同一轮多个缺 id 的调用如果同名，Anthropic 客户端
+		// 会拒绝重复的 tool_use.id（原生桥的 ls 调用实测常缺 id 字段）。
+		return "call_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
 	if strings.HasPrefix(trimmed, "call_") {
 		return trimmed

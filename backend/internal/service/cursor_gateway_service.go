@@ -83,6 +83,15 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	}
 
 	conversation := req.Conversation()
+	if err := conversation.ValidationError(); err != nil {
+		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools)
+	if err != nil {
+		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	conversation.Tools = mcpTools
+	conversation.NativeToolBridge = nativeBridge
 	prompt := conversation.Render()
 	if strings.TrimSpace(prompt) == "" {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", "messages contain no text content")
@@ -93,10 +102,15 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	}
 
 	publicModel := req.Model
-	selection := cursor.ResolveModel(publicModel)
+	selection, err := resolveCursorModelSelection(body, publicModel, req.ReasoningEffort)
+	if err != nil {
+		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
 	upstreamModel := selection.ModelID
 
-	if err := s.ensureModelQuota(c, account, selection.ModelID); err != nil {
+	if err := s.ensureModelQuota(account, selection.ModelID, func(status int, errType, message string) error {
+		return s.writeError(c, status, errType, message)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -105,27 +119,42 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 		return nil, err
 	}
 
-	conversationID := req.ResolveConversationID()
-	if conversationID == "" {
-		conversationID = uuid.NewString()
-	}
+	conversationID := resolveCursorConversationID(c, account, conversation, req.ID)
 
 	agentCtx, cancel := context.WithTimeout(ctx, cursorAgentTimeout)
 	defer cancel()
 
 	input := cursor.AgentTurnInput{
-		Text:           prompt,
-		ConversationID: conversationID,
-		ModelID:        selection.ModelID,
-		ModelParams:    selection.Params,
-		MaxMode:        selection.MaxMode,
-		Tools:          conversation.Tools,
+		Text:             prompt,
+		ConversationID:   conversationID,
+		Images:           conversation.Images(),
+		ModelID:          selection.ModelID,
+		ModelParams:      selection.Params,
+		MaxMode:          selection.MaxMode,
+		Tools:            conversation.Tools,
+		NativeToolBridge: conversation.NativeToolBridge,
 	}
 
+	var result *ForwardResult
 	if req.Stream {
-		return s.forwardStreaming(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
+		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
+		result, err = s.forwardStreaming(
+			agentCtx,
+			c,
+			account,
+			options,
+			input,
+			publicModel,
+			upstreamModel,
+			prompt,
+			startTime,
+			includeUsage,
+		)
+	} else {
+		result, err = s.forwardBuffered(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
 	}
-	return s.forwardBuffered(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
+	annotateCursorModelSelection(result, selection)
+	return result, err
 }
 
 func (s *CursorGatewayService) agentOptions(ctx context.Context, account *Account) (*cursor.AgentOptions, error) {
@@ -194,23 +223,50 @@ func (s *CursorGatewayService) agentOptions(ctx context.Context, account *Accoun
 // 沿用同一个 conversation_id 且不带任何状态时模型完全不记得上一轮，这条链路对
 // 上游是无状态的，conversation_id 只是关联标识。
 func cursorConversationID(c *gin.Context, account *Account, conversation *cursor.Conversation) string {
-	if conversation == nil || len(conversation.Turns) == 0 {
-		return uuid.NewString()
+	accountID := accountIDOrZero(account)
+	apiKeyID := getAPIKeyIDFromContext(c)
+	if (conversation == nil || len(conversation.Turns) == 0) && accountID == 0 && apiKeyID == 0 {
+		return ""
 	}
-	seed := conversation.Turns[0]
-	for _, turn := range conversation.Turns {
-		if turn.Role == cursor.RoleUser {
-			seed = turn
-			break
+
+	seedRole := ""
+	seedText := ""
+	if conversation != nil && len(conversation.Turns) > 0 {
+		seed := conversation.Turns[0]
+		for _, turn := range conversation.Turns {
+			if turn.Role == cursor.RoleUser {
+				seed = turn
+				break
+			}
 		}
+		seedRole = string(seed.Role)
+		seedText = strings.TrimSpace(seed.Text)
 	}
 	return generateSessionUUID(strings.Join([]string{
 		"cursor-conversation",
-		strconv.FormatInt(accountIDOrZero(account), 10),
-		strconv.FormatInt(getAPIKeyIDFromContext(c), 10),
-		string(seed.Role),
-		strings.TrimSpace(seed.Text),
+		strconv.FormatInt(accountID, 10),
+		strconv.FormatInt(apiKeyID, 10),
+		seedRole,
+		seedText,
 	}, "\x00"))
+}
+
+func resolveCursorConversationID(
+	c *gin.Context,
+	account *Account,
+	conversation *cursor.Conversation,
+	explicitBodyID string,
+) string {
+	if normalized := NormalizeClientSessionID(explicitBodyID); normalized != "" {
+		return normalized
+	}
+	if clientSessionID := ExtractClientSessionID(c); clientSessionID != "" {
+		return clientSessionID
+	}
+	if derived := cursorConversationID(c, account, conversation); derived != "" {
+		return derived
+	}
+	return uuid.NewString()
 }
 
 // cursorSessionID 为账号派生一个稳定的会话标识。
@@ -233,6 +289,7 @@ func (s *CursorGatewayService) forwardStreaming(
 	input cursor.AgentTurnInput,
 	publicModel, upstreamModel, prompt string,
 	startTime time.Time,
+	includeUsage bool,
 ) (*ForwardResult, error) {
 	responseID := "chatcmpl-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	created := time.Now().Unix()
@@ -321,6 +378,17 @@ func (s *CursorGatewayService) forwardStreaming(
 	}
 	if err := writeChunk(cursor.NewOpenAIFinalChunk(responseID, publicModel, created, finishReason)); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
+	}
+	if includeUsage {
+		if err := writeChunk(cursorEstimatedChatUsageChunk(
+			responseID,
+			publicModel,
+			created,
+			prompt,
+			result.Text,
+		)); err != nil {
+			return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
+		}
 	}
 	if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err == nil {
 		c.Writer.Flush()
@@ -455,8 +523,9 @@ func (s *CursorGatewayService) buildResult(
 ) *ForwardResult {
 	result := &ForwardResult{
 		Usage: ClaudeUsage{
-			InputTokens:  int(cursor.EstimateTokens(prompt)),
-			OutputTokens: int(cursor.EstimateTokens(completion)),
+			InputTokens:      int(cursor.EstimateTokens(prompt)),
+			OutputTokens:     int(cursor.EstimateTokens(completion)),
+			CacheUsageSource: CacheUsageSourceEstimated,
 		},
 		Model:            publicModel,
 		Stream:           stream,

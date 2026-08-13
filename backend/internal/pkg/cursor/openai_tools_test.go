@@ -2,6 +2,7 @@ package cursor
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,7 +71,14 @@ func TestNewOpenAIToolCallID(t *testing.T) {
 	require.Equal(t, "call_abc123", NewOpenAIToolCallID("call_abc123"))
 	require.Equal(t, "call_041a48e1241e4224aa3256a277bacfb2",
 		NewOpenAIToolCallID("041a48e1-241e-4224-aa32-56a277bacfb2"))
-	require.Equal(t, "call_unknown", NewOpenAIToolCallID("  "))
+
+	// 缺 id 的兜底必须唯一：同一轮多个缺 id 的调用如果同名，
+	// Anthropic 客户端会拒绝重复的 tool_use.id。
+	first := NewOpenAIToolCallID("  ")
+	second := NewOpenAIToolCallID("")
+	require.True(t, strings.HasPrefix(first, "call_"))
+	require.True(t, strings.HasPrefix(second, "call_"))
+	require.NotEqual(t, first, second)
 }
 
 func TestNewOpenAIToolCallChunkShape(t *testing.T) {

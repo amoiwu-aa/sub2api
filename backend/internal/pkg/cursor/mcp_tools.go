@@ -106,31 +106,81 @@ func NormalizeToolName(name string) string {
 //
 // 没有工具时返回空串：纯对话请求不该被这段约束污染。
 func ToolPolicyPreamble(tools []McpTool) string {
+	return ToolPolicyPreambleWithNative(tools, nil)
+}
+
+// ToolPolicyPreambleWithNative 是 ToolPolicyPreamble 的原生工具桥变体。
+//
+// nativeBridge 非空时（内置名 → 客户端工具名），对应的内置只读工具被放行：
+// 模型直接用它训练时熟悉的 read / grep / ls，网关把 exec 调用翻译给客户端执行
+// （见 native_tools.go）。这比逼模型改走 MCP 通道更顺——长上下文里 MCP 调用
+// 容易发生格式漂移（把调用写成正文文本），内置工具调用天然走协议帧。
+func ToolPolicyPreambleWithNative(tools []McpTool, nativeBridge map[string]string) string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		if name := strings.TrimSpace(tool.Name); name != "" {
 			names = append(names, McpToolNamespacePrefix+name)
 		}
 	}
-	if len(names) == 0 {
+	nativeAllowed := make([]string, 0, len(nativeBridge))
+	for _, key := range NativeToolBridgeKeys() {
+		if clientName, ok := nativeBridge[key]; ok && strings.TrimSpace(clientName) != "" {
+			nativeAllowed = append(nativeAllowed, key)
+		}
+	}
+	if len(names) == 0 && len(nativeAllowed) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
 	sb.WriteString("<tool_policy>\n")
-	sb.WriteString("This session runs outside an editor. Every built-in tool ")
-	sb.WriteString("(Shell, AwaitShell, Read, Write, StrReplace, Delete, Grep, Glob, ")
-	sb.WriteString("EditNotebook, ReadLints, Task, TodoWrite, WebSearch, WebFetch, ")
-	sb.WriteString("GenerateImage, SwitchMode and any other non-MCP tool) is unavailable ")
-	sb.WriteString("here and will fail if you call it.\n")
-	sb.WriteString("The only tools you may call are:\n")
-	for _, name := range names {
-		sb.WriteString("  - ")
-		sb.WriteString(name)
-		sb.WriteString("\n")
+	sb.WriteString("This session runs outside an editor.\n")
+	if len(nativeAllowed) > 0 {
+		sb.WriteString("You MAY use these built-in tools directly; the host executes them: ")
+		sb.WriteString(strings.Join(nativeAllowed, ", "))
+		sb.WriteString(".\n")
+		// 未桥接的内置工具要显式点名禁用：它们只会得到 stub 的空回执，
+		// 不点名的话模型误用时毫无线索。桥接键（read/grep/ls/shell/write/
+		// delete/fetch）按配置动态进出禁用名单，其余内置工具恒在。
+		unavailable := make([]string, 0, 16)
+		for _, key := range NativeToolBridgeKeys() {
+			if _, ok := nativeBridge[key]; !ok {
+				unavailable = append(unavailable, key)
+			}
+		}
+		unavailable = append(unavailable,
+			"AwaitShell", "StrReplace", "EditNotebook", "ReadLints", "Task",
+			"TodoWrite", "WebSearch", "GenerateImage", "SwitchMode")
+		sb.WriteString("Every other built-in tool (")
+		sb.WriteString(strings.Join(unavailable, ", "))
+		sb.WriteString(" and any other non-MCP tool) is unavailable ")
+		sb.WriteString("here and will fail if you call it.\n")
+	} else {
+		sb.WriteString("Every built-in tool ")
+		sb.WriteString("(Shell, AwaitShell, Read, Write, StrReplace, Delete, Grep, Glob, ")
+		sb.WriteString("EditNotebook, ReadLints, Task, TodoWrite, WebSearch, WebFetch, ")
+		sb.WriteString("GenerateImage, SwitchMode and any other non-MCP tool) is unavailable ")
+		sb.WriteString("here and will fail if you call it.\n")
+	}
+	if len(names) > 0 {
+		if len(nativeAllowed) > 0 {
+			sb.WriteString("The only other tools you may call are:\n")
+		} else {
+			sb.WriteString("The only tools you may call are:\n")
+		}
+		for _, name := range names {
+			sb.WriteString("  - ")
+			sb.WriteString(name)
+			sb.WriteString("\n")
+		}
 	}
 	sb.WriteString("Use them for every action you need to take. ")
-	sb.WriteString("If none of them fits, answer in plain text instead of reaching for a built-in tool.\n")
+	sb.WriteString("If none of them fits, answer in plain text instead of reaching for an unavailable tool.\n")
+	// 长上下文里模型可能把调用写成正文标记（<tool_call>/<invoke> 之类的伪 XML），
+	// 那样的调用没人执行，客户端只会看到一坨原始文本。显式点破这一条。
+	sb.WriteString("Invoke tools only through the tool-calling channel. Never write tool-call ")
+	sb.WriteString("markup such as <tool_call> or <invoke> blocks as plain text in your reply; ")
+	sb.WriteString("text like that is not executed and will be shown to the user as-is.\n")
 	sb.WriteString("</tool_policy>")
 	return sb.String()
 }

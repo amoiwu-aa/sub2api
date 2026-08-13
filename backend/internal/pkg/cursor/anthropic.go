@@ -1,7 +1,10 @@
 package cursor
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -13,6 +16,7 @@ import (
 
 // AnthropicRequest 是 /v1/messages 的请求体（只取需要的字段）。
 type AnthropicRequest struct {
+	ID        string             `json:"id,omitempty"`
 	Model     string             `json:"model"`
 	MaxTokens int                `json:"max_tokens,omitempty"`
 	System    json.RawMessage    `json:"system,omitempty"`
@@ -21,10 +25,16 @@ type AnthropicRequest struct {
 	// ToolChoice 只用来识别 {"type":"none"}；Cursor 没有强制调某个工具的开关。
 	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
 	Stream     bool            `json:"stream,omitempty"`
-	Metadata   *struct {
+	// OutputConfig.Effort 是 Anthropic Messages 的标准推理档位字段。
+	OutputConfig *AnthropicOutputConfig `json:"output_config,omitempty"`
+	Metadata     *struct {
 		ConversationID string `json:"conversation_id,omitempty"`
 		UserID         string `json:"user_id,omitempty"`
 	} `json:"metadata,omitempty"`
+}
+
+type AnthropicOutputConfig struct {
+	Effort *string `json:"effort,omitempty"`
 }
 
 type AnthropicMessage struct {
@@ -43,8 +53,9 @@ type AnthropicTool struct {
 
 // anthropicContentBlock 覆盖入站请求里会出现的全部块类型。
 type anthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type   string                `json:"type"`
+	Text   string                `json:"text,omitempty"`
+	Source *anthropicImageSource `json:"source,omitempty"`
 	// tool_use
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
@@ -53,6 +64,13 @@ type anthropicContentBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 
 // ResolveConversationID 取 metadata 里的会话 id。
@@ -110,16 +128,21 @@ func (r *AnthropicRequest) Conversation() *Conversation {
 		return &Conversation{}
 	}
 	turns := make([]Turn, 0, len(r.Messages)+1)
+	var conversionErrors []error
 	if system := anthropicText(r.System); system != "" {
 		turns = append(turns, Turn{Role: RoleSystem, Text: system})
 	}
 	for i := range r.Messages {
-		turns = append(turns, anthropicMessageToTurns(r.Messages[i])...)
+		messageTurns, err := anthropicMessageToTurns(r.Messages[i])
+		if err != nil {
+			conversionErrors = append(conversionErrors, fmt.Errorf("messages[%d]: %w", i, err))
+		}
+		turns = append(turns, messageTurns...)
 	}
-	return &Conversation{Turns: turns, Tools: r.McpTools()}
+	return &Conversation{Turns: turns, Tools: r.McpTools(), Err: errors.Join(conversionErrors...)}
 }
 
-func anthropicMessageToTurns(message AnthropicMessage) []Turn {
+func anthropicMessageToTurns(message AnthropicMessage) ([]Turn, error) {
 	role := RoleUser
 	if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
 		role = RoleAssistant
@@ -127,18 +150,27 @@ func anthropicMessageToTurns(message AnthropicMessage) []Turn {
 
 	blocks, ok := anthropicBlocks(message.Content)
 	if !ok {
-		return []Turn{{Role: role, Text: anthropicText(message.Content)}}
+		return []Turn{{Role: role, Text: anthropicText(message.Content)}}, nil
 	}
 
 	turns := make([]Turn, 0, 2)
 	main := Turn{Role: role}
 	texts := make([]string, 0, len(blocks))
-	for _, block := range blocks {
+	var conversionErrors []error
+	for i, block := range blocks {
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
 				texts = append(texts, block.Text)
 			}
+		case "image":
+			image, err := anthropicImage(block.Source)
+			if err != nil {
+				conversionErrors = append(conversionErrors, fmt.Errorf("content[%d]: %w", i, err))
+				continue
+			}
+			main.Images = append(main.Images, image)
+			texts = append(texts, attachedImageMarker)
 		case "tool_use":
 			main.ToolCalls = append(main.ToolCalls, ToolCall{
 				ID:        block.ID,
@@ -146,13 +178,18 @@ func anthropicMessageToTurns(message AnthropicMessage) []Turn {
 				Arguments: string(block.Input),
 			})
 		case "tool_result":
+			resultText, resultImages, err := anthropicTextAndImages(block.Content, true)
+			if err != nil {
+				conversionErrors = append(conversionErrors, fmt.Errorf("content[%d].tool_result: %w", i, err))
+			}
 			// 工具结果先独立成一条，顺序要排在同消息的文本之前：
 			// 客户端把结果和后续追问塞在同一条 user 消息里，
 			// 反过来渲染会让模型以为先有追问再有结果。
 			result := Turn{
 				Role:       RoleTool,
 				ToolCallID: block.ToolUseID,
-				Text:       anthropicText(block.Content),
+				Text:       resultText,
+				Images:     resultImages,
 			}
 			if block.IsError {
 				result.Text = "[tool error] " + result.Text
@@ -162,10 +199,10 @@ func anthropicMessageToTurns(message AnthropicMessage) []Turn {
 	}
 
 	main.Text = strings.Join(texts, "\n")
-	if main.Text != "" || len(main.ToolCalls) > 0 {
+	if main.Text != "" || len(main.Images) > 0 || len(main.ToolCalls) > 0 {
 		turns = append(turns, main)
 	}
-	return turns
+	return turns, errors.Join(conversionErrors...)
 }
 
 // anthropicBlocks 解析内容块数组；content 是裸字符串时返回 false。
@@ -183,6 +220,104 @@ func anthropicBlocks(raw json.RawMessage) ([]anthropicContentBlock, bool) {
 
 // anthropicText 从 string / 块数组 / 单个块里提取纯文本。
 func anthropicText(raw json.RawMessage) string {
+	text, _, _ := anthropicTextAndImages(raw, false)
+	return text
+}
+
+func anthropicTextAndImages(raw json.RawMessage, includeImageMarkers bool) (string, []AttachedImage, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return "", nil, nil
+	}
+	if trimmed[0] == '"' {
+		var text string
+		if err := json.Unmarshal(raw, &text); err == nil {
+			return text, nil, nil
+		}
+		return "", nil, nil
+	}
+
+	var blocks []anthropicContentBlock
+	var rawBlocks []json.RawMessage
+	if parsed, ok := anthropicBlocks(raw); ok {
+		blocks = parsed
+		// 与 blocks 同源解析；块数组一定也能解析成原始 JSON 数组。
+		_ = json.Unmarshal(raw, &rawBlocks)
+	} else {
+		var block anthropicContentBlock
+		if err := json.Unmarshal(raw, &block); err != nil || strings.TrimSpace(block.Type) == "" {
+			return trimmed, nil, nil
+		}
+		blocks = []anthropicContentBlock{block}
+		rawBlocks = []json.RawMessage{raw}
+	}
+
+	parts := make([]string, 0, len(blocks))
+	images := make([]AttachedImage, 0, len(blocks))
+	var conversionErrors []error
+	for i, block := range blocks {
+		blockType := strings.ToLower(strings.TrimSpace(block.Type))
+		switch blockType {
+		case "image":
+			image, err := anthropicImage(block.Source)
+			if err != nil {
+				conversionErrors = append(conversionErrors, fmt.Errorf("content[%d]: %w", i, err))
+				continue
+			}
+			images = append(images, image)
+			if includeImageMarkers {
+				parts = append(parts, attachedImageMarker)
+			}
+		default:
+			if block.Text != "" {
+				parts = append(parts, block.Text)
+				continue
+			}
+			// 完整历史重放：结构化块（带 type、无 text，比如 {"type":"json",...}）
+			// 不能静默丢弃——否则模型看到的是一次"没有输出"的工具调用。
+			// 空 text 块没有信息量，保持原来的跳过行为。
+			if blockType != "text" && i < len(rawBlocks) {
+				if compact := compactJSONText(rawBlocks[i]); compact != "" {
+					parts = append(parts, compact)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n"), images, errors.Join(conversionErrors...)
+}
+
+// compactJSONText 把一个 JSON 块压缩成单行文本，失败时原样返回修剪后的文本。
+func compactJSONText(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, []byte(trimmed)); err != nil {
+		return trimmed
+	}
+	return buf.String()
+}
+
+func anthropicImage(source *anthropicImageSource) (AttachedImage, error) {
+	if source == nil {
+		return AttachedImage{}, fmt.Errorf("image source is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(source.Type)) {
+	case "base64":
+		mimeType := strings.TrimSpace(source.MediaType)
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		return parseImageDataURI("data:" + mimeType + ";base64," + source.Data)
+	case "url":
+		return parseImageDataURI(source.URL)
+	default:
+		return AttachedImage{}, fmt.Errorf("unsupported Anthropic image source type %q", source.Type)
+	}
+}
+
+func anthropicTextLegacy(raw json.RawMessage) string {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
 		return ""

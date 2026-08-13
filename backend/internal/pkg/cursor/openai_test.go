@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func parseOpenAIRequest(t *testing.T, body string) *OpenAIRequest {
@@ -12,6 +13,12 @@ func parseOpenAIRequest(t *testing.T, body string) *OpenAIRequest {
 	var req OpenAIRequest
 	require.NoError(t, json.Unmarshal([]byte(body), &req))
 	return &req
+}
+
+func TestOpenAIRequestParsesReasoningEffort(t *testing.T) {
+	req := parseOpenAIRequest(t, `{"model":"cursor/grok-4.6","reasoning_effort":"xhigh","messages":[]}`)
+	require.NotNil(t, req.ReasoningEffort)
+	require.Equal(t, ModelEffortXHigh, *req.ReasoningEffort)
 }
 
 func TestMessagesToAgentTextAddsRolePrefixes(t *testing.T) {
@@ -84,6 +91,26 @@ func TestOpenAIFinalChunkCarriesFinishReason(t *testing.T) {
 		"model": "m",
 		"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
 	}`, string(raw))
+}
+
+func TestOpenAIUsageChunkCarriesOnlyEstimatedBasicUsage(t *testing.T) {
+	raw, err := json.Marshal(NewOpenAIUsageChunk("chatcmpl-1", "m", 1, 12, 4))
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"id": "chatcmpl-1",
+		"object": "chat.completion.chunk",
+		"created": 1,
+		"model": "m",
+		"choices": [],
+		"usage": {
+			"prompt_tokens": 12,
+			"completion_tokens": 4,
+			"total_tokens": 16
+		}
+	}`, string(raw))
+	require.False(t, gjson.GetBytes(raw, "usage.cached_tokens").Exists())
+	require.False(t, gjson.GetBytes(raw, "usage.cache_read_input_tokens").Exists())
+	require.False(t, gjson.GetBytes(raw, "usage.cache_creation_input_tokens").Exists())
 }
 
 func TestOpenAIReasoningChunkShape(t *testing.T) {

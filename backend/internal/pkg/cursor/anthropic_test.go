@@ -14,6 +14,17 @@ func parseAnthropicRequest(t *testing.T, body string) *AnthropicRequest {
 	return &req
 }
 
+func TestAnthropicRequestParsesOutputEffort(t *testing.T) {
+	req := parseAnthropicRequest(t, `{
+		"model":"cursor/grok-4.6",
+		"output_config":{"effort":"max"},
+		"messages":[]
+	}`)
+	require.NotNil(t, req.OutputConfig)
+	require.NotNil(t, req.OutputConfig.Effort)
+	require.Equal(t, "max", *req.OutputConfig.Effort)
+}
+
 func TestAnthropicRequestSystemBecomesSystemTurn(t *testing.T) {
 	req := parseAnthropicRequest(t, `{
 		"model":"cursor/default",
@@ -71,6 +82,45 @@ func TestAnthropicToolResultErrorIsMarked(t *testing.T) {
 	conversation := req.Conversation()
 	require.Len(t, conversation.Turns, 1)
 	require.Equal(t, "[tool error] boom", conversation.Turns[0].Text)
+}
+
+func TestAnthropicStructuredToolResultIsReplayedNotDropped(t *testing.T) {
+	// 完整历史重放的要求：客户端发来的结构化工具结果（带 type 但没有 text 字段）
+	// 不能被压成空串，否则模型看到的是一次"没有输出"的工具调用。
+	req := parseAnthropicRequest(t, `{
+		"model":"cursor/default",
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"toolu_1","content":[
+				{"type":"json","json":{"temperature":21.5,"unit":"C"}}
+			]},
+			{"type":"tool_result","tool_use_id":"toolu_2","content":{"type":"structured","data":{"rows":3}}}
+		]}]
+	}`)
+	conversation := req.Conversation()
+	require.NoError(t, conversation.Err)
+	require.Len(t, conversation.Turns, 2)
+
+	require.Equal(t, RoleTool, conversation.Turns[0].Role)
+	require.Equal(t, "toolu_1", conversation.Turns[0].ToolCallID)
+	require.Contains(t, conversation.Turns[0].Text, `"temperature"`)
+	require.Contains(t, conversation.Turns[0].Text, "21.5")
+
+	require.Equal(t, RoleTool, conversation.Turns[1].Role)
+	require.Equal(t, "toolu_2", conversation.Turns[1].ToolCallID)
+	require.Contains(t, conversation.Turns[1].Text, `"rows"`)
+}
+
+func TestAnthropicEmptyTextBlocksStayDropped(t *testing.T) {
+	// 空 text 块没有信息量，不应该触发原文 JSON 回退。
+	req := parseAnthropicRequest(t, `{
+		"model":"cursor/default",
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":""}]}
+		]}]
+	}`)
+	conversation := req.Conversation()
+	require.Len(t, conversation.Turns, 1)
+	require.Equal(t, "", conversation.Turns[0].Text)
 }
 
 func TestAnthropicRequestExtractsTools(t *testing.T) {

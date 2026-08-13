@@ -1,0 +1,15 @@
+{
+  "frame_base64": "CAESB3Vua25vd24=",
+  "config": {
+    "enabled": true,
+    "validated_sample_count": 0
+  },
+  "want": {
+    "status": "unavailable",
+    "reason": "insufficient_validated_samples",
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

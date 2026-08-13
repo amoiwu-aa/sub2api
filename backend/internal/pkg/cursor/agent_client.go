@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -67,11 +68,16 @@ type AgentTurnInput struct {
 	Text              string
 	ConversationID    string
 	ConversationState []byte
+	Images            []AttachedImage
 	ModelID           string
 	ModelParams       []ModelParam
 	MaxMode           *bool
 	// Tools 是客户端声明的工具，注册为 MCP 工具供模型调用。
 	Tools []McpTool
+	// NativeToolBridge 是原生工具桥映射（内置名 → 客户端工具名）。
+	// 命中的内置工具 exec 不回 stub，翻译成客户端工具调用后与 MCP
+	// 调用走同一条「不回执、主动关流」的收尾路径。
+	NativeToolBridge map[string]string
 	// ProjectName 影响 RequestContext 里构造出来的项目路径。
 	ProjectName string
 }
@@ -99,6 +105,10 @@ type AgentTurnResult struct {
 	// QueryIgnored 是收到但未回执的 interaction_query 数。
 	// 当前网关不实现 query 协议；上游若在等回答，流会静默到看门狗超时。
 	QueryIgnored int
+	// TextualToolMarkupSuppressed 是从正文里吞掉的不可解析工具调用标记数
+	//（模型模仿重放格式写进正文、又写岔或断掉的块）。可解析的块不计入：
+	// 它们已被转成 ToolCalls。
+	TextualToolMarkupSuppressed int
 	// KVSeen 是收到的 kv 帧数（仅观测，不参与回执）。
 	KVSeen int
 	// Stalled 为 true 说明这一轮是看门狗超时中止的，不是上游正常结束。
@@ -181,6 +191,7 @@ func RunAgentTurn(
 		Text:              input.Text,
 		ConversationID:    conversationID,
 		ConversationState: input.ConversationState,
+		Images:            input.Images,
 		RequestContext:    EncodeRequestContext(DefaultRequestContextEnv(input.ProjectName)),
 		ModelID:           input.ModelID,
 		ModelParams:       input.ModelParams,
@@ -202,7 +213,16 @@ func RunAgentTurn(
 	}
 	stream.startHeartbeat(ctx)
 
-	return stream.readTurn(onDelta)
+	result, err := stream.readTurn(input.NativeToolBridge, newTextualToolCallFilter(input.Tools, input.NativeToolBridge), onDelta)
+	if result != nil && result.TextualToolMarkupSuppressed > 0 {
+		// 吞掉的正文必须留痕：否则"模型说调了工具却没反应"没法排查。
+		slog.Warn("cursor.textual_tool_markup_suppressed",
+			"count", result.TextualToolMarkupSuppressed,
+			"conversation_id", conversationID,
+			"model", input.ModelID,
+		)
+	}
+	return result, err
 }
 
 var errCursorAgentNeedsSessionToken = errors.New("cursor agent requires a type=session token")
@@ -341,7 +361,14 @@ func (s *agentStream) close() {
 }
 
 // readTurn 读到流结束或 turn_ended 为止。
-func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult, error) {
+// nativeToolBridge 非空时，命中映射的内置工具 exec 翻译成客户端调用而不回 stub；
+// markupFilter 非 nil 时，正文里模仿重放格式写出的 <tool_call>/<invoke> 标记
+// 会被拦下——可解析的转成真调用，残缺的吞掉（见 textual_tool_call_filter.go）。
+func (s *agentStream) readTurn(
+	nativeToolBridge map[string]string,
+	markupFilter *textualToolCallFilter,
+	onDelta func(AgentDelta) error,
+) (*AgentTurnResult, error) {
 	result := &AgentTurnResult{}
 	var text, thinking strings.Builder
 	// 控制 token 可能被切在两个增量之间，过滤要跨增量保持状态。
@@ -355,6 +382,9 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 	// endingOnToolCall 让读循环把「因工具调用而主动关流」与「被看门狗掐断」
 	// 区分开：前者是正常收尾，后者要标成不完整。
 	var endingOnToolCall atomic.Bool
+	// endingOnMarkupLoop 是伪造转写死循环的熔断收尾（见 textualMarkupLoopLimit）：
+	// 同样属于主动关流的正常收尾，不标 stalled。
+	var endingOnMarkupLoop atomic.Bool
 	var toolCallTimer *time.Timer
 	stallTimer := time.AfterFunc(streamStallTimeout, func() {
 		stalled.Store(true)
@@ -377,12 +407,43 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 		return onDelta(delta)
 	}
 
+	// collectClientToolCall 是 MCP 调用与原生工具桥共用的收尾：追加结果、
+	// 通知调用方，并启动/续期「收齐并行调用后主动关流」的宽限定时器。
+	//
+	// closeAfterGrace 只对协议通道的调用为 true：那之后上游在等一个我们
+	// 不会给的 exec 回执，必须主动关流。文本标记转换出的调用（textual
+	// filter）只是模型写的字，上游没在等任何东西，这轮会以 turn_ended
+	// 自然收尾——提前关流反而会截断标记之后的正文。
+	collectClientToolCall := func(clientCall *McpToolCall, closeAfterGrace bool) error {
+		call := ToolCall{
+			ID:        NewOpenAIToolCallID(clientCall.CallID),
+			Name:      clientCall.Name,
+			Arguments: string(clientCall.Arguments),
+		}
+		result.ToolCalls = append(result.ToolCalls, call)
+		if err := emit(AgentDelta{ToolCall: &call}); err != nil {
+			return err
+		}
+		if !closeAfterGrace {
+			stallTimer.Reset(streamStallTimeout)
+			return nil
+		}
+		stallTimer.Stop()
+		if toolCallTimer == nil {
+			endingOnToolCall.Store(true)
+			toolCallTimer = time.AfterFunc(toolCallGrace, s.close)
+		} else {
+			toolCallTimer.Reset(toolCallGrace)
+		}
+		return nil
+	}
+
 	for {
 		envelope, err := s.reader.Next()
 		if err != nil {
 			// turn_ended 后宽限期到点会关掉 body，读出的错误就是预期的收尾信号；
-			// 工具调用后的主动关流同理。看门狗关 body 也走这里，只是要标成不完整。
-			if errors.Is(err, io.EOF) || result.TurnEnded || endingOnToolCall.Load() {
+			// 工具调用/熔断后的主动关流同理。看门狗关 body 也走这里，只是要标成不完整。
+			if errors.Is(err, io.EOF) || result.TurnEnded || endingOnToolCall.Load() || endingOnMarkupLoop.Load() {
 				break
 			}
 			if stalled.Load() {
@@ -409,9 +470,25 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 		case KindTextDelta:
 			stallTimer.Reset(streamStallTimeout)
 			if clean := textFilter.Feed(message.TextDelta); clean != "" {
-				text.WriteString(clean)
-				if err := emit(AgentDelta{Text: clean}); err != nil {
-					return nil, err
+				clean, markupCalls := markupFilter.Feed(clean)
+				for _, call := range markupCalls {
+					if err := collectClientToolCall(call, false); err != nil {
+						return nil, err
+					}
+				}
+				if clean != "" {
+					text.WriteString(clean)
+					if err := emit(AgentDelta{Text: clean}); err != nil {
+						return nil, err
+					}
+				}
+				// 伪造转写死循环熔断：这轮已经救不回来了，主动收尾把
+				// 已过滤的正文交还客户端，别陪模型烧满看门狗的 120 秒。
+				if markupFilter != nil && markupFilter.Suppressed >= textualMarkupLoopLimit &&
+					!endingOnMarkupLoop.Load() {
+					endingOnMarkupLoop.Store(true)
+					stallTimer.Stop()
+					s.close()
 				}
 			}
 		case KindThinkingDelta:
@@ -428,23 +505,18 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 			if message.ToolCall == nil {
 				continue
 			}
-			stallTimer.Stop()
-			call := ToolCall{
-				ID:        NewOpenAIToolCallID(message.ToolCall.CallID),
-				Name:      message.ToolCall.Name,
-				Arguments: string(message.ToolCall.Arguments),
-			}
-			result.ToolCalls = append(result.ToolCalls, call)
-			if err := emit(AgentDelta{ToolCall: &call}); err != nil {
+			if err := collectClientToolCall(message.ToolCall, true); err != nil {
 				return nil, err
 			}
-			if toolCallTimer == nil {
-				endingOnToolCall.Store(true)
-				toolCallTimer = time.AfterFunc(toolCallGrace, s.close)
-			} else {
-				toolCallTimer.Reset(toolCallGrace)
-			}
 		case KindExec:
+			// 原生工具桥：映射过的内置只读工具翻译成客户端调用，
+			// 与 MCP 调用共用「不回执、主动关流」的收尾。
+			if call := TranslateNativeExec(nativeToolBridge, message.Exec); call != nil {
+				if err := collectClientToolCall(call, true); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			// 不回执上游会一直等，整轮对话就挂在那里。
 			replies := StubExecReplies(message.Exec)
 			answered := len(replies) > 0
@@ -473,7 +545,10 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 			stallTimer.Reset(streamStallTimeout)
 		case KindCheckpoint:
 			stallTimer.Reset(streamStallTimeout)
-			result.ConversationState = message.ConversationState
+			// 防御性拷贝：Field.Bytes 零拷贝指向帧缓冲，这是唯一跨迭代持有
+			// 它的地方。当前 EnvelopeReader.Next 每帧独立分配所以安全，但
+			// 引入缓冲池之类的优化会先炸这里，拷一份把契约固化下来。
+			result.ConversationState = append([]byte(nil), message.ConversationState...)
 		case KindTurnEnded:
 			if result.TurnEnded {
 				continue
@@ -494,8 +569,22 @@ func (s *agentStream) readTurn(onDelta func(AgentDelta) error) (*AgentTurnResult
 	// 扣住的尾巴到这里还没长成控制 token，说明是普通文本，补发出去。
 	// 此刻整轮已经读完，emit 再报错只可能是客户端先走了，没有可挽回的动作。
 	if tail := textFilter.Flush(); tail != "" {
+		clean, markupCalls := markupFilter.Feed(tail)
+		for _, call := range markupCalls {
+			_ = collectClientToolCall(call, false)
+		}
+		if clean != "" {
+			text.WriteString(clean)
+			_ = emit(AgentDelta{Text: clean})
+		}
+	}
+	// 标记块写到一半断流的（正是泄漏最常见的形态）在这里被吞掉。
+	if tail := markupFilter.Flush(); tail != "" {
 		text.WriteString(tail)
 		_ = emit(AgentDelta{Text: tail})
+	}
+	if markupFilter != nil {
+		result.TextualToolMarkupSuppressed = markupFilter.Suppressed
 	}
 	if tail := thinkingFilter.Flush(); tail != "" {
 		thinking.WriteString(tail)

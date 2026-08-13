@@ -52,6 +52,15 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	}
 
 	conversation := req.Conversation()
+	if err := conversation.ValidationError(); err != nil {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools)
+	if err != nil {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	conversation.Tools = mcpTools
+	conversation.NativeToolBridge = nativeBridge
 	prompt := conversation.Render()
 	if strings.TrimSpace(prompt) == "" {
 		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error",
@@ -63,10 +72,20 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	}
 
 	publicModel := req.Model
-	selection := cursor.ResolveModel(publicModel)
+	var standardEffort *string
+	if req.OutputConfig != nil {
+		standardEffort = normalizeAnthropicCursorEffort(req.OutputConfig.Effort)
+	}
+	selection, err := resolveCursorModelSelection(body, publicModel, standardEffort)
+	if err != nil {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
 	upstreamModel := selection.ModelID
 
-	if err := s.ensureModelQuota(c, account, selection.ModelID); err != nil {
+	// 配额 429 也要用 Anthropic 的错误体包装，与该入口其它错误一致。
+	if err := s.ensureModelQuota(account, selection.ModelID, func(status int, errType, message string) error {
+		return s.writeAnthropicError(c, status, errType, message)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -75,27 +94,38 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 		return nil, err
 	}
 
-	conversationID := req.ResolveConversationID()
-	if conversationID == "" {
-		conversationID = uuid.NewString()
-	}
+	conversationID := resolveCursorConversationID(c, account, conversation, req.ID)
 
 	agentCtx, cancel := context.WithTimeout(ctx, cursorAgentTimeout)
 	defer cancel()
 
 	input := cursor.AgentTurnInput{
-		Text:           prompt,
-		ConversationID: conversationID,
-		ModelID:        selection.ModelID,
-		ModelParams:    selection.Params,
-		MaxMode:        selection.MaxMode,
-		Tools:          conversation.Tools,
+		Text:             prompt,
+		ConversationID:   conversationID,
+		Images:           conversation.Images(),
+		ModelID:          selection.ModelID,
+		ModelParams:      selection.Params,
+		MaxMode:          selection.MaxMode,
+		Tools:            conversation.Tools,
+		NativeToolBridge: conversation.NativeToolBridge,
 	}
 
+	var result *ForwardResult
 	if req.Stream {
-		return s.forwardMessagesStreaming(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
+		result, err = s.forwardMessagesStreaming(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
+	} else {
+		result, err = s.forwardMessagesBuffered(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
 	}
-	return s.forwardMessagesBuffered(agentCtx, c, account, options, input, publicModel, upstreamModel, prompt, startTime)
+	annotateCursorModelSelection(result, selection)
+	return result, err
+}
+
+func normalizeAnthropicCursorEffort(effort *string) *string {
+	if effort == nil || !strings.EqualFold(strings.TrimSpace(*effort), "max") {
+		return effort
+	}
+	xhigh := cursor.ModelEffortXHigh
+	return &xhigh
 }
 
 // anthropicStreamWriter 维护 Messages SSE 的块索引与开合状态。

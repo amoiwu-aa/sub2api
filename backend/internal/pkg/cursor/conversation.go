@@ -45,6 +45,8 @@ const (
 type Turn struct {
 	Role TurnRole
 	Text string
+	// Images are attached through Cursor's SelectedContext.
+	Images []AttachedImage
 	// ToolCalls 只在 Role == RoleAssistant 时有意义。
 	ToolCalls []ToolCall
 	// ToolCallID / ToolName 只在 Role == RoleTool 时有意义。
@@ -56,6 +58,32 @@ type Turn struct {
 type Conversation struct {
 	Turns []Turn
 	Tools []McpTool
+	// NativeToolBridge 是原生工具桥映射（内置名 → 客户端工具名）。
+	// 非空时 Render 的工具策略前言会放行对应的内置只读工具；
+	// 这些客户端工具不该再出现在 Tools 里（由 service 层切分）。
+	NativeToolBridge map[string]string
+	// Err prevents malformed or unsupported images from being silently dropped.
+	Err error
+}
+
+// ValidationError reports an input conversion error.
+func (c *Conversation) ValidationError() error {
+	if c == nil {
+		return nil
+	}
+	return c.Err
+}
+
+// Images returns all client-supplied images in message order.
+func (c *Conversation) Images() []AttachedImage {
+	if c == nil {
+		return nil
+	}
+	var images []AttachedImage
+	for _, turn := range c.Turns {
+		images = append(images, turn.Images...)
+	}
+	return images
 }
 
 // HasHistory 报告是否存在需要重放的历史（多于一条用户消息，或含工具往返）。
@@ -102,7 +130,7 @@ func (c *Conversation) Render() string {
 	}
 
 	var sb strings.Builder
-	if policy := ToolPolicyPreamble(c.Tools); policy != "" {
+	if policy := ToolPolicyPreambleWithNative(c.Tools, c.NativeToolBridge); policy != "" {
 		sb.WriteString(policy)
 		sb.WriteString("\n\n")
 	}

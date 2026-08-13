@@ -5,7 +5,10 @@
 // agent.api5.cursor.sh 的 AgentService/Run，HTTP/2 双向流 + Connect 信封。
 package cursor
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // PublicModelPrefix 是 cursor 模型对外暴露时的命名空间前缀。
 //
@@ -21,7 +24,7 @@ const AutoModelID = "default"
 //
 // Cursor 的 IDE 把 MAX 做成一个独立于模型名的开关（wire 上是 RequestedModel
 // 的 field 2），但对外这一层只有一个 OpenAI 风格的模型名可用，所以把它编进
-// 名字里：cursor/grok-4.5-max 等价于「选 grok-4.5 并打开 MAX」。
+// 名字里：cursor/grok-4.6-max 等价于「选 grok-4.6 并打开 MAX」。
 //
 // 这样客户端在模型下拉框里就能选，不必额外传自定义字段；用量日志里也是两个
 // 不同的模型名，MAX 的开销天然可以单独计价和统计。
@@ -52,6 +55,8 @@ var defaultModels = []Model{
 	{ID: PublicModelPrefix + "claude-sonnet-5", Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor Claude Sonnet 5"},
 	{ID: PublicModelPrefix + "gpt-5.6-sol", Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor GPT 5.6 Sol"},
 	{ID: PublicModelPrefix + "gpt-5.6-terra", Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor GPT 5.6 Terra"},
+	{ID: PublicModelPrefix + "grok-4.6", Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor Grok 4.6"},
+	{ID: PublicModelPrefix + "grok-4.6" + MaxModeSuffix, Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor Grok 4.6 (MAX)"},
 	{ID: PublicModelPrefix + "grok-4.5", Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor Grok 4.5"},
 	{ID: PublicModelPrefix + "grok-4.5" + MaxModeSuffix, Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor Grok 4.5 (MAX)"},
 	{ID: PublicModelPrefix + "composer-2.5", Object: "model", OwnedBy: "cursor-agent", DisplayName: "Cursor Composer 2.5"},
@@ -105,6 +110,23 @@ type ModelSelection struct {
 	MaxMode *bool
 }
 
+const (
+	ModelEffortLow    = "low"
+	ModelEffortMedium = "medium"
+	ModelEffortHigh   = "high"
+	ModelEffortXHigh  = "xhigh"
+)
+
+// ModelOptions 是公共 API 对 Cursor RequestedModel 的可调覆盖项。
+//
+// Fast / MaxMode 用指针区分「没有指定」与显式 false。没有指定时保留模型目录的
+// 默认值，旧客户端只传 model 的行为因此完全不变。
+type ModelOptions struct {
+	Effort  *string `json:"effort,omitempty"`
+	Fast    *bool   `json:"fast,omitempty"`
+	MaxMode *bool   `json:"max_mode,omitempty"`
+}
+
 // ResolveModel 把对外模型名解析成上游选型。
 //
 // 空值与未知名一律回退到 Auto，避免把客户端随手写的模型名直接打给上游。
@@ -139,6 +161,136 @@ func ResolveModel(publicModel string) ModelSelection {
 		selection.MaxMode = &maxMode
 	}
 	return selection
+}
+
+// ResolveModelWithOptions 在模型名解析结果上应用请求级参数。
+//
+// standardEffort 来自各兼容协议的标准字段：
+//   - Chat Completions: reasoning_effort
+//   - Responses: reasoning.effort
+//   - Anthropic Messages: output_config.effort
+//
+// options 来自三种协议共用的 cursor_options。cursor_options.effort 的优先级高于
+// 标准字段，显式 fast/max_mode 则覆盖目录默认值与旧的 -max 模型后缀。
+func ResolveModelWithOptions(
+	publicModel string,
+	standardEffort *string,
+	options *ModelOptions,
+) (ModelSelection, error) {
+	selection := ResolveModel(publicModel)
+
+	effort := ""
+	standardEffortValue := ""
+	customEffortValue := ""
+	hasEffort := false
+	if standardEffort != nil {
+		normalized, err := normalizeModelEffort(*standardEffort)
+		if err != nil {
+			return ModelSelection{}, err
+		}
+		standardEffortValue = normalized
+		effort = normalized
+		hasEffort = true
+	}
+	if options != nil {
+		if options.Effort != nil {
+			normalized, err := normalizeModelEffort(*options.Effort)
+			if err != nil {
+				return ModelSelection{}, err
+			}
+			customEffortValue = normalized
+			effort = normalized
+			hasEffort = true
+		}
+	}
+	hasOverrides := hasEffort || (options != nil && (options.Fast != nil || options.MaxMode != nil))
+	if !hasOverrides {
+		return selection, nil
+	}
+
+	if selection.ModelID == AutoModelID {
+		return ModelSelection{}, fmt.Errorf("Cursor model options require a named model, not cursor/default")
+	}
+	if !supportsRequestModelOptions(selection.ModelID) {
+		return ModelSelection{}, fmt.Errorf(
+			"Cursor model options are not verified for %q; supported models are cursor/grok-4.6, cursor/grok-4.5 and cursor/composer-2.5",
+			PublicModelID(selection.ModelID),
+		)
+	}
+	for _, explicitEffort := range []string{standardEffortValue, customEffortValue} {
+		if explicitEffort != "" && !supportsModelEffort(selection.ModelID, explicitEffort) {
+			return ModelSelection{}, fmt.Errorf(
+				"effort %q is not supported by %s",
+				explicitEffort,
+				PublicModelID(selection.ModelID),
+			)
+		}
+	}
+
+	selection.Params = append([]ModelParam(nil), selection.Params...)
+	if effort != "" {
+		selection.Params = setModelParam(selection.Params, "effort", effort)
+	}
+	if options != nil {
+		if options.Fast != nil {
+			selection.Params = setModelParam(selection.Params, "fast", fmt.Sprintf("%t", *options.Fast))
+		}
+		if options.MaxMode != nil {
+			maxMode := *options.MaxMode
+			selection.MaxMode = &maxMode
+		}
+	}
+	return selection, nil
+}
+
+func normalizeModelEffort(raw string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if normalized == "" {
+		return "", fmt.Errorf("effort must not be empty")
+	}
+	return normalized, nil
+}
+
+func supportsRequestModelOptions(modelID string) bool {
+	switch modelID {
+	case "grok-4.6", "grok-4.5":
+		return true
+	case "composer-2.5":
+		// composer 的默认参数就带 fast=true（见官方目录
+		// officialSelectedSubagentModels），fast 是它的合法参数。必须允许
+		// cursor_options.fast=false：composer 的 Fast 官方价是标准价的
+		// 3~7.5 倍，没有这个退出通道，标准档价格就是不可达的。
+		// effort 仍会被 supportsModelEffort 拒掉（composer 无档位）。
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsModelEffort(modelID, effort string) bool {
+	switch modelID {
+	case "grok-4.6":
+		return effort == ModelEffortLow ||
+			effort == ModelEffortMedium ||
+			effort == ModelEffortHigh ||
+			effort == ModelEffortXHigh
+	case "grok-4.5":
+		return effort == ModelEffortLow ||
+			effort == ModelEffortMedium ||
+			effort == ModelEffortHigh
+	default:
+		return false
+	}
+}
+
+func setModelParam(params []ModelParam, id, value string) []ModelParam {
+	for i := range params {
+		if params[i].ID == id {
+			params[i].Value = value
+			return params
+		}
+	}
+	return append(params, ModelParam{ID: id, Value: value})
 }
 
 // UpstreamModelID 把对外模型名转换为 Agent wire 上的 modelId。

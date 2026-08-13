@@ -395,6 +395,116 @@ Anthropic 多一步处理：它把工具结果塞在 user 消息的内容块里�
 - `/v1/messages/count_tokens`：Cursor 从 404 改为走本地估算（与 Grok / Kiro
   同源）。Claude Code 每轮都会调它，404 会让它反复重试并在界面上刷错误。
 
+### 请求级模型参数
+
+Cursor Grok 4.6 的 Effort、Fast、MAX 不需要展开成 16 个模型名。三个兼容入口都
+接受同一个 `cursor_options` 扩展：
+
+```json
+{
+  "model": "cursor/grok-4.6",
+  "reasoning_effort": "medium",
+  "cursor_options": {
+    "effort": "xhigh",
+    "fast": false,
+    "max_mode": true
+  }
+}
+```
+
+- `effort`：Grok 4.6 支持 `low`、`medium`、`high`、`xhigh`；Grok 4.5 不支持
+  `xhigh`；Composer 2.5 无档位（带 `effort` 会 400）。
+- `fast`、`max_mode` 是布尔值，显式 `false` 与省略字段不同。支持
+  `cursor_options` 的模型是 Grok 4.6、Grok 4.5 与 Composer 2.5；Composer
+  默认 `fast=true` 且 Fast 溢价高，`fast: false` 是它按标准价计费的唯一途径。
+- Chat Completions 的标准档位字段是 `reasoning_effort`。
+- Responses 的标准档位字段是 `reasoning.effort`。
+- Anthropic Messages 的标准档位字段是 `output_config.effort`，其中 `max`
+  映射为 Cursor 的 `xhigh`；这个别名不适用于另外两个标准字段或
+  `cursor_options.effort`。
+- `cursor_options.effort` 比协议标准字段优先；`cursor_options.max_mode` 比旧的
+  `cursor/grok-4.6-max` 模型后缀优先。
+- 只传 `model` 的旧请求保持原行为：具名模型默认 `effort=high`、`fast=true`；
+  `-max` 后缀继续兼容。
+
+OpenAI Python SDK 可通过
+`extra_body={"cursor_options":{"fast":false,"max_mode":true}}` 传入扩展项。
+空字符串、契约外档位、Auto 模型携带参数或尚未验证的模型会返回 400，而不是静默忽略。
+
+### 原生工具桥（native_tools）
+
+MCP 通道是逆着模型的训练习惯改道：模型本来就认识 Cursor 的内置
+read / grep / ls，`<tool_policy>` 却告诉它「这些不可用，改用
+`mcp_cursor-cli_*`」。长上下文里模型会格式漂移，把 MCP 调用写成正文里的
+`<tool_call>` 伪 XML——没人执行，客户端只看到一坨原始标记。
+
+原生工具桥让模型直接用内置只读工具，网关把 exec 帧翻译成标准
+`tool_calls` 交回客户端执行。三个兼容入口都通过 `cursor_options` 开启：
+
+```json
+{
+  "model": "cursor/grok-4.6",
+  "tools": [
+    {"type": "function", "function": {"name": "Read", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "Grep", "parameters": {"type": "object"}}}
+  ],
+  "cursor_options": {
+    "native_tools": {"read": "Read", "grep": "Grep"}
+  }
+}
+```
+
+- 键是内置工具名：`read`、`grep`、`ls`、`shell`、`write`、`delete`、
+  `fetch`、`diagnostics`（`redacted_read` 并入 `read`，`shell_stream`
+  与 `background_shell_spawn` 并入 `shell`，后者强制 `run_in_background`）。
+  网关只做翻译不执行任何东西——写类调用由客户端声明的工具执行，走客户
+  端自己的审批流，与同一工具经 MCP 通道被调用时风险等级相同。未映射的
+  内置工具继续回 stub。
+- 值必须是本次请求 `tools` 里声明过的客户端工具名。命中的工具不再注册
+  MCP，模型只看到内置通道；未映射的客户端工具照常走 MCP，两条通道可以共存。
+- 非法键、空值、未声明的工具名一律 400。
+- 模型的调用以映射后的客户端工具名返回（OpenAI `tool_calls` /
+  Anthropic `tool_use`），`tool_call_id` 优先取上游入参自带的
+  `tool_call_id`。客户端执行后照常把结果放进下一次请求，网关文本重放。
+
+网关发给客户端的入参形态（客户端工具的 schema 要认这些字段名）：
+
+| 内置工具 | 入参 JSON |
+|---|---|
+| `read` | `{"path": string, "offset"?: int, "limit"?: int}` |
+| `grep` | `{"pattern": string, "path"?: string, "glob"?: string, "output_mode"?: string, "case_insensitive"?: bool, "head_limit"?: int}` |
+| `ls` | `{"path": string}` |
+| `shell` | `{"command": string, "cwd"?: string, "timeout"?: int, "run_in_background"?: bool, "description"?: string}` |
+| `write` | `{"path": string, "content": string}` |
+| `delete` | `{"path": string}` |
+| `fetch` | `{"url": string}` |
+| `diagnostics` | `{"path": string}` |
+
+字段号依据（反代 `cursor-agent-exec.js` / `cursor-agent-exec-tools.js`）：
+read `path=1, tool_call_id=2, offset=4, limit=5`；grep `pattern=1, path=2,
+glob=3, output_mode=4, case_insensitive=8, head_limit=10, tool_call_id=14`；
+ls `path=1, tool_call_id=3`；shell `command=1, cwd=2, timeout=3,
+tool_call_id=4, is_background=11, description=15`；background_shell_spawn
+`command=1, cwd=2, tool_call_id=3`；write `path=1, content=2,
+tool_call_id=3`；delete `path=1, tool_call_id=2`；fetch `url=1,
+tool_call_id=2`；diagnostics `path=1, tool_call_id=2`。`shell` 的
+timeout 单位未实证，按毫秒对待。上游升级若变动字段，入参解析失败会
+自动回落 stub，不会把错误参数转给客户端。
+
+### 参数如何进入用量与账单
+
+生效的选型会回写进用量日志，三个维度分别落在：
+
+- `effort` → `reasoning_effort` 字段。
+- `fast` → `service_tier` 字段（`fast` / `standard`）。计费按 Cursor 官方
+  牌价整档换价：Grok 4.6/4.5 Fast 是 $4 / $1 / $12（标准价 2x），
+  Composer 2.5 Fast 是 $3 / $0.5 / $15（溢价不均匀，所以不用乘数）。
+  注意具名模型默认 `fast=true`（与 IDE 默认一致），想按标准价计费需
+  显式传 `fast: false`。
+- `max_mode` → 归一化进模型名：`cursor_options.max_mode=true` 打在
+  `cursor/grok-4.6` 上时，日志与账单里记作 `cursor/grok-4.6-max`，与旧的
+  后缀写法落到同一个名字，MAX 用量不会混进基础模型。
+
 ## 6. 排错
 
 ### 症状对照
@@ -465,9 +575,16 @@ ssh <host> "tr -d '\r' < /tmp/cursor-tool-calling-e2e.sh > /tmp/e2e.sh && bash /
 关不掉。桥接之后，opencode 的系统提示与 Cursor 的 agent 行为会同时起作用，
 任务分解风格可能和直连 Claude 不一样。这个无法通过工程手段消除，只能实测评估。
 
-**token 用量是本地估算。** Cursor 上游不返回用量，`EstimateTokens` 按
-「字符数 / 4」近似（按 rune 计，避免中文被按字节抬高三倍）。会低估 CJK、
-高估代码。不估算的话 `usage_logs` 成本恒为 0，平台配额就成了静默失效的开关。
+**token 用量是本地估算，缓存命中不可观测。** Cursor 上游目前没有经过真实样本
+验证的 cache usage 字段映射，`EstimateTokens` 按「字符数 / 4」近似（按 rune
+计，避免中文被按字节抬高三倍）。会低估 CJK、高估代码。不估算的话
+`usage_logs` 成本恒为 0，平台配额就成了静默失效的开关。
+
+因此 Cursor 日志的 `cache_usage_source` 是 `estimated`，不能把 cache read 的
+零值解释为真实 0% 命中。带 `X-Session-Id` 请求后查询
+`GET /v1/sub2api/usage?session_id=...`，当前应得到
+`cache_observation_status="unobservable"` 和 `cache_hit_rate_percent=null`。
+只有私有 usage decoder 完成真实样本对账后才能返回实际命中率。
 
 **thinking 不走 Anthropic 的 thinking 块。** Anthropic 的 thinking 需要配一个
 上游签名，我们给不出。伪造签名会让 Claude Code 在下一轮回传时被自己的校验

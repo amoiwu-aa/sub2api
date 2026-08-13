@@ -192,6 +192,8 @@ export const cursorModels = [
   'cursor/claude-sonnet-5',
   'cursor/gpt-5.6-sol',
   'cursor/gpt-5.6-terra',
+  'cursor/grok-4.6',
+  'cursor/grok-4.6-max',
   'cursor/grok-4.5',
   'cursor/grok-4.5-max',
   'cursor/composer-2.5'

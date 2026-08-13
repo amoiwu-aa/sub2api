@@ -3,6 +3,7 @@
 package cursor
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -25,9 +26,9 @@ func TestResolveModelAutoSendsNoParams(t *testing.T) {
 // TestResolveModelNamedCarriesDefaultParams 对齐官方抓包：具名模型带
 // effort=high + fast=true，这正是 IDE 里的「fast」。
 func TestResolveModelNamedCarriesDefaultParams(t *testing.T) {
-	selection := ResolveModel("cursor/grok-4.5")
+	selection := ResolveModel("cursor/grok-4.6")
 
-	require.Equal(t, "grok-4.5", selection.ModelID)
+	require.Equal(t, "grok-4.6", selection.ModelID)
 	require.Equal(t, DefaultModelParams(), selection.Params)
 	// 没要 MAX 就不写 field 2，上游区分「没说」与「显式 false」。
 	require.Nil(t, selection.MaxMode)
@@ -36,12 +37,115 @@ func TestResolveModelNamedCarriesDefaultParams(t *testing.T) {
 // TestResolveModelMaxSuffix 覆盖 MAX 变体：后缀被拆掉，modelId 回到裸名，
 // MaxMode 显式为 true。
 func TestResolveModelMaxSuffix(t *testing.T) {
-	selection := ResolveModel("cursor/grok-4.5" + MaxModeSuffix)
+	selection := ResolveModel("cursor/grok-4.6" + MaxModeSuffix)
 
-	require.Equal(t, "grok-4.5", selection.ModelID, "MAX 变体不是上游模型名，必须拆回裸名")
+	require.Equal(t, "grok-4.6", selection.ModelID, "MAX 变体不是上游模型名，必须拆回裸名")
 	require.Equal(t, DefaultModelParams(), selection.Params)
 	require.NotNil(t, selection.MaxMode)
 	require.True(t, *selection.MaxMode)
+}
+
+func TestResolveModelWithOptionsGrok46AllCombinations(t *testing.T) {
+	for _, effort := range []string{
+		ModelEffortLow,
+		ModelEffortMedium,
+		ModelEffortHigh,
+		ModelEffortXHigh,
+	} {
+		for _, fast := range []bool{false, true} {
+			for _, maxMode := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/fast=%t/max=%t", effort, fast, maxMode), func(t *testing.T) {
+					selection, err := ResolveModelWithOptions(
+						"cursor/grok-4.6",
+						nil,
+						&ModelOptions{Effort: &effort, Fast: &fast, MaxMode: &maxMode},
+					)
+
+					require.NoError(t, err)
+					require.Equal(t, "grok-4.6", selection.ModelID)
+					require.Equal(t, effort, modelParamValue(selection.Params, "effort"))
+					require.Equal(t, fmt.Sprintf("%t", fast), modelParamValue(selection.Params, "fast"))
+					require.NotNil(t, selection.MaxMode)
+					require.Equal(t, maxMode, *selection.MaxMode)
+				})
+			}
+		}
+	}
+}
+
+func TestResolveModelWithOptionsGrok45EffortAllowlist(t *testing.T) {
+	for _, effort := range []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh} {
+		effort := effort
+		selection, err := ResolveModelWithOptions("cursor/grok-4.5", &effort, nil)
+		require.NoError(t, err)
+		require.Equal(t, effort, modelParamValue(selection.Params, "effort"))
+	}
+}
+
+func TestResolveModelWithOptionsPrecedence(t *testing.T) {
+	fast := false
+	maxMode := false
+	standardEffort := ModelEffortLow
+	customEffort := ModelEffortXHigh
+	selection, err := ResolveModelWithOptions(
+		"cursor/grok-4.6-max",
+		&standardEffort,
+		&ModelOptions{Effort: &customEffort, Fast: &fast, MaxMode: &maxMode},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, ModelEffortXHigh, modelParamValue(selection.Params, "effort"),
+		"cursor_options.effort must override the protocol-standard effort")
+	require.Equal(t, "false", modelParamValue(selection.Params, "fast"))
+	require.NotNil(t, selection.MaxMode)
+	require.False(t, *selection.MaxMode, "explicit max_mode=false must override the legacy -max suffix")
+}
+
+func TestResolveModelWithOptionsRejectsUnsupportedCombinations(t *testing.T) {
+	fast := false
+	xhigh := ModelEffortXHigh
+
+	_, err := ResolveModelWithOptions("cursor/grok-4.5", &xhigh, nil)
+	require.ErrorContains(t, err, `effort "xhigh" is not supported`)
+
+	low := ModelEffortLow
+	_, err = ResolveModelWithOptions("cursor/default", &low, nil)
+	require.ErrorContains(t, err, "require a named model")
+
+	_, err = ResolveModelWithOptions("cursor/claude-sonnet-5", nil, &ModelOptions{Fast: &fast})
+	require.ErrorContains(t, err, "not verified")
+
+	selection, err := ResolveModelWithOptions("cursor/claude-sonnet-5", nil, nil)
+	require.NoError(t, err, "old model-only requests must remain compatible")
+	require.Equal(t, "claude-sonnet-5", selection.ModelID)
+}
+
+func TestResolveModelWithOptionsComposerFastToggle(t *testing.T) {
+	// composer 默认 fast=true 且 Fast 官方价是标准价的数倍。fast:false 是
+	// 标准档价格唯一的到达路径，必须放行；effort 对 composer 仍要拒绝。
+	fast := false
+	selection, err := ResolveModelWithOptions("cursor/composer-2.5", nil, &ModelOptions{Fast: &fast})
+	require.NoError(t, err)
+	require.Equal(t, "composer-2.5", selection.ModelID)
+	require.Equal(t, "false", modelParamValue(selection.Params, "fast"))
+
+	high := ModelEffortHigh
+	_, err = ResolveModelWithOptions("cursor/composer-2.5", nil, &ModelOptions{Effort: &high})
+	require.ErrorContains(t, err, `effort "high" is not supported`)
+}
+
+func TestResolveModelWithOptionsRejectsBlankAndUndocumentedEfforts(t *testing.T) {
+	for _, effort := range []string{"", "   ", "extra-high", "extra_high", "max"} {
+		effort := effort
+		t.Run(fmt.Sprintf("%q", effort), func(t *testing.T) {
+			_, err := ResolveModelWithOptions(
+				"cursor/grok-4.6",
+				nil,
+				&ModelOptions{Effort: &effort},
+			)
+			require.Error(t, err)
+		})
+	}
 }
 
 // TestResolveModelMaxSuffixOnUnknownBaseFallsBack 确认 "-max" 不是一个可以
@@ -86,4 +190,35 @@ func TestDefaultModelsAreResolvable(t *testing.T) {
 				"%s 出现在模型列表里却退成了 Auto，用户会以为选中了却没生效", id)
 		})
 	}
+}
+
+func TestResolveModelWithOptionsValidatesOverriddenStandardEffort(t *testing.T) {
+	customHigh := ModelEffortHigh
+	for _, tc := range []struct {
+		model          string
+		standardEffort string
+	}{
+		{model: "cursor/grok-4.6", standardEffort: "max"},
+		{model: "cursor/grok-4.6", standardEffort: "extra-high"},
+		{model: "cursor/grok-4.5", standardEffort: ModelEffortXHigh},
+	} {
+		tc := tc
+		t.Run(tc.model+"/"+tc.standardEffort, func(t *testing.T) {
+			_, err := ResolveModelWithOptions(
+				tc.model,
+				&tc.standardEffort,
+				&ModelOptions{Effort: &customHigh},
+			)
+			require.ErrorContains(t, err, fmt.Sprintf(`effort %q is not supported`, tc.standardEffort))
+		})
+	}
+}
+
+func modelParamValue(params []ModelParam, id string) string {
+	for _, param := range params {
+		if param.ID == id {
+			return param.Value
+		}
+	}
+	return ""
 }

@@ -1150,10 +1150,127 @@ func TestCalculateCostWithLongContext_PropagatesError(t *testing.T) {
 	require.Contains(t, err.Error(), "pricing not found")
 }
 
-func TestGetModelPricing_Grok45OfficialFallback(t *testing.T) {
+func TestCalculateCostWithServiceTier_CursorFastUsesExplicitFastPricing(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200}
+
+	// Grok 4.5 / 4.6 的 Fast 官方价正好是标准价 2x（$4 / $1 / $12）。
+	for _, model := range []string{"cursor/grok-4.6", "cursor/grok-4.5"} {
+		model := model
+		t.Run(model, func(t *testing.T) {
+			baseCost, err := svc.CalculateCost(model, tokens, 1.0)
+			require.NoError(t, err)
+
+			fastCost, err := svc.CalculateCostWithServiceTier(model, tokens, 1.0, ServiceTierFast)
+			require.NoError(t, err)
+			require.InDelta(t, baseCost.InputCost*2, fastCost.InputCost, 1e-10)
+			require.InDelta(t, baseCost.OutputCost*2, fastCost.OutputCost, 1e-10)
+			require.InDelta(t, baseCost.CacheReadCost*2, fastCost.CacheReadCost, 1e-10)
+
+			standardCost, err := svc.CalculateCostWithServiceTier(model, tokens, 1.0, ServiceTierStandard)
+			require.NoError(t, err)
+			require.InDelta(t, baseCost.TotalCost, standardCost.TotalCost, 1e-10)
+		})
+	}
+}
+
+func TestCalculateCostWithServiceTier_CursorComposerFastIsNotUniformMultiple(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}
+
+	fastCost, err := svc.CalculateCostWithServiceTier("cursor/composer-2.5", tokens, 1.0, ServiceTierFast)
+	require.NoError(t, err)
+	// Composer 2.5 Fast 官方价 $3 / $0.5 / $15：输入 6x、缓存 2.5x、输出 6x，
+	// 均匀乘数会算错，必须整档换价。
+	require.InDelta(t, 3.0, fastCost.InputCost, 1e-9)
+	require.InDelta(t, 15.0, fastCost.OutputCost, 1e-9)
+	require.InDelta(t, 0.5, fastCost.CacheReadCost, 1e-9)
+}
+
+func TestCalculateCostWithServiceTier_FastWithoutExplicitPricingKeepsBasePrice(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200}
+
+	baseCost, err := svc.CalculateCost("claude-sonnet-4", tokens, 1.0)
+	require.NoError(t, err)
+
+	// 未配置 fast 价的模型不能被隐式加价（fast 溢价并不通用）。
+	fastCost, err := svc.CalculateCostWithServiceTier("claude-sonnet-4", tokens, 1.0, ServiceTierFast)
+	require.NoError(t, err)
+	require.InDelta(t, baseCost.TotalCost, fastCost.TotalCost, 1e-10)
+}
+
+func TestCalculateCostWithServiceTier_CursorMaxVariantInheritsFastPricing(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 500}
+
+	baseFast, err := svc.CalculateCostWithServiceTier("cursor/grok-4.6", tokens, 1.0, ServiceTierFast)
+	require.NoError(t, err)
+
+	// -max 变体回退到基础模型条目时要连 fast 档价格一起继承。
+	maxFast, err := svc.CalculateCostWithServiceTier("cursor/grok-4.6-max", tokens, 1.0, ServiceTierFast)
+	require.NoError(t, err)
+	require.InDelta(t, baseFast.TotalCost, maxFast.TotalCost, 1e-10)
+}
+
+func TestGetModelPricing_LiteLLMEntriesInheritCursorFastTierPricing(t *testing.T) {
+	// fast 差价只在 fallback 条目上；若动态价目含裸名会抢占 fallback，
+	// 必须把 fast 字段并进去，否则 fast 档流量被静默按标准价计。
+	svc := NewBillingService(&config.Config{}, &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"grok-4.6": {
+				InputCostPerToken:       2e-6,
+				OutputCostPerToken:      6e-6,
+				CacheReadInputTokenCost: 0.5e-6,
+			},
+		},
+	})
+
+	pricing, err := svc.GetModelPricing("cursor/grok-4.6")
+	require.NoError(t, err)
+	require.InDelta(t, 4e-6, pricing.InputPricePerTokenFast, 1e-12)
+	require.InDelta(t, 12e-6, pricing.OutputPricePerTokenFast, 1e-12)
+	require.InDelta(t, 1e-6, pricing.CacheReadPricePerTokenFast, 1e-12)
+
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 500}
+	fastCost, err := svc.CalculateCostWithServiceTier("cursor/grok-4.6", tokens, 1.0, ServiceTierFast)
+	require.NoError(t, err)
+	baseCost, err := svc.CalculateCost("cursor/grok-4.6", tokens, 1.0)
+	require.NoError(t, err)
+	require.InDelta(t, baseCost.TotalCost*2, fastCost.TotalCost, 1e-10)
+}
+
+func TestCalculateCostWithServiceTier_CursorComposerStandardReachableViaFastFalse(t *testing.T) {
+	// composer 默认 fast=true；标准档只有通过 cursor_options.fast=false 才能
+	// 到达（ResolveModelWithOptions 已放行），价目两档都要有效。
+	svc := newTestBillingService()
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+
+	standardCost, err := svc.CalculateCostWithServiceTier("cursor/composer-2.5", tokens, 1.0, ServiceTierStandard)
+	require.NoError(t, err)
+	require.InDelta(t, 0.5, standardCost.InputCost, 1e-9)
+	require.InDelta(t, 2.5, standardCost.OutputCost, 1e-9)
+}
+
+func TestCalculateCostWithServiceTier_CursorFastStacksWithLongContext(t *testing.T) {
+	svc := newTestBillingService()
+	// 超过 grok-4.6 的 200k 长上下文阈值。
+	tokens := UsageTokens{InputTokens: 300_000, OutputTokens: 1000}
+
+	fastCost, err := svc.CalculateCostWithServiceTier("cursor/grok-4.6", tokens, 1.0, ServiceTierFast)
+	require.NoError(t, err)
+	// fast 档价 $4/M × 长上下文 2x = $8/M。
+	require.InDelta(t, 300_000*8e-6, fastCost.InputCost, 1e-9)
+	require.True(t, fastCost.LongContextBillingApplied)
+}
+
+func TestGetModelPricing_Grok45And46OfficialFallbacks(t *testing.T) {
 	svc := newTestBillingService()
 
-	for _, model := range []string{"grok", "grok-latest", "grok-4.5", "grok-4.5-latest", "grok-build-latest"} {
+	for _, model := range []string{
+		"grok-4.6", "grok-4.6-latest",
+		"grok", "grok-latest", "grok-4.5", "grok-4.5-latest", "grok-build-latest",
+	} {
 		model := model
 		t.Run(model, func(t *testing.T) {
 			pricing, err := svc.GetModelPricing(model)
@@ -1164,6 +1281,12 @@ func TestGetModelPricing_Grok45OfficialFallback(t *testing.T) {
 			require.False(t, pricing.SupportsCacheBreakdown)
 		})
 	}
+
+	grok46, err := svc.GetModelPricing("grok-4.6")
+	require.NoError(t, err)
+	require.Equal(t, 200000, grok46.LongContextInputThreshold)
+	require.InDelta(t, 2.0, grok46.LongContextInputMultiplier, 1e-12)
+	require.InDelta(t, 2.0, grok46.LongContextOutputMultiplier, 1e-12)
 }
 
 func TestGetModelPricing_GrokCatalogFallbacks(t *testing.T) {
@@ -1191,17 +1314,25 @@ func TestGetModelPricing_GrokCatalogFallbacks(t *testing.T) {
 			output:    2.5e-6,
 		},
 		{
-			name: "Grok coding and Composer family",
+			name: "Grok coding family",
 			models: []string{
 				"grok-build",
 				"grok-build-0.1",
 				"grok-composer",
 				"grok-composer-2.5-fast",
-				"composer-2.5",
 			},
 			input:     1e-6,
 			cacheRead: 0.2e-6,
 			output:    2e-6,
+		},
+		{
+			// Cursor 官方牌价（cursor.com/docs/models-and-pricing），
+			// 不再共用 Grok Build 的编码模型价。
+			name:      "Cursor Composer 2.5",
+			models:    []string{"composer-2.5"},
+			input:     0.5e-6,
+			cacheRead: 0.2e-6,
+			output:    2.5e-6,
 		},
 	}
 
