@@ -35,6 +35,9 @@ type CursorGatewayService struct {
 	nativeBridgeMode string
 	// quotaReader 用于按模型判定 Auto / API 两档额度是否还有余量。
 	quotaReader cursorQuotaSnapshotReader
+	// streamKeepaliveInterval 是 Cursor 流式等待期间给下游的 SSE 心跳间隔。
+	// Agent 可能先吐 KV 再静默数十秒；这段时间若不写字节，CLI 会当成 EOF。
+	streamKeepaliveInterval time.Duration
 }
 
 func NewCursorGatewayService(
@@ -44,14 +47,19 @@ func NewCursorGatewayService(
 	cfg *config.Config,
 ) *CursorGatewayService {
 	mode := CursorNativeToolBridgeModeShadow
+	keepalive := defaultCursorStreamKeepalive
 	if cfg != nil {
 		mode = normalizeCursorNativeToolBridgeMode(cfg.Gateway.CursorNativeToolBridgeMode)
+		if cfg.Gateway.StreamKeepaliveInterval > 0 {
+			keepalive = time.Duration(cfg.Gateway.StreamKeepaliveInterval) * time.Second
+		}
 	}
 	return &CursorGatewayService{
-		tokenProvider:    tokenProvider,
-		rateLimitService: rateLimitService,
-		nativeBridgeMode: mode,
-		quotaReader:      quotaReader,
+		tokenProvider:           tokenProvider,
+		rateLimitService:        rateLimitService,
+		nativeBridgeMode:        mode,
+		quotaReader:             quotaReader,
+		streamKeepaliveInterval: keepalive,
 	}
 }
 
@@ -319,41 +327,30 @@ func (s *CursorGatewayService) forwardStreaming(
 	responseID := "chatcmpl-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	created := time.Now().Unix()
 
+	sink := newCursorStreamSink(c)
+	stopKeepalive := sink.startKeepalive(s.cursorStreamKeepaliveInterval(), cursorSSECommentPing)
+	defer stopKeepalive()
+
 	var (
-		headersWritten bool
-		roleWritten    bool
-		firstTokenMs   *int
-		clientGone     bool
+		roleWritten  bool
+		firstTokenMs *int
 	)
 	writeChunk := func(chunk cursor.OpenAIChunk) error {
-		if !headersWritten {
-			c.Header("Content-Type", "text/event-stream")
-			c.Header("Cache-Control", "no-cache")
-			c.Header("Connection", "keep-alive")
-			c.Header("X-Accel-Buffering", "no")
-			c.Status(http.StatusOK)
-			headersWritten = true
-		}
+		var frame string
 		if !roleWritten {
 			rolePayload, err := json.Marshal(cursor.NewOpenAIRoleChunk(responseID, publicModel, created))
 			if err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", rolePayload); err != nil {
-				return err
-			}
-			c.Writer.Flush()
+			frame += fmt.Sprintf("data: %s\n\n", rolePayload)
 			roleWritten = true
 		}
 		payload, err := json.Marshal(chunk)
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", payload); err != nil {
-			return err
-		}
-		c.Writer.Flush()
-		return nil
+		frame += fmt.Sprintf("data: %s\n\n", payload)
+		return sink.writeFrame(frame)
 	}
 
 	toolCallIndex := 0
@@ -366,7 +363,6 @@ func (s *CursorGatewayService) forwardStreaming(
 		// 会一直停在「思考中」，直到（可能永远等不到的）首个正文 token。
 		if delta.Thinking != "" {
 			if err := writeChunk(cursor.NewOpenAIReasoningChunk(responseID, publicModel, created, delta.Thinking)); err != nil {
-				clientGone = true
 				return err
 			}
 		}
@@ -374,21 +370,18 @@ func (s *CursorGatewayService) forwardStreaming(
 			chunk := cursor.NewOpenAIToolCallChunk(responseID, publicModel, created, toolCallIndex, *delta.ToolCall)
 			toolCallIndex++
 			if err := writeChunk(chunk); err != nil {
-				clientGone = true
 				return err
 			}
 		}
 		if delta.Text == "" {
 			return nil
 		}
-		if err := writeChunk(cursor.NewOpenAIChunk(responseID, publicModel, created, delta.Text)); err != nil {
-			clientGone = true
-			return err
-		}
-		return nil
+		return writeChunk(cursor.NewOpenAIChunk(responseID, publicModel, created, delta.Text))
 	})
+	stopKeepalive()
+	headersWritten := sink.headersWrittenLocked()
 	if err != nil {
-		if clientGone {
+		if sink.clientGoneLocked() {
 			return s.buildResult(prompt, "", publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 		}
 		return nil, s.upstreamError(ctx, c, account, publicModel, err, headersWritten)
@@ -420,8 +413,8 @@ func (s *CursorGatewayService) forwardStreaming(
 			return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 		}
 	}
-	if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err == nil {
-		c.Writer.Flush()
+	if err := sink.writeFrame("data: [DONE]\n\n"); err != nil {
+		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}
 	return s.buildResult(
 		prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false,
@@ -544,7 +537,7 @@ func (s *CursorGatewayService) recordAgentIncomplete(
 		UpstreamStatusCode: http.StatusOK,
 		Kind:               "cursor_agent_stall",
 		Stage:              string(GatewayFailureStageInference),
-		Scope:              string(GatewayFailureScopeAccount),
+		Scope:              string(GatewayFailureScopeRequest),
 		Reason:             summary,
 		Message:            msg,
 		Detail:             summary,
@@ -594,6 +587,9 @@ func (s *CursorGatewayService) buildResult(
 func (s *CursorGatewayService) upstreamError(
 	ctx context.Context, c *gin.Context, account *Account, model string, err error, headersWritten bool,
 ) error {
+	if isCursorTurnIncomplete(err) {
+		return s.writeCursorIncompleteChat(c, err, headersWritten)
+	}
 	failure := s.prepareCursorUpstreamFailure(ctx, c, account, model, err)
 	body := cursorGatewayErrorBody(failure.status, failure.message)
 	if headersWritten {
@@ -720,12 +716,58 @@ func cursorGatewayErrorType(status int) string {
 	return errType
 }
 
+// cursorTurnIncompleteError 表示这一轮 Agent 没有正常收尾（看门狗/未回执）。
+// 这是请求结果，不是账号凭证坏了：不得走 UpstreamFailoverError，否则会把
+// 唯一可调度账号排除掉，客户端看到假的 "All available accounts exhausted"。
+type cursorTurnIncompleteError struct {
+	summary string
+}
+
+func (e *cursorTurnIncompleteError) Error() string {
+	if e == nil {
+		return "cursor agent turn incomplete"
+	}
+	return "cursor agent turn incomplete: " + e.summary
+}
+
 func cursorIncompleteTurnError(result *cursor.AgentTurnResult) error {
 	summary := "unknown"
 	if result != nil && result.IncompleteSummary() != "" {
 		summary = result.IncompleteSummary()
 	}
-	return fmt.Errorf("cursor agent turn incomplete: %s", summary)
+	return &cursorTurnIncompleteError{summary: summary}
+}
+
+func isCursorTurnIncomplete(err error) bool {
+	var incomplete *cursorTurnIncompleteError
+	return errors.As(err, &incomplete)
+}
+
+func cursorIncompleteClientMessage(err error) string {
+	if err == nil {
+		return "Cursor agent turn incomplete"
+	}
+	var incomplete *cursorTurnIncompleteError
+	if errors.As(err, &incomplete) && incomplete != nil {
+		return "Cursor agent turn incomplete: " + incomplete.summary
+	}
+	return err.Error()
+}
+
+func (s *CursorGatewayService) writeCursorIncompleteChat(c *gin.Context, err error, headersWritten bool) error {
+	message := cursorIncompleteClientMessage(err)
+	if c == nil || c.Writer == nil {
+		return err
+	}
+	if headersWritten {
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\ndata: [DONE]\n\n", cursorGatewayErrorBody(http.StatusBadGateway, message))
+		c.Writer.Flush()
+		MarkResponseCommitted(c)
+		return err
+	}
+	c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "api_error", "message": message}})
+	MarkResponseCommitted(c)
+	return err
 }
 
 // NewTestAgentOptions 为后台「测试连接」构造 Agent 参数。

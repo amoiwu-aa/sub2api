@@ -211,36 +211,28 @@ func (s *CursorGatewayService) forwardResponsesStreaming(
 	startTime time.Time,
 	includeUsage bool,
 ) (*ForwardResult, error) {
-	var (
-		headersWritten bool
-		clientGone     bool
-		firstTokenMs   *int
-	)
+	sink := newCursorStreamSink(c)
+	stopKeepalive := sink.startKeepalive(s.cursorStreamKeepaliveInterval(), cursorSSECommentPing)
+	defer stopKeepalive()
+	var firstTokenMs *int
+
 	writeEvents := func(events []apicompat.ResponsesStreamEvent) error {
-		if len(events) == 0 || clientGone {
+		if len(events) == 0 || sink.clientGoneLocked() {
 			return nil
 		}
-		if !headersWritten {
-			c.Header("Content-Type", "text/event-stream")
-			c.Header("Cache-Control", "no-cache")
-			c.Header("Connection", "keep-alive")
-			c.Header("X-Accel-Buffering", "no")
-			c.Status(http.StatusOK)
-			headersWritten = true
-		}
+		var frame string
 		for _, event := range events {
 			sse, err := apicompat.ResponsesEventToSSE(event)
 			if err != nil {
 				// 单条事件序列化失败不该毁掉整条流：跳过继续。
 				continue
 			}
-			if _, err := fmt.Fprint(c.Writer, sse); err != nil {
-				clientGone = true
-				return err
-			}
+			frame += sse
 		}
-		c.Writer.Flush()
-		return nil
+		if frame == "" {
+			return nil
+		}
+		return sink.writeFrame(frame)
 	}
 
 	result, err := cursor.RunAgentTurn(ctx, options, input, func(delta cursor.AgentDelta) error {
@@ -254,8 +246,10 @@ func (s *CursorGatewayService) forwardResponsesStreaming(
 		}
 		return writeEvents(apicompat.ChatCompletionsChunkToResponsesEvents(chunk, bridge.state))
 	})
+	stopKeepalive()
+	headersWritten := sink.headersWrittenLocked()
 	if err != nil {
-		if clientGone {
+		if sink.clientGoneLocked() {
 			return s.buildResult(prompt, "", publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 		}
 		return nil, s.upstreamResponsesError(ctx, c, account, publicModel, err, headersWritten, bridge.state)
@@ -277,10 +271,8 @@ func (s *CursorGatewayService) forwardResponsesStreaming(
 	if err := writeEvents(apicompat.FinalizeChatCompletionsResponsesStream(bridge.state)); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}
-	if !clientGone {
-		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err == nil {
-			c.Writer.Flush()
-		}
+	if err := sink.writeFrame("data: [DONE]\n\n"); err != nil {
+		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}
 	return s.buildResult(
 		prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false,
@@ -384,6 +376,9 @@ func (s *CursorGatewayService) upstreamResponsesError(
 	headersWritten bool,
 	state *apicompat.ChatCompletionsToResponsesStreamState,
 ) error {
+	if isCursorTurnIncomplete(err) {
+		return s.writeCursorIncompleteResponses(c, err, headersWritten, model, state)
+	}
 	failure := s.prepareCursorUpstreamFailure(ctx, c, account, model, err)
 	if !headersWritten {
 		return &UpstreamFailoverError{
@@ -392,6 +387,37 @@ func (s *CursorGatewayService) upstreamResponsesError(
 		}
 	}
 
+	return s.writeResponsesFailedSSE(c, model, failure.status, failure.message, state)
+}
+
+func (s *CursorGatewayService) writeCursorIncompleteResponses(
+	c *gin.Context,
+	err error,
+	headersWritten bool,
+	model string,
+	state *apicompat.ChatCompletionsToResponsesStreamState,
+) error {
+	message := cursorIncompleteClientMessage(err)
+	if c == nil || c.Writer == nil {
+		return err
+	}
+	if headersWritten {
+		_ = s.writeResponsesFailedSSE(c, model, http.StatusBadGateway, message, state)
+		MarkResponseCommitted(c)
+		return err
+	}
+	c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "api_error", "message": message}})
+	MarkResponseCommitted(c)
+	return err
+}
+
+func (s *CursorGatewayService) writeResponsesFailedSSE(
+	c *gin.Context,
+	model string,
+	status int,
+	message string,
+	state *apicompat.ChatCompletionsToResponsesStreamState,
+) error {
 	responseID := ""
 	responseModel := model
 	sequence := 0
@@ -411,17 +437,17 @@ func (s *CursorGatewayService) upstreamResponsesError(
 			Status: "failed",
 			Output: []apicompat.ResponsesOutput{},
 			Error: &apicompat.ResponsesError{
-				Code:    cursorGatewayErrorType(failure.status),
-				Message: failure.message,
+				Code:    cursorGatewayErrorType(status),
+				Message: message,
 			},
 		},
 		SequenceNumber: sequence,
 	}
 	sse, marshalErr := apicompat.ResponsesEventToSSE(event)
-	if marshalErr == nil {
+	if marshalErr == nil && c != nil && c.Writer != nil {
 		_, _ = fmt.Fprint(c.Writer, sse)
 		_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
 		c.Writer.Flush()
 	}
-	return errors.New(failure.message)
+	return errors.New(message)
 }

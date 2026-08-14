@@ -682,7 +682,9 @@ docker compose -f docker-compose.yml -f .ringstar-image.override.yml up -d --for
 | 现象 | 多半是 |
 |---|---|
 | 响应 200 但正文极短、耗时接近 120 秒 | 模型用了内置工具，看门狗收的尾。检查 `tool_policy` 有没有发出去 |
-| 日志出现 `cursor.agent_turn_incomplete` 且 `exec_handled>0` | 同上。`summary` 里能看到 stub 回执了几次 |
+| 客户端 EOF / 499，同时看板出现 502 `All available accounts exhausted` | 旧行为：stall 被当成账号级 502 去换号。现网关把 incomplete 当成本轮失败（不排除账号），并在等待上游期间发 SSE 心跳；流已开始时补协议终态，不再空关连接 |
+| 日志 `cursor.agent_turn_incomplete` 且 `summary` 含 `stalled;no_turn_ended;kv=N` | Cursor 只吐了 KV 后静默到看门狗。这是该轮没结束，不是账号坏了或并发用尽 |
+| 日志出现 `cursor.agent_turn_incomplete` 且 `exec_handled>0` | 模型用了内置工具。`summary` 里能看到 stub 回执了几次 |
 | `summary` 含 `tool_call_collection_timed_out` / `conflicting_tool_calls` | 并行窗口触顶或同 ID 不同参数；该轮必须 incomplete，不是成功 |
 | Claude Code 流里只有 OpenAI 风格 `data:{"error"}` | 旧网关；现网关应发 `event: error`。Codex 应对 `response.failed` |
 | 客户端报「未知工具」 | 工具名前缀没剥干净，检查 `NormalizeToolName` |

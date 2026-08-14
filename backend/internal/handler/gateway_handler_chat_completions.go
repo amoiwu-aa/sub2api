@@ -387,25 +387,30 @@ func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int
 
 // handleCCFailoverExhausted writes a failover-exhausted error in CC format.
 func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
-	if streamStarted {
-		return
-	}
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
-	if lastErr != nil && lastErr.IsCredentialFailure() {
-		status, message := credentialFailoverClientResponse(lastErr)
-		h.chatCompletionsErrorResponse(c, status, "server_error", message)
-		return
-	}
+
 	statusCode := http.StatusBadGateway
-	if lastErr != nil && lastErr.StatusCode > 0 {
-		statusCode = lastErr.StatusCode
+	errType := "server_error"
+	message := "All available accounts exhausted"
+	if lastErr != nil && lastErr.IsCredentialFailure() {
+		statusCode, message = credentialFailoverClientResponse(lastErr)
+	} else {
+		if lastErr != nil && lastErr.StatusCode > 0 {
+			statusCode = lastErr.StatusCode
+		}
+		if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
+			service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
+			statusCode = http.StatusBadGateway
+			errType = "upstream_error"
+			message = service.OpenAISilentRefusalClientMessage()
+		}
 	}
-	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
-		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
-		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
+
+	if streamStarted {
+		h.handleStreamingAwareError(c, statusCode, errType, message, true)
 		return
 	}
-	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+	h.chatCompletionsErrorResponse(c, statusCode, errType, message)
 }

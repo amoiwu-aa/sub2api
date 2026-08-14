@@ -135,32 +135,17 @@ func normalizeAnthropicCursorEffort(effort *string) *string {
 // content_block_stop，索引连续。文本与 tool_use 交错时最容易出错，
 // 所以把这套记账收在一个地方。
 type anthropicStreamWriter struct {
-	c              *gin.Context
-	headersWritten bool
-	textOpen       bool
-	blockIndex     int
-	clientGone     bool
+	sink       *cursorStreamSink
+	textOpen   bool
+	blockIndex int
 }
 
 func (w *anthropicStreamWriter) write(event cursor.AnthropicEvent) error {
-	if !w.headersWritten {
-		w.c.Header("Content-Type", "text/event-stream")
-		w.c.Header("Cache-Control", "no-cache")
-		w.c.Header("Connection", "keep-alive")
-		w.c.Header("X-Accel-Buffering", "no")
-		w.c.Status(http.StatusOK)
-		w.headersWritten = true
-	}
 	payload, err := json.Marshal(event.Data)
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w.c.Writer, "event: %s\ndata: %s\n\n", event.Event, payload); err != nil {
-		w.clientGone = true
-		return err
-	}
-	w.c.Writer.Flush()
-	return nil
+	return w.sink.writeFrame(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Event, payload))
 }
 
 func (w *anthropicStreamWriter) openText() error {
@@ -220,7 +205,10 @@ func (s *CursorGatewayService) forwardMessagesStreaming(
 	startTime time.Time,
 ) (*ForwardResult, error) {
 	messageID := "msg_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	writer := &anthropicStreamWriter{c: c}
+	sink := newCursorStreamSink(c)
+	stopKeepalive := sink.startKeepalive(s.cursorStreamKeepaliveInterval(), cursorSSEAnthropicPing)
+	defer stopKeepalive()
+	writer := &anthropicStreamWriter{sink: sink}
 	promptTokens := cursor.EstimateAgentInputTokens(prompt, cursorAgentUsageDetails(input, nil))
 	messageStarted := false
 	ensureMessageStarted := func() error {
@@ -256,20 +244,22 @@ func (s *CursorGatewayService) forwardMessagesStreaming(
 		}
 		return writer.writeText(delta.Text)
 	})
+	stopKeepalive()
+	headersWritten := sink.headersWrittenLocked()
 	if err != nil {
-		if writer.clientGone {
+		if sink.clientGoneLocked() {
 			return s.buildResult(prompt, "", publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 		}
-		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel, err, writer.headersWritten)
+		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel, err, headersWritten)
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
 	if result.Incomplete() {
 		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel,
-			cursorIncompleteTurnError(result), writer.headersWritten)
+			cursorIncompleteTurnError(result), headersWritten)
 	}
 
 	if err := ensureMessageStarted(); err != nil {
-		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel, err, writer.headersWritten)
+		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel, err, headersWritten)
 	}
 	stopReason := "end_turn"
 	if result.EndedWithToolCalls() {
@@ -364,6 +354,9 @@ func (s *CursorGatewayService) upstreamAnthropicError(
 	err error,
 	headersWritten bool,
 ) error {
+	if isCursorTurnIncomplete(err) {
+		return s.writeCursorIncompleteAnthropic(c, err, headersWritten)
+	}
 	failure := s.prepareCursorUpstreamFailure(ctx, c, account, model, err)
 	body, marshalErr := json.Marshal(gin.H{
 		"type": "error",
@@ -381,4 +374,33 @@ func (s *CursorGatewayService) upstreamAnthropicError(
 		return errors.New(failure.message)
 	}
 	return &UpstreamFailoverError{StatusCode: failure.status, ResponseBody: body}
+}
+
+func (s *CursorGatewayService) writeCursorIncompleteAnthropic(c *gin.Context, err error, headersWritten bool) error {
+	message := cursorIncompleteClientMessage(err)
+	if c == nil || c.Writer == nil {
+		return err
+	}
+	body, marshalErr := json.Marshal(gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    "api_error",
+			"message": message,
+		},
+	})
+	if marshalErr != nil {
+		body = []byte(`{"type":"error","error":{"type":"api_error","message":"Cursor agent turn incomplete"}}`)
+	}
+	if headersWritten {
+		_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", body)
+		c.Writer.Flush()
+		MarkResponseCommitted(c)
+		return err
+	}
+	c.JSON(http.StatusBadGateway, gin.H{
+		"type":  "error",
+		"error": gin.H{"type": "api_error", "message": message},
+	})
+	MarkResponseCommitted(c)
+	return err
 }

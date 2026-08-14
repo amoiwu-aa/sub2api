@@ -372,25 +372,31 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
-	if streamStarted {
-		return // Can't write error after stream started
-	}
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
 	}
-	if lastErr != nil && lastErr.IsCredentialFailure() {
-		status, message := credentialFailoverClientResponse(lastErr)
-		h.responsesErrorResponse(c, status, "server_error", message)
-		return
-	}
+
 	statusCode := http.StatusBadGateway
-	if lastErr != nil && lastErr.StatusCode > 0 {
-		statusCode = lastErr.StatusCode
+	errType := "server_error"
+	message := "All available accounts exhausted"
+	if lastErr != nil && lastErr.IsCredentialFailure() {
+		statusCode, message = credentialFailoverClientResponse(lastErr)
+	} else {
+		if lastErr != nil && lastErr.StatusCode > 0 {
+			statusCode = lastErr.StatusCode
+		}
+		if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
+			service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
+			statusCode = http.StatusBadGateway
+			errType = "upstream_error"
+			message = service.OpenAISilentRefusalClientMessage()
+		}
 	}
-	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
-		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
-		h.responsesErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
+
+	if streamStarted {
+		// 流已经开出去（含心跳 ping）后不能静默 return，否则客户端只会看到 EOF。
+		h.handleStreamingAwareError(c, statusCode, errType, message, true)
 		return
 	}
-	h.responsesErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+	h.responsesErrorResponse(c, statusCode, errType, message)
 }

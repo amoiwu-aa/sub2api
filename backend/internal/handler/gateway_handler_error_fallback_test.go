@@ -182,3 +182,42 @@ func TestGatewayForwardErrorAlreadyCommunicated(t *testing.T) {
 		require.False(t, reported)
 	})
 }
+
+func TestHandleResponsesFailoverExhaustedWritesFailedSSEWhenStreamStarted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString(": ping\n\n")
+
+	h := &GatewayHandler{}
+	h.handleResponsesFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode: http.StatusBadGateway,
+	}, true)
+
+	body := w.Body.String()
+	assert.Contains(t, body, ": ping\n\n")
+	assert.Contains(t, body, "event: response.failed\n")
+	assert.Contains(t, body, `"type":"response.failed"`)
+	assert.Contains(t, body, "All available accounts exhausted")
+}
+
+func TestHandleCCFailoverExhaustedWritesSSEWhenStreamStarted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString(": ping\n\n")
+
+	h := &GatewayHandler{}
+	h.handleCCFailoverExhausted(c, &service.UpstreamFailoverError{
+		StatusCode: http.StatusBadGateway,
+	}, true)
+
+	body := w.Body.String()
+	assert.Contains(t, body, ": ping\n\n")
+	assert.Contains(t, body, `data: {"type":"error"`)
+	assert.Contains(t, body, "All available accounts exhausted")
+}
