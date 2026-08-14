@@ -179,6 +179,15 @@ func openSpikeSession(t *testing.T, ctx context.Context, prompt string) *spikeSe
 	return openSpikeSessionWithID(t, ctx, prompt, "spike-"+strconv.FormatInt(time.Now().UnixNano(), 36))
 }
 
+// spikeModelID 决定这一轮打哪个模型。默认 Auto；SPIKE_MODEL 可指定裸名
+// （如 grok-4.6），用于把取证流量打到还有额度的那条池子上。
+func spikeModelID() string {
+	if raw := strings.TrimSpace(os.Getenv("SPIKE_MODEL")); raw != "" {
+		return raw
+	}
+	return AutoModelID
+}
+
 func openSpikeSessionWithID(t *testing.T, ctx context.Context, prompt, conversationID string) *spikeSession {
 	t.Helper()
 
@@ -187,7 +196,7 @@ func openSpikeSessionWithID(t *testing.T, ctx context.Context, prompt, conversat
 		Text:           prompt,
 		ConversationID: conversationID,
 		RequestContext: EncodeRequestContext(DefaultRequestContextEnv("spike")),
-		ModelID:        AutoModelID,
+		ModelID:        spikeModelID(),
 		ModelParams:    []ModelParam{},
 	})
 	if err != nil {
@@ -1047,4 +1056,453 @@ func TestLiveSpikeNoExecReply(t *testing.T) {
 	t.Logf("---- 结论 ----")
 	t.Logf("首个 exec 在 %.1fs，最后一帧在 %.1fs，静默 %.1fs 内上游未主动断流",
 		firstExecAt.Seconds(), last.At.Seconds(), (last.At - firstExecAt).Seconds())
+}
+
+// ---------------------------------------------------------------------------
+// 内置工具字段号取证。
+//
+// execArgFields 只覆盖了当初逆向时撞见过的工具。Cursor 自己还有文件名匹配
+// （glob）、字符串替换编辑、todo 一类内置工具，字段号至今未知，所以原生工具桥
+// 桥不了它们——模型一调就只能拿到 stub，长上下文里就是那种「说调了工具却没
+// 反应」。这是当前最大的缺口。
+//
+// 这个用例逐个抛出只有特定内置工具做得到的任务，把每一帧 exec 的参数字段号
+// 连同子字段完整 dump 出来。认不出的字段号会被显式标注，那就是要补进
+// execArgFields 的新工具；子字段布局则决定 parseNativeExecArgs 怎么取值。
+//
+//	CURSOR_ACCESS_TOKEN=<jwt> ./cursor-spike \
+//	    -test.run TestLiveSpikeUnknownExecFieldForensics -test.v -test.timeout 30m
+//
+// 取证时把 SPIKE_CLIP 设大（如 6000），否则长参数会被截断。
+// ---------------------------------------------------------------------------
+
+type execFieldProbe struct {
+	Name   string
+	Prompt string
+}
+
+// unknownExecProbes 的措辞都在把模型往某一个内置工具上赶：只要它改用 shell
+// 兜底，这一轮就白跑，所以每条都明确点名禁用 shell 与已知工具。
+func unknownExecProbes() []execFieldProbe {
+	return []execFieldProbe{
+		{
+			Name: "glob",
+			Prompt: "用你的文件名匹配工具（glob / file search）列出当前项目里所有 *.md 文件。" +
+				"不要用终端命令，不要用 grep 搜内容，只用文件名匹配那一个工具。",
+		},
+		{
+			Name: "edit",
+			Prompt: "把 README.md 里的第一处 `foo` 原地替换成 `bar`。" +
+				"用你的字符串替换编辑工具，不要整文件重写，不要用终端命令。",
+		},
+		{
+			Name: "todo",
+			Prompt: "先用你的待办清单工具把接下来要做的三件事登记进去，再停下来等我确认。" +
+				"只登记，不要真的动手，也不要用终端命令。",
+		},
+		{
+			Name: "codebase_search",
+			Prompt: "用你的语义代码检索工具找出这个项目里负责鉴权的代码在哪。" +
+				"不要用 grep，不要用终端命令，只用语义检索那一个工具。",
+		},
+	}
+}
+
+// logExecArgFields dump 一帧 exec 的全部参数字段，并把新见到的字段号记进 seen。
+func logExecArgFields(t *testing.T, probe string, raw []byte, seen map[int]string) {
+	root, err := ReadFields(raw)
+	if err != nil {
+		t.Logf("[%s] 帧解析失败: %v", probe, err)
+		return
+	}
+	for _, field := range root {
+		if field.Number != 2 || field.WireType != wireBytes {
+			continue
+		}
+		inner, err := ReadFields(field.Bytes)
+		if err != nil {
+			t.Logf("[%s] exec_server_message 解析失败: %v", probe, err)
+			continue
+		}
+		for _, sub := range inner {
+			// 1=id 15=exec_id 19=trace 11=mcp_args，都不是工具参数。
+			switch sub.Number {
+			case 1, 15, 19, mcpArgsField:
+				continue
+			}
+			if sub.WireType != wireBytes {
+				continue
+			}
+			kind, known := execArgFields[sub.Number]
+			if !known {
+				kind = "??? 未知，需要补进 execArgFields"
+			}
+			if _, dup := seen[sub.Number]; !dup {
+				seen[sub.Number] = kind
+			}
+			t.Logf("[%s] arg_field=%d %s", probe, sub.Number, kind)
+			t.Logf("%s", dumpProto(sub.Bytes, "            ", 0))
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// read 回执形状扫描。
+//
+// StrReplace 逆不出来的卡点在这里：模型要改文件会先发 read 取内容，而当前
+// stub 的 read 回执结构上游不认——实测模型拿到后会去跑 `file` / `xxd` 判断
+// 是不是二进制，最后回报「binary data」。read 回不对，编辑类工具就永远走不到
+// 下发那一步。
+//
+// 判定很直接：让模型把读到的内容原样贴出来，回执里塞一个不可能重名的标记。
+// 正文里出现标记 = 这个形状被上游正确解读了。
+// ---------------------------------------------------------------------------
+
+const spikeReadMarker = "RINGSTAR-READ-OK-7F3A2B"
+
+// spikeReadFileBody 是回执里假装的文件内容。带标记便于判定，也带一行
+// `foo` 方便后续直接接上 StrReplace 探测。
+const spikeReadFileBody = "# " + spikeReadMarker + "\n" +
+	"def handler():\n" +
+	"    value = foo\n" +
+	"    return value\n"
+
+type readReplyVariant struct {
+	Name  string
+	Note  string
+	Build func(exec *ExecRequest) [][]byte
+}
+
+// spikeReadReplyVariants 穷举 read 结果可能的 protobuf 形状。
+// 参照已知可用的 shell 回执（field 2 → {1:{1:stdout,2:stderr,3:exit}}）外推。
+func spikeReadReplyVariants() []readReplyVariant {
+	body := spikeReadFileBody
+	at := func(exec *ExecRequest, inner []byte) [][]byte {
+		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum, inner)}
+	}
+	return []readReplyVariant{
+		{
+			Name: "current-nested-1-1",
+			Note: "现有实现：{1:{1:content}}",
+			Build: func(exec *ExecRequest) [][]byte {
+				return at(exec, EncodeBytesField(1, EncodeStringField(1, body)))
+			},
+		},
+		{
+			Name: "flat-1",
+			Note: "{1:content} 直接放字符串",
+			Build: func(exec *ExecRequest) [][]byte {
+				return at(exec, EncodeStringField(1, body))
+			},
+		},
+		{
+			Name: "nested-1-2",
+			Note: "{1:{2:content}}",
+			Build: func(exec *ExecRequest) [][]byte {
+				return at(exec, EncodeBytesField(1, EncodeStringField(2, body)))
+			},
+		},
+		{
+			Name: "result-under-2",
+			Note: "{2:{1:content}}，与 shell 的成功位一致",
+			Build: func(exec *ExecRequest) [][]byte {
+				return at(exec, EncodeBytesField(2, EncodeStringField(1, body)))
+			},
+		},
+		{
+			Name: "shell-like-1-1-2-3",
+			Note: "照抄 shell 成功回执：{1:{1:content,2:\"\",3:0}}",
+			Build: func(exec *ExecRequest) [][]byte {
+				return at(exec, EncodeBytesField(1, concat(
+					EncodeStringField(1, body),
+					EncodeStringField(2, ""),
+					EncodeVarintField(3, 0),
+				)))
+			},
+		},
+		{
+			Name: "with-line-count",
+			Note: "{1:{1:content,2:行数}}",
+			Build: func(exec *ExecRequest) [][]byte {
+				lines := uint64(strings.Count(body, "\n"))
+				return at(exec, EncodeBytesField(1, concat(
+					EncodeStringField(1, body),
+					EncodeVarintField(2, lines),
+				)))
+			},
+		},
+		{
+			Name: "double-nested",
+			Note: "{1:{1:{1:content}}} 多一层包装",
+			Build: func(exec *ExecRequest) [][]byte {
+				return at(exec, EncodeBytesField(1, EncodeBytesField(1, EncodeStringField(1, body))))
+			},
+		},
+	}
+}
+
+func TestLiveSpikeReadReplyShapes(t *testing.T) {
+	prompt := "读取 /home/cursor/app.py，然后把你读到的内容一字不改地原样贴出来。" +
+		"只贴内容本身，不要加解释、不要加代码块标记。不要调用除 Read 以外的任何工具。"
+
+	type outcome struct {
+		name   string
+		note   string
+		execs  int
+		hit    bool
+		sample string
+	}
+	var results []outcome
+
+	for _, variant := range spikeReadReplyVariants() {
+		t.Run(variant.Name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+			defer cancel()
+
+			execs := 0
+			session := openSpikeSession(t, ctx, prompt)
+			session.pump(90*time.Second, false, func(message ServerMessage, _ []byte) bool {
+				switch message.Kind {
+				case KindExec:
+					execs++
+					var replies [][]byte
+					if message.Exec.Kind == "read" || message.Exec.Kind == "redacted_read" {
+						replies = variant.Build(message.Exec)
+					} else {
+						replies = StubExecReplies(message.Exec)
+					}
+					for _, reply := range replies {
+						_ = session.stream.send(reply)
+					}
+				case KindTurnEnded:
+					return true
+				}
+				return false
+			})
+
+			text := session.text()
+			hit := strings.Contains(text, spikeReadMarker)
+			results = append(results, outcome{
+				name: variant.Name, note: variant.Note,
+				execs: execs, hit: hit, sample: clip(text, 220),
+			})
+			t.Logf("[%s] %s | read帧=%d 命中标记=%v", variant.Name, variant.Note, execs, hit)
+			t.Logf("    正文=%q", clip(text, 400))
+		})
+	}
+
+	t.Logf("---- read 回执形状扫描结果 ----")
+	for _, r := range results {
+		status := "✗"
+		if r.hit {
+			status = "✓ 上游认这个形状"
+		}
+		t.Logf("  %-22s execs=%d %s  (%s)", r.name, r.execs, status, r.note)
+	}
+}
+
+// TestLiveSpikeNamedToolForensics 点名让模型调用某个内置工具，抓它的 exec
+// 字段号与入参布局。
+//
+// 用任务去"钓"工具不可靠：模型会挑它觉得顺手的路（要编辑就先 read，read 拿
+// 不到内容就退回 shell）。直接点名、并把它会绕开的路堵死，命中率高得多。
+//
+// 已知模型侧的工具名与 wire 上的 exec 字段不是一一对应：Glob 在线上就是
+// 一次 pattern 为空、带 glob 与 output_mode=files_with_matches 的 grep(5)。
+// 所以这里要的是每个工具名实际落到哪个字段号上。
+func TestLiveSpikeNamedToolForensics(t *testing.T) {
+	probes := []execFieldProbe{
+		{
+			Name: "StrReplace",
+			Prompt: "文件 /home/cursor/app.py 的内容你已经知道了，就是下面这些：\n\n" +
+				spikeEditFileContent +
+				"\n这个环境里 Read 工具是坏的（只会返回乱码），Shell 也不可用，都不要调用。" +
+				"直接调用 StrReplace，把这个文件里的 `foo` 替换成 `bar`。现在就调。",
+		},
+		{
+			Name: "TodoWrite",
+			Prompt: "直接调用 TodoWrite 工具，建三条待办：写测试、修 bug、发版。" +
+				"必须真的调用工具，不要只用文字描述，也不要调用别的工具。",
+		},
+		{
+			Name: "ReadLints",
+			Prompt: "直接调用 ReadLints 工具，检查 /home/cursor/app.py 的诊断信息。" +
+				"不要调用 Read 或 Shell，现在就调 ReadLints。",
+		},
+		{
+			Name: "Glob",
+			Prompt: "直接调用 Glob 工具，匹配 **/*.py。不要调用别的工具。",
+		},
+	}
+
+	seen := map[int]string{}
+	for _, probe := range probes {
+		t.Run(probe.Name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+			defer cancel()
+
+			session := openSpikeSession(t, ctx, probe.Prompt)
+			session.pump(100*time.Second, false, func(message ServerMessage, raw []byte) bool {
+				switch message.Kind {
+				case KindExec, KindToolCall:
+					logExecArgFields(t, probe.Name, raw, seen)
+					for _, reply := range StubExecReplies(message.Exec) {
+						_ = session.stream.send(reply)
+					}
+				case KindTurnEnded:
+					return true
+				}
+				return false
+			})
+			t.Logf("[%s] 正文=%q", probe.Name, clip(session.text(), 300))
+		})
+	}
+
+	t.Logf("---- 点名调用观察到的字段号 ----")
+	for number := 1; number <= 64; number++ {
+		if kind, ok := seen[number]; ok {
+			t.Logf("  %2d  %s", number, kind)
+		}
+	}
+}
+
+// TestLiveSpikeToolInventory 直接问模型它这一侧有哪些内置工具。
+//
+// 比逐个用任务去"钓"工具便宜得多，也更可靠：codebase_search 那轮模型已经
+// 主动报出过"工具列表里没有 SemanticSearch / codebase_search"，说明它对自己
+// 的工具清单有准确认知。清单决定了原生工具桥的理论上限。
+func TestLiveSpikeToolInventory(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	prompt := "逐行列出你当前可用的全部内置工具的准确名称，一行一个，不要加解释。" +
+		"特别说明这几类有没有：文件名匹配(glob)、字符串替换编辑(search_replace/edit)、" +
+		"待办清单(todo_write)、语义代码检索(codebase_search)、诊断(diagnostics)、" +
+		"网页抓取(fetch)、删除文件(delete)。不要调用任何工具，直接回答。"
+
+	session := openSpikeSession(t, ctx, prompt)
+	session.pump(150*time.Second, false, func(message ServerMessage, _ []byte) bool {
+		if message.Kind == KindExec {
+			// 让它别真去调；回个 stub 把这一轮收掉。
+			for _, reply := range StubExecReplies(message.Exec) {
+				_ = session.stream.send(reply)
+			}
+		}
+		return message.Kind == KindTurnEnded
+	})
+
+	t.Logf("---- 模型自述的内置工具清单 ----\n%s", session.text())
+}
+
+// spikeReadReplyWithContent 用真实文件内容回一次 read，取代「文件访问已禁用」
+// 的 stub。
+//
+// 编辑类工具测不出来的根因是模型压根走不到那一步：沙箱里没有文件，read 又
+// 只会拿到一句「已禁用」，模型只能放弃。喂一份看起来正常的文件内容，它才会
+// 接着发起字符串替换。
+// 形状 {1:{2:content}} 由 TestLiveSpikeReadReplyShapes 实测确定：只有它能让
+// 模型拿到内容并原样复述，其余六种都会被判成 binary data。
+func spikeReadReplyWithContent(exec *ExecRequest, content string) [][]byte {
+	return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
+		EncodeBytesField(1, EncodeStringField(2, content)))}
+}
+
+const spikeEditFileContent = "def handler():\n" +
+	"    value = foo\n" +
+	"    return value\n"
+
+// TestLiveSpikeEditExecForensics 专门抓字符串替换编辑的字段号。
+//
+// 与 TestLiveSpikeUnknownExecFieldForensics 的区别只在于回执：read 会拿到
+// 一份含 `foo` 的真实内容，让模型相信文件存在并接着改它。
+func TestLiveSpikeEditExecForensics(t *testing.T) {
+	observe := 120 * time.Second
+	if raw := strings.TrimSpace(os.Getenv("SPIKE_VARIANT_OBSERVE")); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil {
+			observe = time.Duration(seconds) * time.Second
+		}
+	}
+
+	prompt := "文件 /home/cursor/app.py 的内容是：\n\n" + spikeEditFileContent +
+		"\n请把其中的 `foo` 原地替换成 `bar`。" +
+		"用你的字符串替换编辑工具直接改这一处，不要整文件重写，不要用终端命令。"
+
+	ctx, cancel := context.WithTimeout(context.Background(), observe+5*time.Minute)
+	defer cancel()
+
+	seen := map[int]string{}
+	session := openSpikeSession(t, ctx, prompt)
+	session.pump(observe, false, func(message ServerMessage, raw []byte) bool {
+		switch message.Kind {
+		case KindExec, KindToolCall:
+			logExecArgFields(t, "edit", raw, seen)
+			var replies [][]byte
+			switch message.Exec.Kind {
+			case "read", "redacted_read":
+				replies = spikeReadReplyWithContent(message.Exec, spikeEditFileContent)
+			default:
+				replies = StubExecReplies(message.Exec)
+			}
+			for _, reply := range replies {
+				_ = session.stream.send(reply)
+			}
+		case KindTurnEnded:
+			return true
+		}
+		return false
+	})
+
+	t.Logf("---- 观察到的 exec 参数字段号 ----")
+	for number := 1; number <= 64; number++ {
+		if kind, ok := seen[number]; ok {
+			t.Logf("  %2d  %s", number, kind)
+		}
+	}
+	t.Logf("正文=%q", clip(session.text(), 600))
+}
+
+func TestLiveSpikeUnknownExecFieldForensics(t *testing.T) {
+	observe := 90 * time.Second
+	if raw := strings.TrimSpace(os.Getenv("SPIKE_VARIANT_OBSERVE")); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil {
+			observe = time.Duration(seconds) * time.Second
+		}
+	}
+
+	seen := map[int]string{}
+	for _, probe := range unknownExecProbes() {
+		t.Run(probe.Name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), observe+3*time.Minute)
+			defer cancel()
+
+			session := openSpikeSession(t, ctx, probe.Prompt)
+			session.pump(observe, false, func(message ServerMessage, raw []byte) bool {
+				switch message.Kind {
+				case KindExec, KindToolCall:
+					logExecArgFields(t, probe.Name, raw, seen)
+					// 回执让这一轮接着跑：一个任务里模型常常连着调好几个
+					// 内置工具，一次会话能多捞几个字段号。
+					for _, reply := range StubExecReplies(message.Exec) {
+						_ = session.stream.send(reply)
+					}
+				case KindTurnEnded:
+					return true
+				}
+				return false
+			})
+			t.Logf("[%s] 正文=%q", probe.Name, clip(session.text(), 400))
+		})
+	}
+
+	t.Logf("---- 本次观察到的 exec 参数字段号 ----")
+	if len(seen) == 0 {
+		t.Logf("一个 exec 都没触发：多半是模型改用了别的工具或直接答了，换措辞重试")
+		return
+	}
+	// 字段号上限是 protobuf 的字段号，遍历一遍比引入 sort 更省事。
+	for number := 1; number <= 64; number++ {
+		if kind, ok := seen[number]; ok {
+			t.Logf("  %2d  %s", number, kind)
+		}
+	}
 }

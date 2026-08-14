@@ -1107,7 +1107,7 @@ func (h *AccountHandler) Test(c *gin.Context) {
 		return
 	}
 	if req.CursorOptions != nil {
-		if _, err := cursor.ResolveModelWithOptions(req.ModelID, nil, req.CursorOptions); err != nil {
+		if _, err := cursor.ResolveModelWithOptionsStrict(req.ModelID, nil, req.CursorOptions); err != nil {
 			response.BadRequest(c, err.Error())
 			return
 		}

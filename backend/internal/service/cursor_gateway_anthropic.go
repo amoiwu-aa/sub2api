@@ -55,7 +55,7 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	if err := conversation.ValidationError(); err != nil {
 		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
-	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools)
+	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
 	if err != nil {
 		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -100,14 +100,15 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	defer cancel()
 
 	input := cursor.AgentTurnInput{
-		Text:             prompt,
-		ConversationID:   conversationID,
-		Images:           conversation.Images(),
-		ModelID:          selection.ModelID,
-		ModelParams:      selection.Params,
-		MaxMode:          selection.MaxMode,
-		Tools:            conversation.Tools,
-		NativeToolBridge: conversation.NativeToolBridge,
+		Text:                     prompt,
+		ConversationID:           conversationID,
+		Images:                   conversation.Images(),
+		ModelID:                  selection.ModelID,
+		ModelParams:              selection.Params,
+		MaxMode:                  selection.MaxMode,
+		Tools:                    conversation.Tools,
+		NativeToolBridge:         conversation.NativeToolBridge,
+		DisableParallelToolCalls: conversation.DisableParallelToolCalls,
 	}
 
 	var result *ForwardResult
@@ -220,10 +221,17 @@ func (s *CursorGatewayService) forwardMessagesStreaming(
 ) (*ForwardResult, error) {
 	messageID := "msg_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	writer := &anthropicStreamWriter{c: c}
-	promptTokens := cursor.EstimateTokens(prompt)
-
-	if err := writer.write(cursor.NewAnthropicMessageStart(messageID, publicModel, promptTokens)); err != nil {
-		return nil, s.upstreamError(ctx, c, account, publicModel, err, writer.headersWritten)
+	promptTokens := cursor.EstimateAgentInputTokens(prompt, cursorAgentUsageDetails(input, nil))
+	messageStarted := false
+	ensureMessageStarted := func() error {
+		if messageStarted {
+			return nil
+		}
+		if err := writer.write(cursor.NewAnthropicMessageStart(messageID, publicModel, promptTokens)); err != nil {
+			return err
+		}
+		messageStarted = true
+		return nil
 	}
 
 	var firstTokenMs *int
@@ -231,6 +239,9 @@ func (s *CursorGatewayService) forwardMessagesStreaming(
 		if firstTokenMs == nil && (delta.Text != "" || delta.Thinking != "" || delta.ToolCall != nil) {
 			elapsed := int(time.Since(startTime).Milliseconds())
 			firstTokenMs = &elapsed
+		}
+		if err := ensureMessageStarted(); err != nil {
+			return err
 		}
 		// thinking 不外发（见 cursor.NewAnthropicContent 的说明），但思考期可能
 		// 长达数十秒，中间代理会把静默的连接掐掉——用 ping 顶住。
@@ -249,10 +260,17 @@ func (s *CursorGatewayService) forwardMessagesStreaming(
 		if writer.clientGone {
 			return s.buildResult(prompt, "", publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 		}
-		return nil, s.upstreamError(ctx, c, account, publicModel, err, writer.headersWritten)
+		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel, err, writer.headersWritten)
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+	if result.Incomplete() {
+		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel,
+			cursorIncompleteTurnError(result), writer.headersWritten)
+	}
 
+	if err := ensureMessageStarted(); err != nil {
+		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel, err, writer.headersWritten)
+	}
 	stopReason := "end_turn"
 	if result.EndedWithToolCalls() {
 		stopReason = cursor.StopReasonToolUse
@@ -266,13 +284,20 @@ func (s *CursorGatewayService) forwardMessagesStreaming(
 	if err := writer.closeText(); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}
-	if err := writer.write(cursor.NewAnthropicMessageDelta(stopReason, cursor.EstimateTokens(result.Text))); err != nil {
+	outputTokens := cursor.EstimateAgentOutputTokens(
+		result.Text,
+		cursorAgentUsageDetails(input, result),
+	)
+	if err := writer.write(cursor.NewAnthropicMessageDelta(stopReason, outputTokens)); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}
 	if err := writer.write(cursor.NewAnthropicMessageStop()); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 	}
-	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false), nil
+	return s.buildResult(
+		prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false,
+		cursorAgentUsageDetails(input, result),
+	), nil
 }
 
 func (s *CursorGatewayService) forwardMessagesBuffered(
@@ -286,9 +311,13 @@ func (s *CursorGatewayService) forwardMessagesBuffered(
 ) (*ForwardResult, error) {
 	result, err := cursor.RunAgentTurn(ctx, options, input, nil)
 	if err != nil {
-		return nil, s.upstreamError(ctx, c, account, publicModel, err, false)
+		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel, err, false)
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+	if result.Incomplete() {
+		return nil, s.upstreamAnthropicError(ctx, c, account, publicModel,
+			cursorIncompleteTurnError(result), false)
+	}
 
 	stopReason := "end_turn"
 	if result.EndedWithToolCalls() {
@@ -302,11 +331,20 @@ func (s *CursorGatewayService) forwardMessagesBuffered(
 		Content:    cursor.NewAnthropicContent(result.Text, result.ToolCalls),
 		StopReason: stopReason,
 		Usage: cursor.AnthropicUsage{
-			InputTokens:  cursor.EstimateTokens(prompt),
-			OutputTokens: cursor.EstimateTokens(result.Text),
+			InputTokens: cursor.EstimateAgentInputTokens(
+				prompt,
+				cursorAgentUsageDetails(input, nil),
+			),
+			OutputTokens: cursor.EstimateAgentOutputTokens(
+				result.Text,
+				cursorAgentUsageDetails(input, result),
+			),
 		},
 	})
-	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false), nil
+	return s.buildResult(
+		prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false,
+		cursorAgentUsageDetails(input, result),
+	), nil
 }
 
 func (s *CursorGatewayService) writeAnthropicError(c *gin.Context, status int, errType, message string) error {
@@ -316,4 +354,31 @@ func (s *CursorGatewayService) writeAnthropicError(c *gin.Context, status int, e
 		"error": gin.H{"type": errType, "message": message},
 	})
 	return errors.New(message)
+}
+
+func (s *CursorGatewayService) upstreamAnthropicError(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	model string,
+	err error,
+	headersWritten bool,
+) error {
+	failure := s.prepareCursorUpstreamFailure(ctx, c, account, model, err)
+	body, marshalErr := json.Marshal(gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type":    cursorGatewayErrorType(failure.status),
+			"message": failure.message,
+		},
+	})
+	if marshalErr != nil {
+		body = []byte(`{"type":"error","error":{"type":"api_error","message":"Cursor agent request failed"}}`)
+	}
+	if headersWritten {
+		_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", body)
+		c.Writer.Flush()
+		return errors.New(failure.message)
+	}
+	return &UpstreamFailoverError{StatusCode: failure.status, ResponseBody: body}
 }

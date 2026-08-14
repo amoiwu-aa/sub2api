@@ -146,6 +146,30 @@ func TestAnthropicToolChoiceNoneDisablesTools(t *testing.T) {
 		"tools":[{"name":"Bash","input_schema":{"type":"object"}}]
 	}`)
 	require.Empty(t, req.McpTools())
+	conversation := req.Conversation()
+	require.NoError(t, conversation.ValidationError())
+	require.True(t, conversation.DisableAllTools)
+	require.Contains(t, conversation.Render(), "Tool use is disabled")
+}
+
+func TestAnthropicToolChoiceRejectsForcedAndCarriesNoParallel(t *testing.T) {
+	req := parseAnthropicRequest(t, `{
+		"model":"cursor/default",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{"name":"Read","input_schema":{"type":"object"}}],
+		"tool_choice":{"type":"auto","disable_parallel_tool_use":true}
+	}`)
+	conversation := req.Conversation()
+	require.NoError(t, conversation.ValidationError())
+	require.True(t, conversation.DisableParallelToolCalls)
+
+	forced := parseAnthropicRequest(t, `{
+		"model":"cursor/default",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{"name":"Read","input_schema":{"type":"object"}}],
+		"tool_choice":{"type":"any"}
+	}`)
+	require.ErrorContains(t, forced.Conversation().ValidationError(), "not supported")
 }
 
 func TestNewAnthropicToolUseID(t *testing.T) {

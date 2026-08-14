@@ -17,6 +17,13 @@ func shrinkToolCallGrace(t *testing.T, grace time.Duration) {
 	t.Cleanup(func() { toolCallGrace = original })
 }
 
+func shrinkToolCallCollectionCap(t *testing.T, cap time.Duration) {
+	t.Helper()
+	original := toolCallCollectionCap
+	toolCallCollectionCap = cap
+	t.Cleanup(func() { toolCallCollectionCap = original })
+}
+
 // mcpToolCallMessage 构造一条 MCP 工具调用：exec_server_message(2) → mcp_args(11)。
 func mcpToolCallMessage(execID, toolName string, args map[string]any) []byte {
 	mcpArgs := EncodeStringField(mcpToolNameField, toolName)
@@ -52,6 +59,8 @@ func TestRunAgentTurnEndsOnMcpToolCall(t *testing.T) {
 
 	require.True(t, result.EndedWithToolCalls())
 	require.Len(t, result.ToolCalls, 1)
+	require.Equal(t, 1, result.MCPToolCalls)
+	require.Zero(t, result.NativeToolCalls)
 	require.Equal(t, "Bash", result.ToolCalls[0].Name)
 	// id 会被规整成 OpenAI 风格：加 call_ 前缀、去掉连字符。
 	require.Equal(t, "call_exec1", result.ToolCalls[0].ID)
@@ -96,6 +105,31 @@ func TestRunAgentTurnCollectsParallelToolCalls(t *testing.T) {
 	require.Len(t, result.ToolCalls, 2)
 	require.Equal(t, "Bash", result.ToolCalls[0].Name)
 	require.Equal(t, "Read", result.ToolCalls[1].Name)
+}
+
+func TestRunAgentTurnHonorsDisableParallelToolCalls(t *testing.T) {
+	shrinkToolCallGrace(t, 300*time.Millisecond)
+
+	server := &agentTestServer{t: t, hangAfterScript: true, frameDelay: 50 * time.Millisecond, script: [][]byte{
+		mcpToolCallMessage("exec-1", "Read", map[string]any{"file_path": "/tmp/a"}),
+		mcpToolCallMessage("exec-2", "Read", map[string]any{"file_path": "/tmp/b"}),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{
+			Text:                     "read one",
+			ConversationID:           "conv-no-parallel",
+			DisableParallelToolCalls: true,
+		}, nil)
+	require.NoError(t, err)
+	require.Len(t, result.ToolCalls, 1)
+	require.Equal(t, "/tmp/a", func() string {
+		var args map[string]string
+		require.NoError(t, json.Unmarshal([]byte(result.ToolCalls[0].Arguments), &args))
+		return args["file_path"]
+	}())
+	require.False(t, result.Incomplete())
 }
 
 func TestRunAgentTurnWaitsOutSlowlyGeneratedToolCalls(t *testing.T) {
@@ -145,6 +179,65 @@ func TestRunAgentTurnDropsToolCallsWhenGraceIsTooShort(t *testing.T) {
 		AgentTurnInput{Text: "explore", ConversationID: "conv-1"}, nil)
 	require.NoError(t, err)
 	require.Len(t, result.ToolCalls, 1)
+}
+
+func TestRunAgentTurnMarksAbsoluteToolCollectionCapIncomplete(t *testing.T) {
+	shrinkToolCallGrace(t, 100*time.Millisecond)
+	shrinkToolCallCollectionCap(t, 80*time.Millisecond)
+
+	server := &agentTestServer{
+		t: t, hangAfterScript: true, frameDelay: 30 * time.Millisecond,
+		script: [][]byte{
+			mcpToolCallMessage("exec-1", "read", map[string]any{"filePath": "/a"}),
+			mcpToolCallMessage("exec-2", "read", map[string]any{"filePath": "/b"}),
+			mcpToolCallMessage("exec-3", "read", map[string]any{"filePath": "/c"}),
+			mcpToolCallMessage("exec-4", "read", map[string]any{"filePath": "/d"}),
+			mcpToolCallMessage("exec-5", "read", map[string]any{"filePath": "/e"}),
+		},
+	}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "explore", ConversationID: "conv-cap"}, nil)
+	require.NoError(t, err)
+	require.True(t, result.ToolCallCollectionTimedOut)
+	require.True(t, result.Incomplete())
+	require.Contains(t, result.IncompleteSummary(), "tool_call_collection_timeout")
+	require.Less(t, len(result.ToolCalls), 5, "绝对上限没有截停持续生成的调用")
+}
+
+func TestRunAgentTurnDeduplicatesIdenticalToolCallID(t *testing.T) {
+	shrinkToolCallGrace(t, 100*time.Millisecond)
+
+	call := mcpToolCallMessage("exec-dup", "Read", map[string]any{"file_path": "/tmp/x"})
+	server := &agentTestServer{t: t, hangAfterScript: true, script: [][]byte{call, call}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "read", ConversationID: "conv-dup"}, nil)
+	require.NoError(t, err)
+	require.Len(t, result.ToolCalls, 1)
+	require.Equal(t, 1, result.DuplicateToolCalls)
+	require.Zero(t, result.ConflictingToolCalls)
+	require.False(t, result.Incomplete())
+}
+
+func TestRunAgentTurnMarksConflictingDuplicateToolCallIncomplete(t *testing.T) {
+	shrinkToolCallGrace(t, 100*time.Millisecond)
+
+	server := &agentTestServer{t: t, hangAfterScript: true, script: [][]byte{
+		mcpToolCallMessage("exec-conflict", "Read", map[string]any{"file_path": "/tmp/a"}),
+		mcpToolCallMessage("exec-conflict", "Read", map[string]any{"file_path": "/tmp/b"}),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "read", ConversationID: "conv-conflict"}, nil)
+	require.NoError(t, err)
+	require.Len(t, result.ToolCalls, 1)
+	require.Equal(t, 1, result.ConflictingToolCalls)
+	require.True(t, result.Incomplete())
+	require.Contains(t, result.IncompleteSummary(), "tool_call_conflicts=1")
 }
 
 func TestRunAgentTurnKeepsTextBeforeToolCall(t *testing.T) {

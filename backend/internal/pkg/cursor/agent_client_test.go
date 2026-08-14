@@ -349,8 +349,9 @@ func TestRunAgentTurnWatchdogEndsTurnWhenExecCannotBeAnswered(t *testing.T) {
 }
 
 func TestRunAgentTurnCountsIgnoredInteractionQuery(t *testing.T) {
-	// 收到 query 却不回执时，应计入 QueryIgnored，并走短看门狗而不是干等两分钟。
-	shrinkStallTimeouts(t, 5*time.Second, 150*time.Millisecond)
+	// 收到 query 却没有可验证回执协议时，应立即计入 QueryIgnored 并收尾，
+	// 由上层返回明确 unsupported/incomplete，不再等待看门狗。
+	shrinkStallTimeouts(t, 5*time.Second, 5*time.Second)
 
 	server := &agentTestServer{t: t, hangAfterScript: true, script: [][]byte{
 		textDeltaMessage("需要你确认一下"),
@@ -377,7 +378,7 @@ func TestRunAgentTurnCountsIgnoredInteractionQuery(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, result.Incomplete())
-	require.True(t, result.Stalled)
+	require.False(t, result.Stalled)
 	require.Equal(t, 1, result.QueryIgnored)
 	require.Contains(t, result.IncompleteSummary(), "query_ignored=1")
 	require.Equal(t, "需要你确认一下", result.Text)

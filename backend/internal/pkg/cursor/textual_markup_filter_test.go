@@ -9,10 +9,18 @@ import (
 )
 
 func testMarkupFilter() *textualToolCallFilter {
-	return newTextualToolCallFilter(
+	return newTextualToolCallFilterWithRecovery(
 		[]McpTool{{Name: "Grep"}, {Name: "Read"}},
-		map[string]string{"write": "Write"},
+		nativeBridgeOf(map[string]string{"write": "Write"}),
+		true,
 	)
+}
+
+func enableTextualRecoveryForTest(t *testing.T) {
+	t.Helper()
+	original := enableTextualReadOnlyToolRecovery
+	enableTextualReadOnlyToolRecovery = true
+	t.Cleanup(func() { enableTextualReadOnlyToolRecovery = original })
 }
 
 func feedMarkupChunks(f *textualToolCallFilter, chunks ...string) (string, []*McpToolCall) {
@@ -100,14 +108,24 @@ func TestTextualFilterParsesHeadAttributeArguments(t *testing.T) {
 	require.JSONEq(t, `{"pattern":"交合|双修","path":"章节","head_limit":50}`, string(calls[0].Arguments))
 }
 
-func TestTextualFilterMapsNativeBridgeBuiltinNames(t *testing.T) {
-	// 模型可能用内置名（write）而不是客户端名（Write）。
+func TestTextualFilterNeverRecoversMutatingTools(t *testing.T) {
+	// 即使显式开启只读恢复，write 也只能吞掉，不能由模型正文触发真实写入。
 	f := testMarkupFilter()
 	_, calls := feedMarkupChunks(f,
 		`<tool_call name="write">{"path":"a.md","content":"x"}</tool_call>`)
 
-	require.Len(t, calls, 1)
-	require.Equal(t, "Write", calls[0].Name)
+	require.Empty(t, calls)
+	require.Equal(t, 1, f.Suppressed)
+}
+
+func TestTextualFilterDefaultIsSuppressOnly(t *testing.T) {
+	f := newTextualToolCallFilter([]McpTool{{Name: "Grep"}}, nil)
+	clean, calls := feedMarkupChunks(f,
+		`before<tool_call name="Grep">{"pattern":"x"}</tool_call>after`)
+
+	require.Equal(t, "beforeafter", clean)
+	require.Empty(t, calls)
+	require.Equal(t, 1, f.Suppressed)
 }
 
 func TestTextualFilterSuppressesUndeclaredTools(t *testing.T) {
@@ -226,6 +244,7 @@ func TestTextualFilterFailsOpenOnOversizedBlock(t *testing.T) {
 }
 
 func TestRunAgentTurnMintsUniqueIDsForDuplicateTextualCalls(t *testing.T) {
+	enableTextualRecoveryForTest(t)
 	// 模型把两个文本调用写成同一个 id（抄重放历史的典型行为），
 	// 下发给客户端的 tool_call id 必须互不相同。
 	server := &agentTestServer{t: t, script: [][]byte{
@@ -257,6 +276,7 @@ func TestTextualFilterDisabledWithoutTools(t *testing.T) {
 }
 
 func TestRunAgentTurnConvertsTextualToolMarkup(t *testing.T) {
+	enableTextualRecoveryForTest(t)
 	// 文本标记转换出的调用不触发提前关流：上游没在等回执，这轮以
 	// turn_ended 自然收尾，标记之后的正文必须保留。
 	server := &agentTestServer{t: t, script: [][]byte{
@@ -279,6 +299,7 @@ func TestRunAgentTurnConvertsTextualToolMarkup(t *testing.T) {
 	require.True(t, result.EndedWithToolCalls())
 	require.True(t, result.TurnEnded)
 	require.Len(t, result.ToolCalls, 1)
+	require.Equal(t, 1, result.TextualToolCalls)
 	require.Equal(t, "Grep", result.ToolCalls[0].Name)
 	// 正文必须干净且完整：标记一个字符都不能漏，标记后的正文不能被截断。
 	require.Equal(t, "扫一遍禁写项。扫完继续写。", result.Text)

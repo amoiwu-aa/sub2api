@@ -77,10 +77,27 @@ type textualToolCallFilter struct {
 	blockSuppressOnly bool
 	// Suppressed 是被吞掉的不可解析/残缺/伪造块数。
 	Suppressed int
+	// recoverReadOnly 只允许显式开启时把已声明的只读工具标记恢复成真调用。
+	// 默认只吞不执行，避免模型引用示例文本触发客户端真实操作。
+	recoverReadOnly bool
 }
 
+var enableTextualReadOnlyToolRecovery = envBool("CURSOR_TEXTUAL_TOOL_CALL_RECOVERY", false)
+
 // newTextualToolCallFilter 构造拦截器；declared 为空时返回 nil（禁用）。
-func newTextualToolCallFilter(mcpTools []McpTool, nativeBridge map[string]string) *textualToolCallFilter {
+func newTextualToolCallFilter(mcpTools []McpTool, nativeBridge NativeToolBridge) *textualToolCallFilter {
+	return newTextualToolCallFilterWithRecovery(
+		mcpTools,
+		nativeBridge,
+		enableTextualReadOnlyToolRecovery,
+	)
+}
+
+func newTextualToolCallFilterWithRecovery(
+	mcpTools []McpTool,
+	nativeBridge NativeToolBridge,
+	recoverReadOnly bool,
+) *textualToolCallFilter {
 	declared := make(map[string]string, len(mcpTools)+2*len(nativeBridge))
 	for _, tool := range mcpTools {
 		name := strings.TrimSpace(tool.Name)
@@ -89,8 +106,8 @@ func newTextualToolCallFilter(mcpTools []McpTool, nativeBridge map[string]string
 		}
 		declared[strings.ToLower(name)] = name
 	}
-	for builtinKey, clientName := range nativeBridge {
-		clientName = strings.TrimSpace(clientName)
+	for builtinKey, target := range nativeBridge {
+		clientName := strings.TrimSpace(target.Name)
 		if clientName == "" {
 			continue
 		}
@@ -100,7 +117,7 @@ func newTextualToolCallFilter(mcpTools []McpTool, nativeBridge map[string]string
 	if len(declared) == 0 {
 		return nil
 	}
-	return &textualToolCallFilter{declared: declared}
+	return &textualToolCallFilter{declared: declared, recoverReadOnly: recoverReadOnly}
 }
 
 // Feed 吃进一块已经过控制 token 过滤的文本，返回可以下发的干净文本与
@@ -138,7 +155,8 @@ func (f *textualToolCallFilter) Feed(chunk string) (string, []*McpToolCall) {
 			if f.blockSuppressOnly {
 				// 伪造的工具结果块：没有可执行语义，整段吞掉。
 				f.Suppressed++
-			} else if call := parseTextualToolCall(blockText, f.declared); call != nil {
+			} else if call := parseTextualToolCall(blockText, f.declared); call != nil &&
+				f.recoverReadOnly && isTextualRecoveryReadOnlyTool(call.Name) {
 				calls = append(calls, call)
 			} else {
 				f.Suppressed++
@@ -178,6 +196,15 @@ func (f *textualToolCallFilter) Feed(chunk string) (string, []*McpToolCall) {
 		data = ""
 	}
 	return clean.String(), calls
+}
+
+func isTextualRecoveryReadOnlyTool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "read", "grep", "glob", "listdir", "ls", "webfetch", "lspdiagnostics", "diagnostics":
+		return true
+	default:
+		return false
+	}
 }
 
 // stripTextualTags 从一段确定不含块开标签的文本里剥掉转写结构标签

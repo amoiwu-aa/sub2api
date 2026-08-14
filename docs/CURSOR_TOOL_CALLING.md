@@ -134,9 +134,46 @@ Connect over HTTP/2 双向流，帧格式 `[1 字节标志][4 字节大端长度
 ```
 2  shell            3  write        4  delete
 5  grep             7  read         8  ls
-14 shell_stream    29  redacted_read
+9  diagnostics     14  shell_stream 16 background_shell_spawn
+20 fetch           29  redacted_read
 37 subagent_await  41/42/43 *_allowlist_precheck
 ```
+
+`diagnostics` / `background_shell_spawn` / `fetch` 在反代里属于扩展表
+`EXT_EXEC_ARG_FIELDS`，原生工具桥需要识别它们。`subagent_await` 与三个
+precheck 只解析、不桥接：映射表怎么配都不放行，只会回 stub。
+
+#### 模型侧工具名 → wire 字段（2026-08-14 实测）
+
+模型看到的工具名与 wire 上的 exec 字段**不是一一对应**。
+`TestLiveSpikeToolInventory` 问出的模型自述清单有 18 项：Shell、Grep、Delete、
+WebSearch、WebFetch、GenerateImage、ReadLints、EditNotebook、TodoWrite、
+StrReplace、Write、Read、Glob、Task、AwaitShell、ListMcpResources、
+FetchMcpResource、SwitchMode（明确**没有** codebase_search 一类语义检索）。
+
+其中真正会下发 exec 帧的只有这些，且全部落在已知字段上：
+
+| 模型侧工具 | wire 字段 | 说明 |
+|---|---|---|
+| `Read` | 7 / 29 | — |
+| `Grep` | 5 | 带 `#1 pattern` |
+| `Glob` | **5** | 不带 `#1 pattern`，只有 `#3 glob` + `#4 output_mode=files_with_matches` |
+| `Shell` / `AwaitShell` | 2 / 14 / 16 | — |
+| `Write` | 3 | `#1 path` `#2 content` |
+| `StrReplace` | **3** | 替换在 Cursor 服务端完成，落到 wire 上是一次**整文件 write** |
+| `Delete` | 4 | — |
+| `WebFetch` | 20 | — |
+
+`TodoWrite`、`ReadLints` 点名调用后模型回报执行成功，但**一帧 exec 都没有**，
+由 Cursor 服务端自己消化，网关无从桥接。
+
+两个后果值得注意：
+
+- 桥接键 `write` 同时承接了模型的 Write 与 StrReplace。客户端只声明了
+  `Edit` / `StrReplace` 而没有 `Write` 时，这类调用桥不上——要让编辑能力可用，
+  客户端必须声明一个能整文件覆写的工具。
+- 结论是 `execArgFields` **不需要新增字段**：现有覆盖已经是这条 API 上
+  可桥接工具的全集。
 
 以 `shell_stream`（字段 14）为例，参数结构是：
 
@@ -313,28 +350,25 @@ shell。所以每次带工具的请求都要前置 `ToolPolicyPreamble`，显式
 
 ### 4.2 重放渲染格式
 
-`Conversation.Render()` 的输出形态：
+`Conversation.Render()` 用 JSONL 包历史，不用未转义的 XML 标签当结构边界。
+工具结果里出现 `</tool_result>` 或伪造 `<tool_call>` 时，JSON 转义会把它们变成
+普通字符串，不会提前闭合外层块。Go 的 `json.Marshal` 默认还会把 `<` `>` `&`
+写成 `\u003c` 一类，这是有意保留的。
 
 ```
 <tool_policy>
 …内置工具不可用，只能调用 mcp_cursor-cli_Bash…
 </tool_policy>
 
-<system_instructions>
-…客户端的系统提示…
-</system_instructions>
+<system_instructions_json>
+{"text":"…客户端的系统提示…"}
+</system_instructions_json>
 
-<conversation_history>
-<user>
-run echo hi
-</user>
-<tool_call id="call_1" name="Bash">
-{"command":"echo hi"}
-</tool_call>
-<tool_result id="call_1" name="Bash">
-hi
-</tool_result>
-</conversation_history>
+<conversation_history_jsonl>
+{"role":"user","text":"run echo hi"}
+{"role":"assistant","tool_calls":[{"id":"call_1","name":"Bash","arguments":"{\"command\":\"echo hi\"}"}]}
+{"role":"tool","tool_call_id":"call_1","tool_name":"Bash","output":"hi"}
+</conversation_history_jsonl>
 
 <continue>
 The tool results above are real output from tools you already called…
@@ -342,6 +376,10 @@ The tool results above are real output from tools you already called…
 ```
 
 单条用户消息且无工具时会退化成原文，不给纯对话请求平白加一堆标签。
+历史校验会拒绝空/重复 call ID、孤儿 tool result、同 ID 错名；缺失的
+`tool_name` 按 call ID 从前面的 assistant 调用补回。`tool_choice=none` 即使
+`tools` 为空也必须发出「全部内置工具不可用」的策略；`required` / 具名
+`tool_choice` 无法保证时直接 400，不静默当 auto。
 
 ## 5. 实现地图
 
@@ -357,14 +395,20 @@ The tool results above are real output from tools you already called…
 | `agent_client.go` | 双向流客户端（新增工具调用收齐与主动收尾） |
 | `openai.go` | Chat Completions 的入站解析与出站编码 |
 | `anthropic.go` | Messages 的入站解析与 SSE 事件构造 |
+| `native_tools.go` | 原生 exec → 客户端 tool_calls，含 glob 分流与参数绑定 |
+| `models.go` | 模型目录、严格解析、`cursor_bridge` 能力契约 |
+| `token_estimate.go` | 把 tools / 图片 / thinking / 调用参数计入估算用量 |
+| `textual_tool_call_filter.go` | 正文伪 XML 默认只吞不执行 |
 
 ### 服务层 `backend/internal/service/`
 
 | 文件 | 入口 | 面向 |
 |---|---|---|
-| `cursor_gateway_service.go` | `ForwardAsChatCompletions` | opencode |
+| `cursor_gateway_service.go` | `ForwardAsChatCompletions` | opencode / AutoClaw |
 | `cursor_gateway_anthropic.go` | `Forward` | Claude Code |
 | `cursor_gateway_responses.go` | `ForwardAsResponses` | Codex |
+| `cursor_gateway_native_tools.go` | 解析 `native_tools` 与全局 bridge mode | 三入口共用 |
+| `cursor_gateway_native_tools_infer.go` | schema 驱动推断、别名、单位转换 | 第三方客户端 |
 
 三者共用 `Conversation` 与 `RunAgentTurn`，差别只在出站编码。
 
@@ -454,7 +498,7 @@ read / grep / ls，`<tool_policy>` 却告诉它「这些不可用，改用
 }
 ```
 
-- 键是内置工具名：`read`、`grep`、`ls`、`shell`、`write`、`delete`、
+- 键是内置工具名：`read`、`grep`、`glob`、`ls`、`shell`、`write`、`delete`、
   `fetch`、`diagnostics`（`redacted_read` 并入 `read`，`shell_stream`
   与 `background_shell_spawn` 并入 `shell`，后者强制 `run_in_background`）。
   网关只做翻译不执行任何东西——写类调用由客户端声明的工具执行，走客户
@@ -463,9 +507,52 @@ read / grep / ls，`<tool_policy>` 却告诉它「这些不可用，改用
 - 值必须是本次请求 `tools` 里声明过的客户端工具名。命中的工具不再注册
   MCP，模型只看到内置通道；未映射的客户端工具照常走 MCP，两条通道可以共存。
 - 非法键、空值、未声明的工具名一律 400。
+
+#### 自动推断
+
+`cursor_options` 是 RingStar 的私有扩展，Codex、Claude Code 这类第三方客户端
+不认识它。网关会按客户端声明的工具 schema 计算候选映射，但是否真正启用由
+`gateway.cursor_native_tool_bridge_mode` 控制：
+
+- `shadow`（默认）：只记录拟议映射，所有工具仍走 MCP，不改变请求语义。
+- `explicit`：只接受客户端显式给出的 `native_tools`。
+- `infer_readonly`：只自动桥接 read / grep / glob / ls / fetch / diagnostics。
+- `infer_all`：自动桥接所有通过严格 schema 校验的工具。
+- `off`：全局 kill switch，连显式映射也关闭。
+
+推断只认客户端自己声明的东西，分两步：
+
+1. 按名字找候选工具。别名表覆盖常见叫法（`read` 认 `Read` / `read_file`，
+   `shell` 认 `Bash` / `run_terminal_cmd` 等）。一个客户端工具只会被一个内置
+   工具占用。
+2. 拿候选工具的 JSON Schema 逐个绑定上表里的入参，两个方向都要成立：
+   网关必发的入参要有类型兼容的属性可落；客户端声明的必填属性要都能被网关
+   发出的入参覆盖。
+
+任一步不成立就不映射，工具保持在 MCP，不会因为推断丢失。推断映射只输出
+schema 里确实绑定成功的属性；客户端必填字段不得依赖原生可选参数，秒/毫秒等
+单位差异必须经过值转换。
+
+绑定的产物除了工具名，还有一张「规范入参名 → 客户端属性名」的改写表。**光对
+名字不够**：Claude Code 的 `Read` 收 `file_path` 而不是 `path`，原样发过去会被
+客户端判成缺参数。推断出改写表后，网关按客户端的属性名写出入参。
+
+这套校验也是安全阀。两个真实例子：
+
+- Codex 的 `shell` 收 `command: string[]`，网关发的是字符串，类型冲突 → 不映射。
+- Claude Code 的 `WebFetch` 必填一个网关永远不会发的 `prompt` → 不映射。
+
+schema 缺失或没声明任何属性时同样不映射：无从校验，不如回落 MCP，别赌客户端
+认得规范名。显式配置的映射不受这条限制（那是客户端自己的断言），但一样会尝试
+绑定改写表。
+
+用 `cursor_options.native_tools_auto: false` 可以让本次请求全部走 MCP；
+显式 `true` 是请求级 opt-in（全局 `off` 除外）。显式 `native_tools` 优先于推断：
+给了就只认它列的键，不再自动补别的。
 - 模型的调用以映射后的客户端工具名返回（OpenAI `tool_calls` /
   Anthropic `tool_use`），`tool_call_id` 优先取上游入参自带的
-  `tool_call_id`。客户端执行后照常把结果放进下一次请求，网关文本重放。
+  `tool_call_id`（复合 `call...\\nfc...` 只取合法的第一段）。客户端执行后照常把
+  结果放进下一次请求，网关以完整转义的 JSONL 历史重放。
 
 网关发给客户端的入参形态（客户端工具的 schema 要认这些字段名）：
 
@@ -473,6 +560,7 @@ read / grep / ls，`<tool_policy>` 却告诉它「这些不可用，改用
 |---|---|
 | `read` | `{"path": string, "offset"?: int, "limit"?: int}` |
 | `grep` | `{"pattern": string, "path"?: string, "glob"?: string, "output_mode"?: string, "case_insensitive"?: bool, "head_limit"?: int}` |
+| `glob` | `{"pattern": string, "path"?: string}` |
 | `ls` | `{"path": string}` |
 | `shell` | `{"command": string, "cwd"?: string, "timeout"?: int, "run_in_background"?: bool, "description"?: string}` |
 | `write` | `{"path": string, "content": string}` |
@@ -491,6 +579,86 @@ tool_call_id=2`；diagnostics `path=1, tool_call_id=2`。`shell` 的
 timeout 单位未实证，按毫秒对待。上游升级若变动字段，入参解析失败会
 自动回落 stub，不会把错误参数转给客户端。
 
+#### 能力发现与客户端兼容
+
+Cursor 分组的 `GET /v1/models` 同时返回三部分：
+
+- 标准 OpenAI `data` 模型列表；
+- Codex 可直接解码的完整 `models` manifest（含 reasoning、context、shell、
+  apply_patch 等元数据）；
+- 版本化 `cursor_bridge` 契约：协议版本、当前模式、9 个原生键与参数、并行、
+  图片、交互和 continuation 能力。
+
+响应头 `X-RingStar-Cursor-Bridge-Version` 与
+`X-RingStar-Cursor-Bridge-Mode` 可用于低成本探测。真实 Codex 0.144.1 会声明
+约 273 个工具，因此 MCP 工具上限为 512、单 schema 256 KiB、总 schema 4 MiB；
+重名、空名、非法 JSON Schema 和非 object 根在进入上游前直接 400。
+
+未知的 `gateway.cursor_native_tool_bridge_mode` 会失败关闭到 `explicit`：保留
+显式映射，但绝不因为拼写错误打开推断。
+
+#### 客户端 Profile
+
+「完美对接」不是把所有工具硬映成 Cursor 原生 exec。能证明语义等价的走原生桥，
+其余走 MCP；不兼容时安静回落，不静默改参数。
+
+| 客户端 | 入口 | 原生桥（mode 允许时） | 必须留在 MCP |
+|---|---|---|---|
+| AutoClaw | `/v1/chat/completions` | 显式 `native_tools`：`read→Read`、`grep→Grep`、`glob→Glob`、`ls→ListDir`、`shell→Bash`、`write→Write`、`delete→Delete`、`fetch→WebFetch`、`diagnostics→LspDiagnostics` | ToolSearch / Notebook / Git / Skill / Subagent / Ask |
+| Claude Code | `/v1/messages` | schema 推断：`Read`/`Write` 的 `file_path`、`Grep` 的 `-i`、`Glob`、`Bash`、`LS` | `WebFetch`（额外必填 `prompt`）、客户端专有 MCP |
+| Codex | `/v1/responses` | 通常几乎不桥：`shell.command` 是 `string[]`，与原生 `string` 类型冲突 | `shell`、`apply_patch`、`update_plan`、tool-search；**禁止**把 patch 强映成整文件 Write |
+
+AutoClaw 的私有 `cursor_options` 只能发给确认的 RingStar provider，不能仅凭
+`cursor/*` 模型名。负能力缓存键至少包含 base URL、bridge version、protocol、
+model，并设短 TTL。`ToolSearch` 选中的延迟工具必须写入 session-scoped loaded
+set，下一轮真正加入 `tools[]`，同时更新 prompt profile epoch。
+
+#### 灰度、kill switch 与回滚
+
+线上默认必须是 `shadow`。观察无误后再按组放开，不要一上来 `infer_all`。
+
+```
+shadow → infer_readonly → Bash/shell → Write/Delete → infer_all（仅已验收客户端）
+```
+
+每档只看这些信号：`cursor.agent_turn_incomplete`、`cursor.agent_tool_bridge`
+（native / mcp / textual）、shadow 拟议映射日志、stub / unknown exec、重复或
+冲突 call ID、任务成功率。写类工具放开后还要核对客户端审批链没有被绕过。
+
+**Kill switch（无需重建镜像）**，在部署目录改环境变量后只重建应用容器：
+
+```bash
+# 立刻关掉原生桥（显式 native_tools 也不再生效）
+GATEWAY_CURSOR_NATIVE_TOOL_BRIDGE_MODE=off
+docker compose up -d --no-deps --force-recreate sub2api
+
+# 只保留 AutoClaw 这类显式映射，第三方推断全关
+GATEWAY_CURSOR_NATIVE_TOOL_BRIDGE_MODE=explicit
+```
+
+`CURSOR_TEXTUAL_TOOL_CALL_RECOVERY` 默认 `false`。`CURSOR_TOOL_CALL_GRACE_MS`
+默认 3000，`CURSOR_TOOL_CALL_CAP_MS` 默认 15000。
+
+**不可变部署与镜像回滚**走 `deploy/update-ringstar.sh`：
+
+- 源码树 dirty（未提交改动或未跟踪文件）直接拒绝，禁止 `git reset --hard`。
+- 用 `git worktree` 在目标 commit 上构建 `ringstar:<12 位 sha>`。
+- 部署前把当前镜像打成 `ringstar:rollback-YYYYMMDD-HHMMSS`。
+- 健康检查或 Cursor E2E 失败自动切回 rollback 镜像。
+- `RUN_CURSOR_E2E=0` 可跳过 E2E 门禁（只用于紧急热修，事后必须补跑）。
+
+手动回滚：
+
+```bash
+# 覆盖文件默认在 $RINGSTAR_DEPLOY_DIR/.ringstar-image.override.yml
+cat > /opt/sub2api/.ringstar-image.override.yml <<'EOF'
+services:
+  sub2api:
+    image: ringstar:rollback-<timestamp>
+EOF
+docker compose -f docker-compose.yml -f .ringstar-image.override.yml up -d --force-recreate --no-deps sub2api
+```
+
 ### 参数如何进入用量与账单
 
 生效的选型会回写进用量日志，三个维度分别落在：
@@ -504,6 +672,8 @@ timeout 单位未实证，按毫秒对待。上游升级若变动字段，入参
 - `max_mode` → 归一化进模型名：`cursor_options.max_mode=true` 打在
   `cursor/grok-4.6` 上时，日志与账单里记作 `cursor/grok-4.6-max`，与旧的
   后缀写法落到同一个名字，MAX 用量不会混进基础模型。
+- 本地估算会计入 prompt、MCP 工具 schema、图片字节、thinking 与工具调用参数；
+  这些值始终标记为 `estimated`，不会冒充上游真实 usage。
 
 ## 6. 排错
 
@@ -513,10 +683,14 @@ timeout 单位未实证，按毫秒对待。上游升级若变动字段，入参
 |---|---|
 | 响应 200 但正文极短、耗时接近 120 秒 | 模型用了内置工具，看门狗收的尾。检查 `tool_policy` 有没有发出去 |
 | 日志出现 `cursor.agent_turn_incomplete` 且 `exec_handled>0` | 同上。`summary` 里能看到 stub 回执了几次 |
+| `summary` 含 `tool_call_collection_timed_out` / `conflicting_tool_calls` | 并行窗口触顶或同 ID 不同参数；该轮必须 incomplete，不是成功 |
+| Claude Code 流里只有 OpenAI 风格 `data:{"error"}` | 旧网关；现网关应发 `event: error`。Codex 应对 `response.failed` |
 | 客户端报「未知工具」 | 工具名前缀没剥干净，检查 `NormalizeToolName` |
 | 模型把同一个工具反复调用 | 重放里缺 `<continue>`，或工具结果为空且没写「无输出」 |
 | `cursor agent stream requires HTTP/2` | 代理把 h2 降级了，或 `ForceAttemptHTTP2` 没设 |
 | 上游回 `ERROR_NOT_LOGGED_IN` | 用了 web 类型的 token，Agent 只认 `type=session` |
+| Codex 刷 `missing field display_name` | `/v1/models` 的 `models` 数组缺完整 Codex manifest |
+| Glob 调用立刻失败、pattern 为空 | 把 Glob 误桥成 Grep；应走 `glob` 键，入参是 `pattern`+`path` |
 
 ### 有用的日志
 
@@ -526,7 +700,17 @@ docker logs --since 1h sub2api 2>&1 | grep -E 'cursor\.'
 
 `cursor.agent_turn_incomplete` 的 `summary` 字段把挂死原因收成了一句短文：
 `stalled` / `no_turn_ended` / `exec_unanswered=N` / `exec_handled=N` /
-`query_ignored=N` / `kv=N`。响应头 `X-RingStar-Cursor-Agent` 也带这一串。
+`query_ignored=N` / `kv=N` / `tool_call_collection_timed_out` /
+`duplicate_tool_calls` / `conflicting_tool_calls`。响应头
+`X-RingStar-Cursor-Agent` 也带这一串。
+
+流式失败必须按协议收尾，不能一律写 OpenAI SSE：
+
+| 协议 | 失败终态 |
+|---|---|
+| Chat Completions | `data: {"error":…}` + `data: [DONE]` |
+| Anthropic Messages | `event: error`；`message_start` 延迟到首个真实上游事件之后 |
+| Responses | `event: response.failed` |
 
 ### 现场取证
 
@@ -550,24 +734,60 @@ CURSOR_ACCESS_TOKEN=<jwt> ./cursor-spike -test.run TestLiveSpikeBaselineNoTool -
 | `TestLiveSpikeMcpToolCall` | 工具是否真的被调用，dump 完整帧结构 |
 | `TestLiveSpikeMcpToolRoundTrip` | 完整回合：调用 → 重放 → 采纳结果 |
 | `TestLiveSpikeExecReplyForensics` | 全量 dump 回执之后的每一帧 |
+| `TestLiveSpikeUnknownExecFieldForensics` | 逼模型去调未桥接的内置工具，dump 参数字段号 |
+| `TestLiveSpikeNamedToolForensics` | 点名调用某个内置工具，抓它落到哪个字段号 |
+| `TestLiveSpikeToolInventory` | 直接问模型它这一侧有哪些内置工具 |
+| `TestLiveSpikeReadReplyShapes` | 扫描 read 回执的 protobuf 形状 |
+| `TestLiveSpikeEditExecForensics` | 喂真实文件内容，抓编辑类工具的字段号 |
 | `TestLiveSpikeReplyVariants` | 回执形状扫描 |
 | `TestLiveSpikeContinuationProbe` | 续跑帧探测 |
 
 环境变量：`SPIKE_CLIP` 放大字符串打印长度（取证时设 6000），
-`SPIKE_VARIANT_OBSERVE` 控制每个变体的观察秒数。
+`SPIKE_VARIANT_OBSERVE` 控制每个变体的观察秒数，`SPIKE_MODEL` 指定模型裸名
+（如 `grok-4.6`），用来把取证流量打到还有额度的那条池子上。
+
+#### exec 回执的正确形状
+
+回执结构放错位置不会报错，只会让模型收到语义不对的结果，然后白烧一整轮。
+已实测确定的两个：
+
+| 工具 | 回执结构 |
+|---|---|
+| `shell` | 字段 2 → `{1:{1:stdout, 2:stderr, 3:exit_code}}` |
+| `read` | 字段 7 → **`{1:{2:content}}`** |
+| `shell_stream` | 字段 14 → start `{4:_}` → stdout `{1:{1:...}}` → exit `{3:{1:0}}` |
+
+read 的内容位是 `{1:{2:...}}` 而不是 `{1:{1:...}}`：放到 `{1:{1:...}}` 会被
+上游判成 binary data，模型接着去跑 `file` / `xxd` 查是不是二进制，然后放弃。
+`TestLiveSpikeReadReplyShapes` 扫过七种候选，只有这一种能让模型拿到内容并原样
+复述。
 
 ### 线上验收
 
-`deploy/tests/cursor-tool-calling-e2e.sh` 覆盖三个协议各自的工具调用、结果
-重放、流式事件序列，以及纯对话回归，共 31 项断言。在部署机上直接跑，API Key
-由脚本自己从库里取，不用手工传：
+`deploy/tests/cursor-tool-calling-e2e.sh` 覆盖能力契约、三个协议各自的工具调用、
+结果重放、流式事件序列，以及纯对话回归。失败必须以非零退出码结束（CI 对脚本
+做 `bash -n`）。**必须显式指定专用 Cursor Key 或分组**，禁止脚本随便捞一把生产
+Key：
 
 ```bash
-scp deploy/tests/cursor-tool-calling-e2e.sh <host>:/tmp/
-ssh <host> "tr -d '\r' < /tmp/cursor-tool-calling-e2e.sh > /tmp/e2e.sh && bash /tmp/e2e.sh"
+CURSOR_E2E_API_KEY=<cursor-group-key> \
+CURSOR_E2E_MODEL=cursor/grok-4.6 \
+bash deploy/tests/cursor-tool-calling-e2e.sh
+
+# 或
+CURSOR_E2E_GROUP_ID=<cursor-group-id> \
+CURSOR_E2E_MODEL=cursor/grok-4.6 \
+bash deploy/tests/cursor-tool-calling-e2e.sh
 ```
 
-结尾会打印 `E2E_ALL_PASS` 或 `E2E_HAS_FAILURE`。改动协议层后务必重跑。
+结尾打印 `E2E_ALL_PASS`（退出 0）或 `E2E_HAS_FAILURE`（退出 1）。改动协议层后
+务必重跑。隔离 canary 应使用生产库 dump 的临时副本，独立 PostgreSQL / Redis /
+App，不要切生产流量。
+
+2026-08-14 实测：Grok 4.6 三协议脚本全绿；真实 Codex CLI 0.144.1 在补齐
+`/v1/models` manifest 与 MCP 上限 512 后，模型目录无警告，shell 调用与结果续跑
+成功。Claude Code 的 curl Messages 链路完整通过；不能把「本机 CLI 无法把临时
+base URL 打到 canary」计成成功证据。
 
 ## 7. 已知限制
 
@@ -592,17 +812,25 @@ ssh <host> "tr -d '\r' < /tmp/cursor-tool-calling-e2e.sh > /tmp/e2e.sh && bash /
 
 **内置工具仍可能被调用。** 工具策略前言是提示词层面的约束，不是协议层的开关。
 模型偶尔仍会去碰内置工具，此时会落回原来的 stub 回执路径并被看门狗收尾。
-目前没有找到协议层禁用内置工具的字段，这是后续可以继续挖的方向。
+目前没有找到协议层禁用内置工具的字段。模型写在正文里的 `<tool_call>` 默认只吞
+不执行；只有显式设置 `CURSOR_TEXTUAL_TOOL_CALL_RECOVERY=true` 时才恢复已声明的
+只读工具，写入/执行类永远不会从正文升级为真实调用。
 
-**并行工具调用靠时间窗收齐。** 收到首个调用后等 `toolCallGrace`（500ms）收齐
-同一轮的其余调用，然后关流。上游若在更长的间隔后追发调用，会被漏掉。实测中
-未观察到这种情况。
+**并行工具调用仍依赖静默窗口。** 默认 quiet period 为 3 秒；每个新调用续期，
+同时有 15 秒绝对上限。完全相同的 call ID 会去重，同 ID 不同参数与绝对上限触发
+都会把该轮标成 incomplete，而不是静默 completed。协议级 batch 边界仍待逆向。
 
 ## 8. 后续可做
 
-- 找出协议层禁用内置工具的开关，替掉提示词约束。
-- `interaction_query`（field 7）目前直接忽略。上游若在等用户确认，这一轮会
-  静默挂起到看门狗。可以考虑翻译成客户端的一次工具调用。
-- 图片输入：`UserMessage.field 3` 是 `selected_context`，能挂图片。三个客户端
-  都支持多模态，这条通路还没接。
+- 找出协议层禁用内置工具的开关，替掉提示词约束。TodoWrite / ReadLints 由
+  Cursor 服务端自己消化，目前只能靠提示词约束，仍有假报成功的风险。
+- `interaction_query`（field 7）目前会立即返回协议对应的
+  unsupported/incomplete 终态，不再等看门狗后假成功；真实问答回执形状仍待逆向，
+  完成后可翻译成客户端 Ask/Confirm 工具。
+- 协议级并行 batch 边界仍待逆向；当前是 3 秒静默窗口 + 15 秒绝对上限。
+- 图片输入已通过 `UserMessage.field 3` 的 `selected_context` 接通；仍需继续拿
+  真实客户端做格式与计费样本对账。
+- 真实 usage decoder 继续遵守独立样本对账门槛，估算用量不得冒充上游 usage。
+- 按 `shadow → infer_readonly → Bash → Write/Delete` 对生产流量分级放开；每档
+  都要有真实客户端（不只是 curl）的成功率对照。
 - Kiro 通道的 `/v1/responses` 仍然 404，可以照本次的路子补上。

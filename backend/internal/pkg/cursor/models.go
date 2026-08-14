@@ -40,6 +40,40 @@ type Model struct {
 	Created     int64  `json:"created,omitempty"`
 	OwnedBy     string `json:"owned_by"`
 	DisplayName string `json:"display_name,omitempty"`
+	// CursorCapabilities is a versioned extension. OpenAI-compatible clients
+	// ignore unknown fields; RingStar-aware clients use it instead of probing 400s.
+	CursorCapabilities *ModelCapabilities `json:"cursor_capabilities,omitempty"`
+}
+
+const BridgeProtocolVersion = "1.0"
+
+// ModelCapabilities describes verified request-level controls for one model.
+type ModelCapabilities struct {
+	BridgeVersion string   `json:"bridge_version"`
+	Efforts       []string `json:"efforts,omitempty"`
+	Fast          bool     `json:"fast"`
+	MaxMode       bool     `json:"max_mode"`
+}
+
+// NativeToolCapability describes the canonical arguments emitted for one
+// native bridge key.
+type NativeToolCapability struct {
+	Key       string          `json:"key"`
+	Arguments []NativeToolArg `json:"arguments"`
+}
+
+// BridgeCapabilities is returned with Cursor /models responses.
+type BridgeCapabilities struct {
+	Version                string                 `json:"version"`
+	DefaultMode            string                 `json:"default_mode"`
+	Modes                  []string               `json:"modes"`
+	Protocols              []string               `json:"protocols"`
+	NativeTools            []NativeToolCapability `json:"native_tools"`
+	ParallelToolCalls      bool                   `json:"parallel_tool_calls"`
+	Images                 bool                   `json:"images"`
+	InteractionQueries     bool                   `json:"interaction_queries"`
+	StatefulContinuation   bool                   `json:"stateful_continuation"`
+	ProtocolTerminalErrors bool                   `json:"protocol_terminal_errors"`
 }
 
 // defaultModels 对应反代 cursor-agent-env.js 的 OFFICIAL_SELECTED_SUBAGENT_MODELS。
@@ -66,7 +100,51 @@ var defaultModels = []Model{
 func DefaultModels() []Model {
 	out := make([]Model, len(defaultModels))
 	copy(out, defaultModels)
+	for i := range out {
+		capabilities := modelCapabilities(out[i].ID)
+		out[i].CursorCapabilities = &capabilities
+	}
 	return out
+}
+
+// DefaultBridgeCapabilities returns a deterministic capability contract.
+func DefaultBridgeCapabilities(defaultMode string) BridgeCapabilities {
+	tools := make([]NativeToolCapability, 0, len(nativeToolArgSpecs))
+	for _, key := range NativeToolBridgeKeys() {
+		spec := NativeToolArgSpec(key)
+		args := append([]NativeToolArg(nil), spec...)
+		tools = append(tools, NativeToolCapability{Key: key, Arguments: args})
+	}
+	return BridgeCapabilities{
+		Version:                BridgeProtocolVersion,
+		DefaultMode:            defaultMode,
+		Modes:                  []string{"off", "shadow", "explicit", "infer_readonly", "infer_all"},
+		Protocols:              []string{"chat_completions", "anthropic_messages", "responses"},
+		NativeTools:            tools,
+		ParallelToolCalls:      true,
+		Images:                 true,
+		InteractionQueries:     false,
+		StatefulContinuation:   false,
+		ProtocolTerminalErrors: true,
+	}
+}
+
+func modelCapabilities(publicModel string) ModelCapabilities {
+	selection := ResolveModel(publicModel)
+	capabilities := ModelCapabilities{BridgeVersion: BridgeProtocolVersion}
+	switch selection.ModelID {
+	case "grok-4.6":
+		capabilities.Efforts = []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh}
+		capabilities.Fast = true
+		capabilities.MaxMode = true
+	case "grok-4.5":
+		capabilities.Efforts = []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh}
+		capabilities.Fast = true
+		capabilities.MaxMode = true
+	case "composer-2.5":
+		capabilities.Fast = true
+	}
+	return capabilities
 }
 
 // DefaultModelIDs 返回内置模型的对外 ID 列表（含 cursor/ 前缀）。
@@ -163,6 +241,29 @@ func ResolveModel(publicModel string) ModelSelection {
 	return selection
 }
 
+// ResolveModelStrict resolves only models present in the verified catalog.
+// Public gateway APIs use it so a typo cannot silently run cursor/default while
+// the response still claims the requested model.
+func ResolveModelStrict(publicModel string) (ModelSelection, error) {
+	bare := strings.TrimSpace(publicModel)
+	if rest := strings.TrimPrefix(bare, PublicModelPrefix); rest != bare {
+		bare = strings.TrimSpace(rest)
+	}
+	if bare == "" {
+		return ModelSelection{}, fmt.Errorf("cursor model is required")
+	}
+	if rest, found := strings.CutSuffix(bare, MaxModeSuffix); found {
+		if _, ok := knownUpstreamModelIDs[rest]; !ok {
+			return ModelSelection{}, fmt.Errorf("unknown cursor model %q", publicModel)
+		}
+		return ResolveModel(publicModel), nil
+	}
+	if _, ok := knownUpstreamModelIDs[bare]; !ok {
+		return ModelSelection{}, fmt.Errorf("unknown cursor model %q", publicModel)
+	}
+	return ResolveModel(publicModel), nil
+}
+
 // ResolveModelWithOptions 在模型名解析结果上应用请求级参数。
 //
 // standardEffort 来自各兼容协议的标准字段：
@@ -178,7 +279,28 @@ func ResolveModelWithOptions(
 	options *ModelOptions,
 ) (ModelSelection, error) {
 	selection := ResolveModel(publicModel)
+	return applyModelOptions(selection, standardEffort, options)
+}
 
+// ResolveModelWithOptionsStrict combines strict catalog validation with
+// request-level effort/fast/MAX overrides.
+func ResolveModelWithOptionsStrict(
+	publicModel string,
+	standardEffort *string,
+	options *ModelOptions,
+) (ModelSelection, error) {
+	selection, err := ResolveModelStrict(publicModel)
+	if err != nil {
+		return ModelSelection{}, err
+	}
+	return applyModelOptions(selection, standardEffort, options)
+}
+
+func applyModelOptions(
+	selection ModelSelection,
+	standardEffort *string,
+	options *ModelOptions,
+) (ModelSelection, error) {
 	effort := ""
 	standardEffortValue := ""
 	customEffortValue := ""

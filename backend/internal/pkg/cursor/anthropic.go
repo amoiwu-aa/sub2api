@@ -93,9 +93,6 @@ func (r *AnthropicRequest) McpTools() []McpTool {
 			continue
 		}
 		name := strings.TrimSpace(tool.Name)
-		if name == "" {
-			continue
-		}
 		tools = append(tools, McpTool{
 			Name:        name,
 			Description: tool.Description,
@@ -106,17 +103,36 @@ func (r *AnthropicRequest) McpTools() []McpTool {
 }
 
 func (r *AnthropicRequest) toolsDisabled() bool {
+	disableAll, _, _ := r.toolControl()
+	return disableAll
+}
+
+func (r *AnthropicRequest) toolControl() (disableAll, disableParallel bool, err error) {
+	if r == nil {
+		return false, false, nil
+	}
 	trimmed := strings.TrimSpace(string(r.ToolChoice))
 	if trimmed == "" {
-		return false
+		return false, false, nil
 	}
 	var choice struct {
-		Type string `json:"type"`
+		Type                   string `json:"type"`
+		DisableParallelToolUse bool   `json:"disable_parallel_tool_use,omitempty"`
 	}
 	if err := json.Unmarshal(r.ToolChoice, &choice); err != nil {
-		return false
+		return false, false, fmt.Errorf("invalid tool_choice: %w", err)
 	}
-	return choice.Type == "none"
+	switch choice.Type {
+	case "", "auto":
+		return false, choice.DisableParallelToolUse, nil
+	case "none":
+		return true, choice.DisableParallelToolUse, nil
+	case "any", "tool":
+		return false, choice.DisableParallelToolUse,
+			fmt.Errorf("tool_choice type %q is not supported by the Cursor bridge", choice.Type)
+	default:
+		return false, choice.DisableParallelToolUse, fmt.Errorf("invalid tool_choice type %q", choice.Type)
+	}
 }
 
 // Conversation 把 Messages 请求归一化。
@@ -139,7 +155,14 @@ func (r *AnthropicRequest) Conversation() *Conversation {
 		}
 		turns = append(turns, messageTurns...)
 	}
-	return &Conversation{Turns: turns, Tools: r.McpTools(), Err: errors.Join(conversionErrors...)}
+	disableAll, disableParallel, controlErr := r.toolControl()
+	return &Conversation{
+		Turns:                    turns,
+		Tools:                    r.McpTools(),
+		DisableAllTools:          disableAll,
+		DisableParallelToolCalls: disableParallel,
+		Err:                      errors.Join(append(conversionErrors, controlErr)...),
+	}
 }
 
 func anthropicMessageToTurns(message AnthropicMessage) ([]Turn, error) {

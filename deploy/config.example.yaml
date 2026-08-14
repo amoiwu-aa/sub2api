@@ -234,6 +234,11 @@ security:
 # 网关配置
 # =============================================================================
 gateway:
+  # Cursor native-tool bridge mode:
+  # off | shadow | explicit | infer_readonly | infer_all
+  # Safe default: shadow records inferred mappings while keeping all tools on MCP.
+  # Cursor 原生工具桥模式；安全默认值 shadow 只观测推断，不摘除 MCP 工具。
+  cursor_native_tool_bridge_mode: shadow
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600

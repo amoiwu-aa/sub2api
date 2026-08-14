@@ -50,6 +50,9 @@ var (
 	// 的参数漏成正文。留到 3 秒是按「参数较长的调用也能生成完」取的，代价是带
 	// 工具的那一轮多等最多 3 秒。
 	toolCallGrace = envDuration("CURSOR_TOOL_CALL_GRACE_MS", 3*time.Second, time.Millisecond)
+	// toolCallCollectionCap 是连续工具调用收集的绝对上限。quiet timer 每次调用
+	// 都会续期，模型若持续生成调用可能永远不收尾；触及上限必须标 incomplete。
+	toolCallCollectionCap = envDuration("CURSOR_TOOL_CALL_CAP_MS", 15*time.Second, time.Millisecond)
 )
 
 // AgentOptions 是一次 Agent 调用的传输与身份配置。
@@ -74,10 +77,12 @@ type AgentTurnInput struct {
 	MaxMode           *bool
 	// Tools 是客户端声明的工具，注册为 MCP 工具供模型调用。
 	Tools []McpTool
-	// NativeToolBridge 是原生工具桥映射（内置名 → 客户端工具名）。
+	// NativeToolBridge 是原生工具桥映射（内置名 → 客户端工具）。
 	// 命中的内置工具 exec 不回 stub，翻译成客户端工具调用后与 MCP
 	// 调用走同一条「不回执、主动关流」的收尾路径。
-	NativeToolBridge map[string]string
+	NativeToolBridge NativeToolBridge
+	// DisableParallelToolCalls is the normalized client tool-control request.
+	DisableParallelToolCalls bool
 	// ProjectName 影响 RequestContext 里构造出来的项目路径。
 	ProjectName string
 }
@@ -116,6 +121,18 @@ type AgentTurnResult struct {
 	// ToolCalls 是模型这一轮要客户端执行的工具调用。非空时这一轮以
 	// finish_reason=tool_calls 收尾，结果由客户端在下一次请求里带回来。
 	ToolCalls []ToolCall
+	// ToolCallCollectionTimedOut 表示连续工具调用触及绝对收集上限，末尾调用
+	// 可能被截断。该轮必须按 incomplete 处理。
+	ToolCallCollectionTimedOut bool
+	// DuplicateToolCalls / ConflictingToolCalls 记录重复 call ID。完全一致的重复
+	// 被去重；同 ID 不同内容属于协议冲突，会把该轮标成 incomplete。
+	DuplicateToolCalls   int
+	ConflictingToolCalls int
+	MCPToolCalls         int
+	NativeToolCalls      int
+	TextualToolCalls     int
+	// ToolCallCollectionMs 是从首个调用到收集结束的耗时。
+	ToolCallCollectionMs int64
 }
 
 // EndedWithToolCalls 报告这一轮是否以工具调用收尾。
@@ -129,7 +146,13 @@ func (r *AgentTurnResult) EndedWithToolCalls() bool {
 // 以工具调用收尾也算完整：那是双方约好的暂停点，不是故障。上游确实还开着流
 // 在等一个我们不打算给的 exec 回执，但这一轮对客户端而言已经交付完毕。
 func (r *AgentTurnResult) Incomplete() bool {
-	if r == nil || r.EndedWithToolCalls() {
+	if r == nil {
+		return false
+	}
+	if r.ToolCallCollectionTimedOut || r.ConflictingToolCalls > 0 {
+		return true
+	}
+	if r.EndedWithToolCalls() {
 		return false
 	}
 	return r.Stalled || r.ExecUnanswered > 0 || r.QueryIgnored > 0
@@ -156,6 +179,15 @@ func (r *AgentTurnResult) IncompleteSummary() string {
 	}
 	if r.QueryIgnored > 0 {
 		parts = append(parts, fmt.Sprintf("query_ignored=%d", r.QueryIgnored))
+	}
+	if r.ToolCallCollectionTimedOut {
+		parts = append(parts, "tool_call_collection_timeout")
+	}
+	if r.DuplicateToolCalls > 0 {
+		parts = append(parts, fmt.Sprintf("tool_call_duplicates=%d", r.DuplicateToolCalls))
+	}
+	if r.ConflictingToolCalls > 0 {
+		parts = append(parts, fmt.Sprintf("tool_call_conflicts=%d", r.ConflictingToolCalls))
 	}
 	if r.KVSeen > 0 {
 		parts = append(parts, fmt.Sprintf("kv=%d", r.KVSeen))
@@ -213,13 +245,33 @@ func RunAgentTurn(
 	}
 	stream.startHeartbeat(ctx)
 
-	result, err := stream.readTurn(input.NativeToolBridge, newTextualToolCallFilter(input.Tools, input.NativeToolBridge), onDelta)
+	result, err := stream.readTurn(
+		input.NativeToolBridge,
+		input.DisableParallelToolCalls,
+		newTextualToolCallFilter(input.Tools, input.NativeToolBridge),
+		onDelta,
+	)
 	if result != nil && result.TextualToolMarkupSuppressed > 0 {
 		// 吞掉的正文必须留痕：否则"模型说调了工具却没反应"没法排查。
 		slog.Warn("cursor.textual_tool_markup_suppressed",
 			"count", result.TextualToolMarkupSuppressed,
 			"conversation_id", conversationID,
 			"model", input.ModelID,
+		)
+	}
+	if result != nil && (len(result.ToolCalls) > 0 || result.ExecHandled > 0 || result.QueryIgnored > 0) {
+		slog.Debug("cursor.agent_tool_bridge",
+			"conversation_id", conversationID,
+			"model", input.ModelID,
+			"mcp_calls", result.MCPToolCalls,
+			"native_calls", result.NativeToolCalls,
+			"textual_calls", result.TextualToolCalls,
+			"duplicates", result.DuplicateToolCalls,
+			"conflicts", result.ConflictingToolCalls,
+			"collection_ms", result.ToolCallCollectionMs,
+			"collection_timeout", result.ToolCallCollectionTimedOut,
+			"exec_stubbed", result.ExecHandled,
+			"query_unsupported", result.QueryIgnored,
 		)
 	}
 	return result, err
@@ -365,7 +417,8 @@ func (s *agentStream) close() {
 // markupFilter 非 nil 时，正文里模仿重放格式写出的 <tool_call>/<invoke> 标记
 // 会被拦下——可解析的转成真调用，残缺的吞掉（见 textual_tool_call_filter.go）。
 func (s *agentStream) readTurn(
-	nativeToolBridge map[string]string,
+	nativeToolBridge NativeToolBridge,
+	disableParallelToolCalls bool,
 	markupFilter *textualToolCallFilter,
 	onDelta func(AgentDelta) error,
 ) (*AgentTurnResult, error) {
@@ -385,7 +438,15 @@ func (s *agentStream) readTurn(
 	// endingOnMarkupLoop 是伪造转写死循环的熔断收尾（见 textualMarkupLoopLimit）：
 	// 同样属于主动关流的正常收尾，不标 stalled。
 	var endingOnMarkupLoop atomic.Bool
-	var toolCallTimer *time.Timer
+	// interaction_query 当前没有可验证的回执协议。收到后立即收尾并让适配器
+	// 返回明确 unsupported/incomplete，不能等 15 秒后伪装成成功。
+	var endingOnUnsupportedQuery atomic.Bool
+	var toolCallQuietTimer *time.Timer
+	var toolCallCapTimer *time.Timer
+	var toolCallCollectionDone atomic.Bool
+	var toolCallCollectionTimedOut atomic.Bool
+	var toolCallCollectionStarted time.Time
+	seenToolCalls := make(map[string]ToolCall)
 	stallTimer := time.AfterFunc(streamStallTimeout, func() {
 		stalled.Store(true)
 		s.close()
@@ -395,8 +456,11 @@ func (s *agentStream) readTurn(
 		if graceTimer != nil {
 			graceTimer.Stop()
 		}
-		if toolCallTimer != nil {
-			toolCallTimer.Stop()
+		if toolCallQuietTimer != nil {
+			toolCallQuietTimer.Stop()
+		}
+		if toolCallCapTimer != nil {
+			toolCallCapTimer.Stop()
 		}
 	}()
 
@@ -414,13 +478,30 @@ func (s *agentStream) readTurn(
 	// 不会给的 exec 回执，必须主动关流。文本标记转换出的调用（textual
 	// filter）只是模型写的字，上游没在等任何东西，这轮会以 turn_ended
 	// 自然收尾——提前关流反而会截断标记之后的正文。
-	collectClientToolCall := func(clientCall *McpToolCall, closeAfterGrace bool) error {
+	collectClientToolCall := func(clientCall *McpToolCall, closeAfterGrace bool, source string) error {
 		call := ToolCall{
 			ID:        NewOpenAIToolCallID(clientCall.CallID),
 			Name:      clientCall.Name,
 			Arguments: string(clientCall.Arguments),
 		}
+		if previous, exists := seenToolCalls[call.ID]; exists {
+			if previous.Name == call.Name && previous.Arguments == call.Arguments {
+				result.DuplicateToolCalls++
+				return nil
+			}
+			result.ConflictingToolCalls++
+			return nil
+		}
+		seenToolCalls[call.ID] = call
 		result.ToolCalls = append(result.ToolCalls, call)
+		switch source {
+		case "mcp":
+			result.MCPToolCalls++
+		case "native":
+			result.NativeToolCalls++
+		case "textual":
+			result.TextualToolCalls++
+		}
 		if err := emit(AgentDelta{ToolCall: &call}); err != nil {
 			return err
 		}
@@ -429,11 +510,28 @@ func (s *agentStream) readTurn(
 			return nil
 		}
 		stallTimer.Stop()
-		if toolCallTimer == nil {
+		if disableParallelToolCalls {
 			endingOnToolCall.Store(true)
-			toolCallTimer = time.AfterFunc(toolCallGrace, s.close)
+			toolCallCollectionDone.Store(true)
+			s.close()
+			return nil
+		}
+		if toolCallQuietTimer == nil {
+			endingOnToolCall.Store(true)
+			toolCallCollectionStarted = time.Now()
+			toolCallQuietTimer = time.AfterFunc(toolCallGrace, func() {
+				if toolCallCollectionDone.CompareAndSwap(false, true) {
+					s.close()
+				}
+			})
+			toolCallCapTimer = time.AfterFunc(toolCallCollectionCap, func() {
+				if toolCallCollectionDone.CompareAndSwap(false, true) {
+					toolCallCollectionTimedOut.Store(true)
+					s.close()
+				}
+			})
 		} else {
-			toolCallTimer.Reset(toolCallGrace)
+			toolCallQuietTimer.Reset(toolCallGrace)
 		}
 		return nil
 	}
@@ -443,7 +541,8 @@ func (s *agentStream) readTurn(
 		if err != nil {
 			// turn_ended 后宽限期到点会关掉 body，读出的错误就是预期的收尾信号；
 			// 工具调用/熔断后的主动关流同理。看门狗关 body 也走这里，只是要标成不完整。
-			if errors.Is(err, io.EOF) || result.TurnEnded || endingOnToolCall.Load() || endingOnMarkupLoop.Load() {
+			if errors.Is(err, io.EOF) || result.TurnEnded || endingOnToolCall.Load() ||
+				endingOnMarkupLoop.Load() || endingOnUnsupportedQuery.Load() {
 				break
 			}
 			if stalled.Load() {
@@ -472,7 +571,7 @@ func (s *agentStream) readTurn(
 			if clean := textFilter.Feed(message.TextDelta); clean != "" {
 				clean, markupCalls := markupFilter.Feed(clean)
 				for _, call := range markupCalls {
-					if err := collectClientToolCall(call, false); err != nil {
+					if err := collectClientToolCall(call, false, "textual"); err != nil {
 						return nil, err
 					}
 				}
@@ -505,14 +604,14 @@ func (s *agentStream) readTurn(
 			if message.ToolCall == nil {
 				continue
 			}
-			if err := collectClientToolCall(message.ToolCall, true); err != nil {
+			if err := collectClientToolCall(message.ToolCall, true, "mcp"); err != nil {
 				return nil, err
 			}
 		case KindExec:
 			// 原生工具桥：映射过的内置只读工具翻译成客户端调用，
 			// 与 MCP 调用共用「不回执、主动关流」的收尾。
 			if call := TranslateNativeExec(nativeToolBridge, message.Exec); call != nil {
-				if err := collectClientToolCall(call, true); err != nil {
+				if err := collectClientToolCall(call, true, "native"); err != nil {
 					return nil, err
 				}
 				continue
@@ -536,10 +635,12 @@ func (s *agentStream) readTurn(
 			result.ExecUnanswered++
 			stallTimer.Reset(execStallTimeout)
 		case KindQuery:
-			// 网关目前不实现 interaction_query 回执。上游若在等用户选择/确认，
-			// 会像未回执的 exec 一样静默挂起——记数并缩短看门狗。
+			// 网关目前不实现 interaction_query 回执。立即关流，调用方会根据
+			// QueryIgnored 将该轮编码成协议对应的失败终态。
 			result.QueryIgnored++
-			stallTimer.Reset(execStallTimeout)
+			endingOnUnsupportedQuery.Store(true)
+			stallTimer.Stop()
+			s.close()
 		case KindKV:
 			result.KVSeen++
 			stallTimer.Reset(streamStallTimeout)
@@ -552,6 +653,13 @@ func (s *agentStream) readTurn(
 		case KindTurnEnded:
 			if result.TurnEnded {
 				continue
+			}
+			toolCallCollectionDone.Store(true)
+			if toolCallQuietTimer != nil {
+				toolCallQuietTimer.Stop()
+			}
+			if toolCallCapTimer != nil {
+				toolCallCapTimer.Stop()
 			}
 			result.TurnEnded = true
 			// 收尾交给 graceTimer，看门狗不必再盯着。
@@ -571,7 +679,7 @@ func (s *agentStream) readTurn(
 	if tail := textFilter.Flush(); tail != "" {
 		clean, markupCalls := markupFilter.Feed(tail)
 		for _, call := range markupCalls {
-			_ = collectClientToolCall(call, false)
+			_ = collectClientToolCall(call, false, "textual")
 		}
 		if clean != "" {
 			text.WriteString(clean)
@@ -591,6 +699,10 @@ func (s *agentStream) readTurn(
 		_ = emit(AgentDelta{Thinking: tail})
 	}
 
+	result.ToolCallCollectionTimedOut = toolCallCollectionTimedOut.Load()
+	if !toolCallCollectionStarted.IsZero() {
+		result.ToolCallCollectionMs = time.Since(toolCallCollectionStarted).Milliseconds()
+	}
 	result.Text = text.String()
 	result.Thinking = thinking.String()
 	return result, nil

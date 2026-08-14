@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/gin-gonic/gin"
@@ -31,12 +32,35 @@ const (
 type CursorGatewayService struct {
 	tokenProvider    *CursorTokenProvider
 	rateLimitService *RateLimitService
+	nativeBridgeMode string
 	// quotaReader 用于按模型判定 Auto / API 两档额度是否还有余量。
 	quotaReader cursorQuotaSnapshotReader
 }
 
-func NewCursorGatewayService(tokenProvider *CursorTokenProvider, rateLimitService *RateLimitService, quotaReader cursorQuotaSnapshotReader) *CursorGatewayService {
-	return &CursorGatewayService{tokenProvider: tokenProvider, rateLimitService: rateLimitService, quotaReader: quotaReader}
+func NewCursorGatewayService(
+	tokenProvider *CursorTokenProvider,
+	rateLimitService *RateLimitService,
+	quotaReader cursorQuotaSnapshotReader,
+	cfg *config.Config,
+) *CursorGatewayService {
+	mode := CursorNativeToolBridgeModeShadow
+	if cfg != nil {
+		mode = normalizeCursorNativeToolBridgeMode(cfg.Gateway.CursorNativeToolBridgeMode)
+	}
+	return &CursorGatewayService{
+		tokenProvider:    tokenProvider,
+		rateLimitService: rateLimitService,
+		nativeBridgeMode: mode,
+		quotaReader:      quotaReader,
+	}
+}
+
+// NativeToolBridgeMode exposes the effective mode for capability discovery.
+func (s *CursorGatewayService) NativeToolBridgeMode() string {
+	if s == nil {
+		return CursorNativeToolBridgeModeShadow
+	}
+	return normalizeCursorNativeToolBridgeMode(s.nativeBridgeMode)
 }
 
 // reportUpstreamError 把上游故障喂给账号健康度体系。
@@ -86,7 +110,7 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	if err := conversation.ValidationError(); err != nil {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
-	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools)
+	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
 	if err != nil {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -125,14 +149,15 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	defer cancel()
 
 	input := cursor.AgentTurnInput{
-		Text:             prompt,
-		ConversationID:   conversationID,
-		Images:           conversation.Images(),
-		ModelID:          selection.ModelID,
-		ModelParams:      selection.Params,
-		MaxMode:          selection.MaxMode,
-		Tools:            conversation.Tools,
-		NativeToolBridge: conversation.NativeToolBridge,
+		Text:                     prompt,
+		ConversationID:           conversationID,
+		Images:                   conversation.Images(),
+		ModelID:                  selection.ModelID,
+		ModelParams:              selection.Params,
+		MaxMode:                  selection.MaxMode,
+		Tools:                    conversation.Tools,
+		NativeToolBridge:         conversation.NativeToolBridge,
+		DisableParallelToolCalls: conversation.DisableParallelToolCalls,
 	}
 
 	var result *ForwardResult
@@ -369,6 +394,10 @@ func (s *CursorGatewayService) forwardStreaming(
 		return nil, s.upstreamError(ctx, c, account, publicModel, err, headersWritten)
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+	if result.Incomplete() {
+		return nil, s.upstreamError(ctx, c, account, publicModel,
+			cursorIncompleteTurnError(result), headersWritten)
+	}
 
 	// finish_reason 必须如实反映这一轮是不是停在工具调用上：报成 stop
 	// 会让客户端以为任务已经做完，工具永远不会被执行。
@@ -386,6 +415,7 @@ func (s *CursorGatewayService) forwardStreaming(
 			created,
 			prompt,
 			result.Text,
+			cursorAgentUsageDetails(input, result),
 		)); err != nil {
 			return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 		}
@@ -393,7 +423,10 @@ func (s *CursorGatewayService) forwardStreaming(
 	if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err == nil {
 		c.Writer.Flush()
 	}
-	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false), nil
+	return s.buildResult(
+		prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false,
+		cursorAgentUsageDetails(input, result),
+	), nil
 }
 
 func (s *CursorGatewayService) forwardBuffered(
@@ -410,6 +443,10 @@ func (s *CursorGatewayService) forwardBuffered(
 		return nil, s.upstreamError(ctx, c, account, publicModel, err, false)
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+	if result.Incomplete() {
+		return nil, s.upstreamError(ctx, c, account, publicModel,
+			cursorIncompleteTurnError(result), false)
+	}
 
 	promptTokens := cursor.EstimateTokens(prompt)
 	completionTokens := cursor.EstimateTokens(result.Text)
@@ -438,7 +475,10 @@ func (s *CursorGatewayService) forwardBuffered(
 			TotalTokens:      promptTokens + completionTokens,
 		},
 	})
-	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false), nil
+	return s.buildResult(
+		prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false,
+		cursorAgentUsageDetails(input, result),
+	), nil
 }
 
 // cursorPromptTooLargeMessage 说明超限原因。带上实际字节数和上限，客户端才知道
@@ -483,6 +523,13 @@ func (s *CursorGatewayService) recordAgentIncomplete(
 		"exec_unanswered", result.ExecUnanswered,
 		"query_ignored", result.QueryIgnored,
 		"kv_seen", result.KVSeen,
+		"mcp_tool_calls", result.MCPToolCalls,
+		"native_tool_calls", result.NativeToolCalls,
+		"textual_tool_calls", result.TextualToolCalls,
+		"tool_call_duplicates", result.DuplicateToolCalls,
+		"tool_call_conflicts", result.ConflictingToolCalls,
+		"tool_call_collection_ms", result.ToolCallCollectionMs,
+		"tool_call_collection_timeout", result.ToolCallCollectionTimedOut,
 	)
 	if c == nil {
 		return
@@ -520,11 +567,16 @@ func (s *CursorGatewayService) buildResult(
 	firstTokenMs *int,
 	startTime time.Time,
 	clientDisconnect bool,
+	details ...cursor.AgentUsageDetails,
 ) *ForwardResult {
+	usageDetails := cursor.AgentUsageDetails{}
+	if len(details) > 0 {
+		usageDetails = details[0]
+	}
 	result := &ForwardResult{
 		Usage: ClaudeUsage{
-			InputTokens:      int(cursor.EstimateTokens(prompt)),
-			OutputTokens:     int(cursor.EstimateTokens(completion)),
+			InputTokens:      int(cursor.EstimateAgentInputTokens(prompt, usageDetails)),
+			OutputTokens:     int(cursor.EstimateAgentOutputTokens(completion, usageDetails)),
 			CacheUsageSource: CacheUsageSourceEstimated,
 		},
 		Model:            publicModel,
@@ -542,6 +594,26 @@ func (s *CursorGatewayService) buildResult(
 func (s *CursorGatewayService) upstreamError(
 	ctx context.Context, c *gin.Context, account *Account, model string, err error, headersWritten bool,
 ) error {
+	failure := s.prepareCursorUpstreamFailure(ctx, c, account, model, err)
+	body := cursorGatewayErrorBody(failure.status, failure.message)
+	if headersWritten {
+		// Chat Completions 流已经开出去了，只能在流里补 OpenAI 错误事件收尾。
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\ndata: [DONE]\n\n", body)
+		c.Writer.Flush()
+		return errors.New(failure.message)
+	}
+	return &UpstreamFailoverError{StatusCode: failure.status, ResponseBody: body}
+}
+
+type cursorUpstreamFailure struct {
+	status     int
+	message    string
+	connectErr *cursor.ConnectError
+}
+
+func (s *CursorGatewayService) prepareCursorUpstreamFailure(
+	ctx context.Context, c *gin.Context, account *Account, model string, err error,
+) cursorUpstreamFailure {
 	status := http.StatusBadGateway
 	message := "Cursor agent request failed"
 
@@ -574,13 +646,7 @@ func (s *CursorGatewayService) upstreamError(
 	// 能否 failover 与账号健康度是两件事：即便流已经开出去无法重试，
 	// 429/5xx/401 仍然要影响这个账号下一次能不能被选中。
 	s.reportUpstreamError(ctx, account, status, body, model)
-	if headersWritten {
-		// 流已经开出去了，只能在流里补一个错误事件收尾。
-		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\ndata: [DONE]\n\n", body)
-		c.Writer.Flush()
-		return errors.New(message)
-	}
-	return &UpstreamFailoverError{StatusCode: status, ResponseBody: body}
+	return cursorUpstreamFailure{status: status, message: message, connectErr: connectErr}
 }
 
 // recordUpstreamOpsError 把上游拒绝的真实原因写进 ops 上下文。
@@ -631,6 +697,17 @@ func (s *CursorGatewayService) writeError(c *gin.Context, status int, errType, m
 }
 
 func cursorGatewayErrorBody(status int, message string) []byte {
+	errType := cursorGatewayErrorType(status)
+	body, err := json.Marshal(map[string]any{
+		"error": map[string]any{"type": errType, "message": message},
+	})
+	if err != nil {
+		return []byte(`{"error":{"type":"api_error","message":"Cursor agent request failed"}}`)
+	}
+	return body
+}
+
+func cursorGatewayErrorType(status int) string {
 	errType := "api_error"
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
@@ -640,13 +717,15 @@ func cursorGatewayErrorBody(status int, message string) []byte {
 	case status >= 400 && status < 500:
 		errType = "invalid_request_error"
 	}
-	body, err := json.Marshal(map[string]any{
-		"error": map[string]any{"type": errType, "message": message},
-	})
-	if err != nil {
-		return []byte(`{"error":{"type":"api_error","message":"Cursor agent request failed"}}`)
+	return errType
+}
+
+func cursorIncompleteTurnError(result *cursor.AgentTurnResult) error {
+	summary := "unknown"
+	if result != nil && result.IncompleteSummary() != "" {
+		summary = result.IncompleteSummary()
 	}
-	return body
+	return fmt.Errorf("cursor agent turn incomplete: %s", summary)
 }
 
 // NewTestAgentOptions 为后台「测试连接」构造 Agent 参数。

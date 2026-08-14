@@ -62,6 +62,60 @@ func TestEncodeMcpToolsIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestValidateMcpToolsRejectsMalformedDeclarations(t *testing.T) {
+	tests := []struct {
+		name  string
+		tools []McpTool
+		want  string
+	}{
+		{
+			name:  "empty name",
+			tools: []McpTool{{Name: " ", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+			want:  "name must not be empty",
+		},
+		{
+			name: "duplicate name",
+			tools: []McpTool{
+				{Name: "Read", InputSchema: json.RawMessage(`{"type":"object"}`)},
+				{Name: "Read", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			},
+			want: "duplicate tool name",
+		},
+		{
+			name:  "invalid json",
+			tools: []McpTool{{Name: "Read", InputSchema: json.RawMessage(`{`)}},
+			want:  "invalid JSON schema",
+		},
+		{
+			name:  "non object root",
+			tools: []McpTool{{Name: "Read", InputSchema: json.RawMessage(`{"type":"array"}`)}},
+			want:  "root type must be object",
+		},
+		{
+			name:  "invalid properties",
+			tools: []McpTool{{Name: "Read", InputSchema: json.RawMessage(`{"type":"object","properties":[]}`)}},
+			want:  "properties must be an object",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorContains(t, ValidateMcpTools(tc.tools), tc.want)
+		})
+	}
+}
+
+func TestEncodeRunRequestRejectsInvalidToolSchema(t *testing.T) {
+	_, err := EncodeRunRequest(RunRequestInput{
+		Text:           "hi",
+		ConversationID: "conv-invalid-tools",
+		Tools: []McpTool{{
+			Name:        "Read",
+			InputSchema: json.RawMessage(`not-json`),
+		}},
+	})
+	require.ErrorContains(t, err, "invalid JSON schema")
+}
+
 // buildMcpArgs 拼一条 McpArgs：{5: tool_name, 2: {1: key, 2: Value}...}
 func buildMcpArgs(toolName string, args map[string]any) []byte {
 	out := EncodeStringField(mcpToolNameField, toolName)
@@ -154,6 +208,16 @@ func TestToolPolicyPreambleListsNamespacedNames(t *testing.T) {
 	require.Contains(t, preamble, McpToolNamespacePrefix+"Bash")
 	require.Contains(t, preamble, McpToolNamespacePrefix+"Read")
 	require.Contains(t, preamble, "unavailable")
+}
+
+func TestToolPolicyPreambleEnforcesNoneAndNoParallel(t *testing.T) {
+	none := ToolPolicyPreambleWithControl(nil, nil, true, false)
+	require.Contains(t, none, "Tool use is disabled")
+	require.Contains(t, none, "do not invoke any tool")
+
+	single := ToolPolicyPreambleWithControl([]McpTool{{Name: "Read"}}, nil, false, true)
+	require.Contains(t, single, "Call at most one tool")
+	require.Contains(t, single, McpToolNamespacePrefix+"Read")
 }
 
 func TestNormalizeToolName(t *testing.T) {

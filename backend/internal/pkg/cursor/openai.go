@@ -32,7 +32,8 @@ type OpenAIRequest struct {
 	Tools []OpenAITool `json:"tools,omitempty"`
 	// ToolChoice 目前只区分「禁用工具」与其它：Cursor 侧没有强制调用某个
 	// 工具的开关，硬翻译过去只会给出一个做不到的承诺。
-	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	ToolChoice        json.RawMessage `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
 	// ConversationID 让客户端可以显式延续同一段 Agent 会话。
 	ConversationID string `json:"conversation_id,omitempty"`
 	Metadata       *struct {
@@ -85,9 +86,6 @@ func (r *OpenAIRequest) McpTools() []McpTool {
 			continue
 		}
 		name := strings.TrimSpace(tool.Function.Name)
-		if name == "" {
-			continue
-		}
 		tools = append(tools, McpTool{
 			Name:        name,
 			Description: tool.Function.Description,
@@ -100,8 +98,30 @@ func (r *OpenAIRequest) McpTools() []McpTool {
 // toolsDisabled 识别 tool_choice:"none"。客户端用它表示「这一轮别调工具」，
 // 照常声明的话模型多半还是会调，最后卡在一个客户端不打算执行的调用上。
 func (r *OpenAIRequest) toolsDisabled() bool {
+	disableAll, _, _ := r.toolControl()
+	return disableAll
+}
+
+func (r *OpenAIRequest) toolControl() (disableAll, disableParallel bool, err error) {
+	if r == nil {
+		return false, false, nil
+	}
+	disableParallel = r.ParallelToolCalls != nil && !*r.ParallelToolCalls
 	trimmed := strings.TrimSpace(string(r.ToolChoice))
-	return trimmed == `"none"`
+	if trimmed == "" || trimmed == `"auto"` {
+		return false, disableParallel, nil
+	}
+	if trimmed == `"none"` {
+		return true, disableParallel, nil
+	}
+	if trimmed == `"required"` {
+		return false, disableParallel, errors.New("tool_choice=required is not supported by the Cursor bridge")
+	}
+	var choice map[string]any
+	if json.Unmarshal(r.ToolChoice, &choice) == nil {
+		return false, disableParallel, errors.New("named tool_choice is not supported by the Cursor bridge")
+	}
+	return false, disableParallel, errors.New("invalid tool_choice")
 }
 
 // Conversation 把请求归一化成与协议无关的对话表示。
@@ -118,7 +138,14 @@ func (r *OpenAIRequest) Conversation() *Conversation {
 		}
 		turns = append(turns, turn)
 	}
-	return &Conversation{Turns: turns, Tools: r.McpTools(), Err: errors.Join(conversionErrors...)}
+	disableAll, disableParallel, controlErr := r.toolControl()
+	return &Conversation{
+		Turns:                    turns,
+		Tools:                    r.McpTools(),
+		DisableAllTools:          disableAll,
+		DisableParallelToolCalls: disableParallel,
+		Err:                      errors.Join(append(conversionErrors, controlErr)...),
+	}
 }
 
 func openAIMessageToTurn(message OpenAIMessage) (Turn, error) {

@@ -124,7 +124,7 @@ func (s *AccountTestService) testCursorAccountConnection(
 	}
 
 	s.setupSSEHeaders(c)
-	selection, err := cursor.ResolveModelWithOptions(publicModel, nil, modelOptions)
+	selection, err := cursor.ResolveModelWithOptionsStrict(publicModel, nil, modelOptions)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid Cursor model options: %s", err.Error()))
 	}

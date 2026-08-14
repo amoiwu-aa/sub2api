@@ -20,10 +20,12 @@ func TestOpenAIRequestExtractsMcpTools(t *testing.T) {
 	}`)
 
 	tools := req.McpTools()
-	require.Len(t, tools, 1)
+	require.Len(t, tools, 2)
 	require.Equal(t, "Bash", tools[0].Name)
 	require.Equal(t, "run", tools[0].Description)
 	require.JSONEq(t, `{"type":"object"}`, string(tools[0].InputSchema))
+	require.Empty(t, tools[1].Name)
+	require.ErrorContains(t, req.Conversation().ValidationError(), "name must not be empty")
 }
 
 func TestOpenAIRequestToolChoiceNoneDisablesTools(t *testing.T) {
@@ -35,6 +37,38 @@ func TestOpenAIRequestToolChoiceNoneDisablesTools(t *testing.T) {
 		"tools":[{"type":"function","function":{"name":"Bash"}}]
 	}`)
 	require.Empty(t, req.McpTools())
+	conversation := req.Conversation()
+	require.NoError(t, conversation.ValidationError())
+	require.True(t, conversation.DisableAllTools)
+	require.Contains(t, conversation.Render(), "Tool use is disabled")
+}
+
+func TestOpenAIRequestRejectsUnsupportedForcedToolChoice(t *testing.T) {
+	for _, choice := range []string{
+		`"required"`,
+		`{"type":"function","function":{"name":"Bash"}}`,
+	} {
+		req := parseOpenAIRequest(t, `{
+			"model":"cursor/default",
+			"messages":[{"role":"user","content":"hi"}],
+			"tools":[{"type":"function","function":{"name":"Bash","parameters":{"type":"object"}}}],
+			"tool_choice":`+choice+`
+		}`)
+		require.ErrorContains(t, req.Conversation().ValidationError(), "not supported")
+	}
+}
+
+func TestOpenAIRequestCarriesDisableParallelToolCalls(t *testing.T) {
+	req := parseOpenAIRequest(t, `{
+		"model":"cursor/default",
+		"messages":[{"role":"user","content":"hi"}],
+		"tools":[{"type":"function","function":{"name":"Read","parameters":{"type":"object"}}}],
+		"parallel_tool_calls":false
+	}`)
+	conversation := req.Conversation()
+	require.NoError(t, conversation.ValidationError())
+	require.True(t, conversation.DisableParallelToolCalls)
+	require.Contains(t, conversation.Render(), "Call at most one tool")
 }
 
 func TestOpenAIRequestConversationCarriesToolRoundTrip(t *testing.T) {
@@ -61,8 +95,8 @@ func TestOpenAIRequestConversationCarriesToolRoundTrip(t *testing.T) {
 	require.Equal(t, "call_1", conversation.Turns[3].ToolCallID)
 
 	rendered := conversation.Render()
-	require.Contains(t, rendered, `<tool_call id="call_1" name="Bash">`)
-	require.Contains(t, rendered, `<tool_result id="call_1" name="Bash">`)
+	require.Contains(t, rendered, `"tool_calls":[{"id":"call_1","name":"Bash"`)
+	require.Contains(t, rendered, `"role":"tool","tool_call_id":"call_1","tool_name":"Bash"`)
 	require.Contains(t, rendered, "<continue>")
 }
 

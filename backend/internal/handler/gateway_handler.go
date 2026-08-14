@@ -1123,6 +1123,25 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
+	// Cursor advertises a versioned bridge contract with every model response.
+	// Handle it before the generic account-derived path so active groups do not
+	// accidentally lose cursor_bridge metadata.
+	if platform == service.PlatformCursor {
+		availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+		if len(availableModels) == 0 {
+			availableModels = cursor.DefaultModelIDs()
+		}
+		if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
+			availableModels = filterModelsByCustomList(
+				availableModels,
+				cursor.DefaultModelIDs(),
+				apiKey.Group.ModelsListConfig.Models,
+			)
+		}
+		h.writeCursorModelsList(c, availableModels)
+		return
+	}
+
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.CustomModelsListEnabled() {
@@ -1159,13 +1178,6 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 	// cursor / kiro 的模型名带 cursor/ kiro/ 命名空间前缀，且都不是 Claude 目录里的东西。
 	// 漏掉这两个分支会让客户端拿到一份 Claude 模型表，照着点名后每一次请求都选不到号。
-	if platform == service.PlatformCursor {
-		c.JSON(http.StatusOK, gin.H{
-			"object": "list",
-			"data":   cursor.DefaultModels(),
-		})
-		return
-	}
 	if platform == service.PlatformKiro {
 		c.JSON(http.StatusOK, gin.H{
 			"object": "list",
@@ -1177,6 +1189,139 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
 		"data":   claude.DefaultModels,
+	})
+}
+
+func (h *GatewayHandler) writeCursorModelsList(c *gin.Context, modelIDs []string) {
+	type codexReasoningLevel struct {
+		Effort      string `json:"effort"`
+		Description string `json:"description"`
+	}
+	type codexModel struct {
+		AdditionalSpeedTiers        []any                 `json:"additional_speed_tiers"`
+		ApplyPatchToolType          string                `json:"apply_patch_tool_type"`
+		AvailabilityNux             any                   `json:"availability_nux"`
+		BaseInstructions            string                `json:"base_instructions"`
+		CompHash                    string                `json:"comp_hash"`
+		ContextWindow               int                   `json:"context_window"`
+		DefaultReasoningLevel       string                `json:"default_reasoning_level"`
+		DefaultReasoningSummary     string                `json:"default_reasoning_summary"`
+		DefaultVerbosity            string                `json:"default_verbosity"`
+		Description                 string                `json:"description"`
+		DisplayName                 string                `json:"display_name"`
+		EffectiveContextWindowPct   int                   `json:"effective_context_window_percent"`
+		ExperimentalSupportedTools  []any                 `json:"experimental_supported_tools"`
+		IncludeSkillsInstructions   bool                  `json:"include_skills_usage_instructions"`
+		InputModalities             []string              `json:"input_modalities"`
+		MaxContextWindow            int                   `json:"max_context_window"`
+		ModelMessages               map[string]any        `json:"model_messages"`
+		Priority                    int                   `json:"priority"`
+		ServiceTiers                []any                 `json:"service_tiers"`
+		ShellType                   string                `json:"shell_type"`
+		Slug                        string                `json:"slug"`
+		SupportVerbosity            bool                  `json:"support_verbosity"`
+		SupportedInAPI              bool                  `json:"supported_in_api"`
+		SupportedReasoningLevels    []codexReasoningLevel `json:"supported_reasoning_levels"`
+		SupportsImageDetailOriginal bool                  `json:"supports_image_detail_original"`
+		SupportsParallelToolCalls   bool                  `json:"supports_parallel_tool_calls"`
+		SupportsReasoningSummaries  bool                  `json:"supports_reasoning_summaries"`
+		SupportsSearchTool          bool                  `json:"supports_search_tool"`
+		TruncationPolicy            map[string]any        `json:"truncation_policy"`
+		Upgrade                     any                   `json:"upgrade"`
+		UseResponsesLite            bool                  `json:"use_responses_lite"`
+		Visibility                  string                `json:"visibility"`
+		WebSearchToolType           string                `json:"web_search_tool_type"`
+	}
+	defaults := cursor.DefaultModels()
+	defaultsByID := make(map[string]cursor.Model, len(defaults))
+	for _, model := range defaults {
+		defaultsByID[model.ID] = model
+	}
+
+	models := make([]cursor.Model, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		if model, ok := defaultsByID[strings.TrimSpace(modelID)]; ok {
+			models = append(models, model)
+		}
+	}
+	if len(models) == 0 {
+		models = defaults
+	}
+	codexModels := make([]codexModel, 0, len(models))
+	for index, model := range models {
+		reasoningLevels := make([]codexReasoningLevel, 0)
+		defaultReasoning := "medium"
+		if model.CursorCapabilities != nil {
+			for _, effort := range model.CursorCapabilities.Efforts {
+				reasoningLevels = append(reasoningLevels, codexReasoningLevel{
+					Effort:      effort,
+					Description: "RingStar Cursor reasoning effort " + effort,
+				})
+			}
+			if len(model.CursorCapabilities.Efforts) > 0 {
+				defaultReasoning = model.CursorCapabilities.Efforts[len(model.CursorCapabilities.Efforts)-1]
+				if defaultReasoning == cursor.ModelEffortXHigh {
+					defaultReasoning = cursor.ModelEffortHigh
+				}
+			}
+		}
+		codexModels = append(codexModels, codexModel{
+			AdditionalSpeedTiers:       []any{},
+			ApplyPatchToolType:         "freeform",
+			BaseInstructions:           "Use the client tools through the Responses tool-calling channel.",
+			CompHash:                   "ringstar-" + cursor.BridgeProtocolVersion,
+			ContextWindow:              200000,
+			DefaultReasoningLevel:      defaultReasoning,
+			DefaultReasoningSummary:    "auto",
+			DefaultVerbosity:           "medium",
+			Description:                model.DisplayName,
+			DisplayName:                model.DisplayName,
+			EffectiveContextWindowPct:  95,
+			ExperimentalSupportedTools: []any{},
+			IncludeSkillsInstructions:  true,
+			InputModalities:            []string{"text", "image"},
+			MaxContextWindow:           200000,
+			ModelMessages: map[string]any{
+				"approvals":             nil,
+				"instructions_template": "{{ personality }}",
+				"instructions_variables": map[string]string{
+					"personality_default": "",
+				},
+			},
+			Priority:                    1000 + index,
+			ServiceTiers:                []any{},
+			ShellType:                   "shell_command",
+			Slug:                        model.ID,
+			SupportVerbosity:            true,
+			SupportedInAPI:              true,
+			SupportedReasoningLevels:    reasoningLevels,
+			SupportsImageDetailOriginal: true,
+			SupportsParallelToolCalls:   true,
+			SupportsReasoningSummaries:  true,
+			SupportsSearchTool:          true,
+			TruncationPolicy: map[string]any{
+				"limit": 10000,
+				"mode":  "tokens",
+			},
+			UseResponsesLite:  false,
+			Visibility:        "list",
+			WebSearchToolType: "text_and_image",
+		})
+	}
+	mode := service.CursorNativeToolBridgeModeShadow
+	if h != nil && h.cursorGatewayService != nil {
+		mode = h.cursorGatewayService.NativeToolBridgeMode()
+	}
+	c.Header("X-RingStar-Cursor-Bridge-Version", cursor.BridgeProtocolVersion)
+	c.Header("X-RingStar-Cursor-Bridge-Mode", mode)
+	c.JSON(http.StatusOK, gin.H{
+		"object": "list",
+		"data":   models,
+		// Codex custom providers decode /v1/models as a manifest with a
+		// top-level models array, while ordinary OpenAI clients expect data.
+		// Serving both keeps discovery compatible without UA heuristics.
+		"models":        codexModels,
+		"cursor_bridge": cursor.DefaultBridgeCapabilities(mode),
 	})
 }
 

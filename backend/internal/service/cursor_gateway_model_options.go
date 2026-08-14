@@ -24,7 +24,7 @@ func resolveCursorModelSelection(
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return cursor.ModelSelection{}, fmt.Errorf("invalid cursor_options: %w", err)
 	}
-	return cursor.ResolveModelWithOptions(publicModel, standardEffort, envelope.CursorOptions)
+	return cursor.ResolveModelWithOptionsStrict(publicModel, standardEffort, envelope.CursorOptions)
 }
 
 // annotateCursorModelSelection 把本次生效的选型回写到 ForwardResult，供用量

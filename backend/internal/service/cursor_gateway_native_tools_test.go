@@ -25,9 +25,12 @@ func nativeBridgeClientTools() []cursor.McpTool {
 func TestResolveCursorNativeToolBridgeSplitsMcpRegistration(t *testing.T) {
 	body := []byte(`{"cursor_options":{"native_tools":{"read":"Read","grep":"Grep"}}}`)
 
-	bridge, mcpTools, err := resolveCursorNativeToolBridge(body, nativeBridgeClientTools())
+	bridge, mcpTools, err := resolveCursorNativeToolBridge(body, nativeBridgeClientTools(), CursorNativeToolBridgeModeShadow)
 	require.NoError(t, err)
-	require.Equal(t, map[string]string{"read": "Read", "grep": "Grep"}, bridge)
+	require.Equal(t, cursor.NativeToolBridge{
+		"read": {Name: "Read"},
+		"grep": {Name: "Grep"},
+	}, bridge)
 	// 被桥接的工具必须从 MCP 注册中移除，未桥接的保留。
 	require.Len(t, mcpTools, 1)
 	require.Equal(t, "WebSearch", mcpTools[0].Name)
@@ -54,15 +57,18 @@ func TestCursorOptionsCombinesModelParamsAndNativeTools(t *testing.T) {
 	require.NotNil(t, selection.MaxMode)
 	require.True(t, *selection.MaxMode)
 
-	bridge, mcpTools, err := resolveCursorNativeToolBridge(body, nativeBridgeClientTools())
+	bridge, mcpTools, err := resolveCursorNativeToolBridge(body, nativeBridgeClientTools(), CursorNativeToolBridgeModeShadow)
 	require.NoError(t, err)
-	require.Equal(t, map[string]string{"read": "Read"}, bridge)
+	require.Equal(t, cursor.NativeToolBridge{"read": {Name: "Read"}}, bridge)
 	require.Len(t, mcpTools, 2)
 }
 
+// 没有可校验的 schema 时不推断：夹具里的工具只声明了 {"type":"object"}，
+// 属性表为空，绑定无从谈起，只能整份回落 MCP。
 func TestResolveCursorNativeToolBridgeAbsentKeepsToolsIntact(t *testing.T) {
 	tools := nativeBridgeClientTools()
-	bridge, mcpTools, err := resolveCursorNativeToolBridge([]byte(`{"model":"cursor/grok-4.6"}`), tools)
+	bridge, mcpTools, err := resolveCursorNativeToolBridge(
+		[]byte(`{"model":"cursor/grok-4.6"}`), tools, CursorNativeToolBridgeModeShadow)
 	require.NoError(t, err)
 	require.Nil(t, bridge)
 	require.Equal(t, tools, mcpTools)
@@ -70,9 +76,9 @@ func TestResolveCursorNativeToolBridgeAbsentKeepsToolsIntact(t *testing.T) {
 
 func TestResolveCursorNativeToolBridgeNormalizesKeyCase(t *testing.T) {
 	body := []byte(`{"cursor_options":{"native_tools":{" Read ":"Read"}}}`)
-	bridge, _, err := resolveCursorNativeToolBridge(body, nativeBridgeClientTools())
+	bridge, _, err := resolveCursorNativeToolBridge(body, nativeBridgeClientTools(), CursorNativeToolBridgeModeShadow)
 	require.NoError(t, err)
-	require.Equal(t, map[string]string{"read": "Read"}, bridge)
+	require.Equal(t, cursor.NativeToolBridge{"read": {Name: "Read"}}, bridge)
 }
 
 func TestResolveCursorNativeToolBridgeRejectsInvalidMappings(t *testing.T) {
@@ -109,7 +115,8 @@ func TestResolveCursorNativeToolBridgeRejectsInvalidMappings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := resolveCursorNativeToolBridge([]byte(tt.body), nativeBridgeClientTools())
+			_, _, err := resolveCursorNativeToolBridge(
+				[]byte(tt.body), nativeBridgeClientTools(), CursorNativeToolBridgeModeShadow)
 			require.ErrorContains(t, err, tt.want)
 		})
 	}

@@ -81,7 +81,7 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	if err := conversation.ValidationError(); err != nil {
 		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
-	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools)
+	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
 	if err != nil {
 		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -126,14 +126,15 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	defer cancel()
 
 	input := cursor.AgentTurnInput{
-		Text:             prompt,
-		ConversationID:   resolveCursorConversationID(c, account, conversation, responsesReq.ID),
-		Images:           conversation.Images(),
-		ModelID:          selection.ModelID,
-		ModelParams:      selection.Params,
-		MaxMode:          selection.MaxMode,
-		Tools:            conversation.Tools,
-		NativeToolBridge: conversation.NativeToolBridge,
+		Text:                     prompt,
+		ConversationID:           resolveCursorConversationID(c, account, conversation, responsesReq.ID),
+		Images:                   conversation.Images(),
+		ModelID:                  selection.ModelID,
+		ModelParams:              selection.Params,
+		MaxMode:                  selection.MaxMode,
+		Tools:                    conversation.Tools,
+		NativeToolBridge:         conversation.NativeToolBridge,
+		DisableParallelToolCalls: conversation.DisableParallelToolCalls,
 	}
 
 	bridge := &cursorResponsesBridge{
@@ -257,13 +258,21 @@ func (s *CursorGatewayService) forwardResponsesStreaming(
 		if clientGone {
 			return s.buildResult(prompt, "", publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
 		}
-		return nil, s.upstreamError(ctx, c, account, publicModel, err, headersWritten)
+		return nil, s.upstreamResponsesError(ctx, c, account, publicModel, err, headersWritten, bridge.state)
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+	if result.Incomplete() {
+		return nil, s.upstreamResponsesError(ctx, c, account, publicModel,
+			cursorIncompleteTurnError(result), headersWritten, bridge.state)
+	}
 
 	// 收尾事件必须发：Codex 在等 response.completed，缺了它会一直挂着。
 	if includeUsage {
-		bridge.state.Usage = cursorEstimatedResponsesUsage(prompt, result.Text)
+		bridge.state.Usage = cursorEstimatedResponsesUsage(
+			prompt,
+			result.Text,
+			cursorAgentUsageDetails(input, result),
+		)
 	}
 	if err := writeEvents(apicompat.FinalizeChatCompletionsResponsesStream(bridge.state)); err != nil {
 		return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, true), nil
@@ -273,7 +282,10 @@ func (s *CursorGatewayService) forwardResponsesStreaming(
 			c.Writer.Flush()
 		}
 	}
-	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false), nil
+	return s.buildResult(
+		prompt, result.Text, publicModel, upstreamModel, true, firstTokenMs, startTime, false,
+		cursorAgentUsageDetails(input, result),
+	), nil
 }
 
 func (s *CursorGatewayService) forwardResponsesBuffered(
@@ -288,9 +300,13 @@ func (s *CursorGatewayService) forwardResponsesBuffered(
 ) (*ForwardResult, error) {
 	result, err := cursor.RunAgentTurn(ctx, options, input, nil)
 	if err != nil {
-		return nil, s.upstreamError(ctx, c, account, publicModel, err, false)
+		return nil, s.upstreamResponsesError(ctx, c, account, publicModel, err, false, bridge.state)
 	}
 	s.recordAgentIncomplete(c, account, publicModel, upstreamModel, result)
+	if result.Incomplete() {
+		return nil, s.upstreamResponsesError(ctx, c, account, publicModel,
+			cursorIncompleteTurnError(result), false, bridge.state)
+	}
 
 	finishReason := "stop"
 	if result.EndedWithToolCalls() {
@@ -319,7 +335,10 @@ func (s *CursorGatewayService) forwardResponsesBuffered(
 		chatResp, publicModel, bridge.customTools, bridge.toolSearch, bridge.namespaceTools)
 	c.JSON(http.StatusOK, responsesResp)
 
-	return s.buildResult(prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false), nil
+	return s.buildResult(
+		prompt, result.Text, publicModel, upstreamModel, false, nil, startTime, false,
+		cursorAgentUsageDetails(input, result),
+	), nil
 }
 
 func cursorChatMessage(result *cursor.AgentTurnResult) apicompat.ChatMessage {
@@ -354,4 +373,55 @@ func (s *CursorGatewayService) writeResponsesError(c *gin.Context, status int, e
 	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
 	c.JSON(status, gin.H{"error": gin.H{"type": errType, "message": message}})
 	return errors.New(message)
+}
+
+func (s *CursorGatewayService) upstreamResponsesError(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	model string,
+	err error,
+	headersWritten bool,
+	state *apicompat.ChatCompletionsToResponsesStreamState,
+) error {
+	failure := s.prepareCursorUpstreamFailure(ctx, c, account, model, err)
+	if !headersWritten {
+		return &UpstreamFailoverError{
+			StatusCode:   failure.status,
+			ResponseBody: cursorGatewayErrorBody(failure.status, failure.message),
+		}
+	}
+
+	responseID := ""
+	responseModel := model
+	sequence := 0
+	if state != nil {
+		responseID = state.ResponseID
+		responseModel = state.Model
+		sequence = state.SequenceNumber
+		state.SequenceNumber++
+		state.CompletedSent = true
+	}
+	event := apicompat.ResponsesStreamEvent{
+		Type: "response.failed",
+		Response: &apicompat.ResponsesResponse{
+			ID:     responseID,
+			Object: "response",
+			Model:  responseModel,
+			Status: "failed",
+			Output: []apicompat.ResponsesOutput{},
+			Error: &apicompat.ResponsesError{
+				Code:    cursorGatewayErrorType(failure.status),
+				Message: failure.message,
+			},
+		},
+		SequenceNumber: sequence,
+	}
+	sse, marshalErr := apicompat.ResponsesEventToSSE(event)
+	if marshalErr == nil {
+		_, _ = fmt.Fprint(c.Writer, sse)
+		_, _ = fmt.Fprint(c.Writer, "data: [DONE]\n\n")
+		c.Writer.Flush()
+	}
+	return errors.New(failure.message)
 }

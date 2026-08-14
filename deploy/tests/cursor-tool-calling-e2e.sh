@@ -3,11 +3,32 @@
 # 在服务器本机跑，API Key 直接从库里取，不出机器。
 set -uo pipefail
 
-B=http://127.0.0.1:8080
-PSQL="docker exec sub2api-postgres psql -U sub2api -d sub2api -t -A"
-KEY=$($PSQL -c "select key from api_keys where deleted_at is null and status='active' order by id limit 1;" | tr -d '[:space:]')
+B="${CURSOR_E2E_BASE_URL:-http://127.0.0.1:8080}"
+MODEL="${CURSOR_E2E_MODEL:-cursor/default}"
+PSQL_CONTAINER="${CURSOR_E2E_PSQL_CONTAINER:-sub2api-postgres}"
+psql_query() {
+  docker exec "$PSQL_CONTAINER" psql -U sub2api -d sub2api -t -A -c "$1"
+}
+KEY="${CURSOR_E2E_API_KEY:-}"
+if [ -z "$KEY" ] && [ -n "${CURSOR_E2E_GROUP_ID:-}" ]; then
+  case "$CURSOR_E2E_GROUP_ID" in
+    *[!0-9]*)
+      echo "FATAL: CURSOR_E2E_GROUP_ID 必须是纯数字"
+      exit 1
+      ;;
+  esac
+  KEY=$(psql_query "select ak.key
+    from api_keys ak
+    join groups g on g.id=ak.group_id
+    where ak.deleted_at is null
+      and ak.status='active'
+      and g.deleted_at is null
+      and g.platform='cursor'
+      and g.id=${CURSOR_E2E_GROUP_ID}
+    order by ak.id limit 1;" | tr -d '[:space:]')
+fi
 if [ -z "$KEY" ]; then
-  echo "FATAL: 没有可用的 API Key"
+  echo "FATAL: 必须显式设置 CURSOR_E2E_API_KEY，或设置专用 Cursor 分组 CURSOR_E2E_GROUP_ID"
   exit 1
 fi
 echo "using api key: ${KEY:0:8}…(${#KEY} chars)"
@@ -25,13 +46,24 @@ check() {
   fi
 }
 
+echo
+echo "=============== 0. Cursor bridge capability contract ==============="
+MODELS=$(curl -s -m 60 "$B/v1/models" -H "Authorization: Bearer $KEY")
+BRIDGE_VERSION=$(echo "$MODELS" | jq -r '.cursor_bridge.version // ""')
+BRIDGE_MODE=$(echo "$MODELS" | jq -r '.cursor_bridge.default_mode // ""')
+BRIDGE_KEYS=$(echo "$MODELS" | jq -r '[.cursor_bridge.native_tools[]?.key] | sort | join(",")')
+check "bridge version 非空" "$([ -n "$BRIDGE_VERSION" ] && echo 1 || echo 0)"
+check "bridge mode 是已知值" "$(case "$BRIDGE_MODE" in off|shadow|explicit|infer_readonly|infer_all) echo 1;; *) echo 0;; esac)" "got=$BRIDGE_MODE"
+check "9 个原生桥键完整" "$([ "$BRIDGE_KEYS" = "delete,diagnostics,fetch,glob,grep,ls,read,shell,write" ] && echo 1 || echo 0)" "got=$BRIDGE_KEYS"
+
 TOOLS_OPENAI='[{"type":"function","function":{"name":"Bash","description":"Execute a shell command and return stdout.","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}}]'
 PROMPT='请用 Bash 工具执行 echo ringstar-e2e-marker，然后把真实输出原样告诉我。'
 
 echo
 echo "=============== 1. 纯对话回归（无工具，不能被破坏）==============="
+REQ=$(jq -n --arg m "$MODEL" '{model:$m,stream:false,messages:[{role:"user",content:"用一句话回答：1+1 等于几？"}]}')
 RESP=$(curl -s -m 120 "$B/v1/chat/completions" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"cursor/default","stream":false,"messages":[{"role":"user","content":"用一句话回答：1+1 等于几？"}]}')
+  -d "$REQ")
 echo "$RESP" | head -c 600; echo
 CONTENT=$(echo "$RESP" | jq -r '.choices[0].message.content // ""')
 FINISH=$(echo "$RESP" | jq -r '.choices[0].finish_reason // ""')
@@ -40,8 +72,8 @@ check "finish_reason=stop" "$([ "$FINISH" = "stop" ] && echo 1 || echo 0)" "got=
 
 echo
 echo "=============== 2. opencode 链路：/v1/chat/completions + tools ==============="
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_OPENAI" \
-  '{model:"cursor/default",stream:false,tools:$t,messages:[{role:"user",content:$p}]}')
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_OPENAI" \
+  '{model:$m,stream:false,tools:$t,messages:[{role:"user",content:$p}]}')
 RESP=$(curl -s -m 180 "$B/v1/chat/completions" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "$REQ")
 echo "$RESP" | head -c 900; echo
 FINISH=$(echo "$RESP" | jq -r '.choices[0].finish_reason // ""')
@@ -55,8 +87,8 @@ check "call id 形如 call_*" "$(case "$CALLID" in call_*) echo 1;; *) echo 0;; 
 
 echo
 echo "--------------- 2b. 带工具结果重放，模型应据此作答 ---------------"
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_OPENAI" --arg id "$CALLID" --arg args "$TOOLARGS" \
-  '{model:"cursor/default",stream:false,tools:$t,messages:[
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_OPENAI" --arg id "$CALLID" --arg args "$TOOLARGS" \
+  '{model:$m,stream:false,tools:$t,messages:[
      {role:"user",content:$p},
      {role:"assistant",content:null,tool_calls:[{id:$id,type:"function",function:{name:"Bash",arguments:$args}}]},
      {role:"tool",tool_call_id:$id,name:"Bash",content:"ringstar-e2e-marker\n"}
@@ -70,8 +102,8 @@ check "回答里出现工具结果" "$(echo "$CONTENT" | grep -q 'ringstar-e2e-m
 
 echo
 echo "--------------- 2c. 流式：tool_calls 增量 + finish_reason ---------------"
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_OPENAI" \
-  '{model:"cursor/default",stream:true,tools:$t,messages:[{role:"user",content:$p}]}')
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_OPENAI" \
+  '{model:$m,stream:true,tools:$t,messages:[{role:"user",content:$p}]}')
 STREAM=$(curl -s -m 180 -N "$B/v1/chat/completions" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "$REQ")
 echo "$STREAM" | grep -o '"tool_calls":\[[^]]*\]' | head -c 400; echo
 check "流里出现 tool_calls 增量" "$(echo "$STREAM" | grep -q '"tool_calls"' && echo 1 || echo 0)"
@@ -81,8 +113,8 @@ check "流以 [DONE] 收尾" "$(echo "$STREAM" | grep -q 'data: \[DONE\]' && ech
 echo
 echo "=============== 3. Claude Code 链路：/v1/messages + tools ==============="
 TOOLS_ANTHROPIC='[{"name":"Bash","description":"Execute a shell command and return stdout.","input_schema":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}]'
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_ANTHROPIC" \
-  '{model:"cursor/default",max_tokens:4096,stream:false,tools:$t,messages:[{role:"user",content:$p}]}')
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_ANTHROPIC" \
+  '{model:$m,max_tokens:4096,stream:false,tools:$t,messages:[{role:"user",content:$p}]}')
 RESP=$(curl -s -m 180 "$B/v1/messages" -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' -H 'Content-Type: application/json' -d "$REQ")
 echo "$RESP" | head -c 900; echo
 STOP=$(echo "$RESP" | jq -r '.stop_reason // ""')
@@ -96,8 +128,8 @@ check "input 含 command" "$(echo "$TU_INPUT" | jq -e '.command' >/dev/null 2>&1
 
 echo
 echo "--------------- 3b. Claude Code 带 tool_result 重放 ---------------"
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_ANTHROPIC" --arg id "$TU_ID" --argjson inp "$TU_INPUT" \
-  '{model:"cursor/default",max_tokens:4096,stream:false,tools:$t,messages:[
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_ANTHROPIC" --arg id "$TU_ID" --argjson inp "$TU_INPUT" \
+  '{model:$m,max_tokens:4096,stream:false,tools:$t,messages:[
      {role:"user",content:$p},
      {role:"assistant",content:[{type:"tool_use",id:$id,name:"Bash",input:$inp}]},
      {role:"user",content:[{type:"tool_result",tool_use_id:$id,content:"ringstar-e2e-marker\n"}]}
@@ -111,8 +143,8 @@ check "回答里出现工具结果" "$(echo "$TEXT" | grep -q 'ringstar-e2e-mark
 
 echo
 echo "--------------- 3c. Claude Code 流式 SSE 事件序列 ---------------"
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_ANTHROPIC" \
-  '{model:"cursor/default",max_tokens:4096,stream:true,tools:$t,messages:[{role:"user",content:$p}]}')
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_ANTHROPIC" \
+  '{model:$m,max_tokens:4096,stream:true,tools:$t,messages:[{role:"user",content:$p}]}')
 STREAM=$(curl -s -m 180 -N "$B/v1/messages" -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' -H 'Content-Type: application/json' -d "$REQ")
 echo "$STREAM" | grep '^event:' | sort | uniq -c
 check "有 message_start" "$(echo "$STREAM" | grep -q 'event: message_start' && echo 1 || echo 0)"
@@ -126,16 +158,17 @@ check "content_block 开合成对 ($OPENS/$CLOSES)" "$([ "$OPENS" = "$CLOSES" ] 
 
 echo
 echo "--------------- 3d. count_tokens 不再 404 ---------------"
+REQ=$(jq -n --arg m "$MODEL" '{model:$m,messages:[{role:"user",content:"hi"}]}')
 CODE=$(curl -s -o /tmp/ct.json -w '%{http_code}' -m 60 "$B/v1/messages/count_tokens" -H "x-api-key: $KEY" \
-  -H 'Content-Type: application/json' -d '{"model":"cursor/default","messages":[{"role":"user","content":"hi"}]}')
+  -H 'Content-Type: application/json' -d "$REQ")
 cat /tmp/ct.json; echo
 check "count_tokens 返回 200" "$([ "$CODE" = "200" ] && echo 1 || echo 0)" "got=$CODE"
 
 echo
 echo "=============== 4. Codex 链路：/v1/responses + tools ==============="
 TOOLS_RESPONSES='[{"type":"function","name":"Bash","description":"Execute a shell command and return stdout.","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]},"strict":false}]'
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_RESPONSES" \
-  '{model:"cursor/default",stream:false,store:false,tools:$t,input:[{type:"message",role:"user",content:[{type:"input_text",text:$p}]}]}')
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_RESPONSES" \
+  '{model:$m,stream:false,store:false,tools:$t,input:[{type:"message",role:"user",content:[{type:"input_text",text:$p}]}]}')
 RESP=$(curl -s -m 180 "$B/v1/responses" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "$REQ")
 echo "$RESP" | head -c 1200; echo
 FC_NAME=$(echo "$RESP" | jq -r '[.output[]? | select(.type=="function_call")][0].name // ""')
@@ -146,8 +179,8 @@ check "arguments 含 command" "$(echo "$FC_ARGS" | jq -e '.command' >/dev/null 2
 
 echo
 echo "--------------- 4b. Codex 流式事件 ---------------"
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_RESPONSES" \
-  '{model:"cursor/default",stream:true,store:false,tools:$t,input:[{type:"message",role:"user",content:[{type:"input_text",text:$p}]}]}')
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_RESPONSES" \
+  '{model:$m,stream:true,store:false,tools:$t,input:[{type:"message",role:"user",content:[{type:"input_text",text:$p}]}]}')
 STREAM=$(curl -s -m 180 -N "$B/v1/responses" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d "$REQ")
 echo "$STREAM" | grep '^event:' | sort | uniq -c
 check "有 response.created" "$(echo "$STREAM" | grep -q 'response.created' && echo 1 || echo 0)"
@@ -156,8 +189,8 @@ check "有 response.completed" "$(echo "$STREAM" | grep -q 'response.completed' 
 
 echo
 echo "--------------- 4c. Codex 带 function_call_output 重放 ---------------"
-REQ=$(jq -n --arg p "$PROMPT" --argjson t "$TOOLS_RESPONSES" --arg args "$FC_ARGS" \
-  '{model:"cursor/default",stream:false,store:false,tools:$t,input:[
+REQ=$(jq -n --arg m "$MODEL" --arg p "$PROMPT" --argjson t "$TOOLS_RESPONSES" --arg args "$FC_ARGS" \
+  '{model:$m,stream:false,store:false,tools:$t,input:[
      {type:"message",role:"user",content:[{type:"input_text",text:$p}]},
      {type:"function_call",call_id:"call_e2e_1",name:"Bash",arguments:$args},
      {type:"function_call_output",call_id:"call_e2e_1",output:"ringstar-e2e-marker\n"}
@@ -170,4 +203,9 @@ check "回答里出现工具结果" "$(echo "$TEXT" | grep -q 'ringstar-e2e-mark
 echo
 echo "==================================================="
 echo "通过 $PASS 项，失败 $FAIL 项"
-[ "$FAIL" = "0" ] && echo "E2E_ALL_PASS" || echo "E2E_HAS_FAILURE"
+if [ "$FAIL" = "0" ]; then
+  echo "E2E_ALL_PASS"
+  exit 0
+fi
+echo "E2E_HAS_FAILURE"
+exit 1

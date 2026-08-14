@@ -2,6 +2,7 @@ package cursor
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -46,6 +47,67 @@ type McpTool struct {
 	// InputSchema 是 JSON Schema 原文。为空时按「无参数对象」处理：
 	// 上游对缺失 schema 的工具会直接忽略，模型也就永远不会调它。
 	InputSchema json.RawMessage
+}
+
+const (
+	// Codex 0.144 with bundled plugins declares roughly 273 tools. The limit must
+	// cover real clients while still bounding protobuf and prompt amplification.
+	MaxMcpTools                 = 512
+	MaxMcpToolSchemaBytes       = 256 * 1024
+	MaxMcpToolSchemasTotalBytes = 4 * 1024 * 1024
+)
+
+// ValidateMcpTools rejects declarations that would otherwise be silently
+// skipped or encoded as protobuf null. Gateway adapters call it before any
+// upstream request, so malformed client tools return a deterministic 400.
+func ValidateMcpTools(tools []McpTool) error {
+	if len(tools) > MaxMcpTools {
+		return fmt.Errorf("too many tools: %d exceeds limit %d", len(tools), MaxMcpTools)
+	}
+	seen := make(map[string]struct{}, len(tools))
+	totalSchemaBytes := 0
+	for i, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			return fmt.Errorf("tools[%d].name must not be empty", i)
+		}
+		if len(name) > 128 {
+			return fmt.Errorf("tools[%d].name exceeds 128 bytes", i)
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return fmt.Errorf("duplicate tool name %q", name)
+		}
+		seen[name] = struct{}{}
+
+		schema := bytesTrimSpace(tool.InputSchema)
+		if len(schema) == 0 {
+			continue
+		}
+		if len(schema) > MaxMcpToolSchemaBytes {
+			return fmt.Errorf("tool %q schema exceeds %d bytes", name, MaxMcpToolSchemaBytes)
+		}
+		totalSchemaBytes += len(schema)
+		if totalSchemaBytes > MaxMcpToolSchemasTotalBytes {
+			return fmt.Errorf("tool schemas exceed aggregate limit %d bytes", MaxMcpToolSchemasTotalBytes)
+		}
+		var root map[string]any
+		if err := json.Unmarshal(schema, &root); err != nil {
+			return fmt.Errorf("tool %q has invalid JSON schema: %w", name, err)
+		}
+		if declaredType, ok := root["type"]; ok && declaredType != "object" {
+			return fmt.Errorf("tool %q schema root type must be object", name)
+		}
+		if properties, ok := root["properties"]; ok {
+			if _, ok := properties.(map[string]any); !ok {
+				return fmt.Errorf("tool %q schema properties must be an object", name)
+			}
+		}
+	}
+	return nil
+}
+
+func bytesTrimSpace(raw []byte) []byte {
+	return []byte(strings.TrimSpace(string(raw)))
 }
 
 // EncodeMcpTools 编码 McpTools 的消息体（不含外层 tag）。
@@ -115,27 +177,46 @@ func ToolPolicyPreamble(tools []McpTool) string {
 // 模型直接用它训练时熟悉的 read / grep / ls，网关把 exec 调用翻译给客户端执行
 // （见 native_tools.go）。这比逼模型改走 MCP 通道更顺——长上下文里 MCP 调用
 // 容易发生格式漂移（把调用写成正文文本），内置工具调用天然走协议帧。
-func ToolPolicyPreambleWithNative(tools []McpTool, nativeBridge map[string]string) string {
+func ToolPolicyPreambleWithNative(tools []McpTool, nativeBridge NativeToolBridge) string {
+	return ToolPolicyPreambleWithControl(tools, nativeBridge, false, false)
+}
+
+// ToolPolicyPreambleWithControl additionally enforces standard tool controls.
+// tool_choice=none still needs a policy even though no client tools are declared,
+// otherwise Cursor's own built-ins remain visible and can stall the turn.
+func ToolPolicyPreambleWithControl(
+	tools []McpTool,
+	nativeBridge NativeToolBridge,
+	disableAll bool,
+	disableParallel bool,
+) string {
 	names := make([]string, 0, len(tools))
-	for _, tool := range tools {
-		if name := strings.TrimSpace(tool.Name); name != "" {
-			names = append(names, McpToolNamespacePrefix+name)
+	if !disableAll {
+		for _, tool := range tools {
+			if name := strings.TrimSpace(tool.Name); name != "" {
+				names = append(names, McpToolNamespacePrefix+name)
+			}
 		}
 	}
 	nativeAllowed := make([]string, 0, len(nativeBridge))
-	for _, key := range NativeToolBridgeKeys() {
-		if clientName, ok := nativeBridge[key]; ok && strings.TrimSpace(clientName) != "" {
-			nativeAllowed = append(nativeAllowed, key)
+	if !disableAll {
+		for _, key := range NativeToolBridgeKeys() {
+			if strings.TrimSpace(nativeBridge.ClientName(key)) != "" {
+				nativeAllowed = append(nativeAllowed, key)
+			}
 		}
 	}
-	if len(names) == 0 && len(nativeAllowed) == 0 {
+	if !disableAll && len(names) == 0 && len(nativeAllowed) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
 	sb.WriteString("<tool_policy>\n")
 	sb.WriteString("This session runs outside an editor.\n")
-	if len(nativeAllowed) > 0 {
+	if disableAll {
+		sb.WriteString("Tool use is disabled for this request. Every built-in and MCP tool is unavailable. ")
+		sb.WriteString("Answer in plain text and do not invoke any tool.\n")
+	} else if len(nativeAllowed) > 0 {
 		sb.WriteString("You MAY use these built-in tools directly; the host executes them: ")
 		sb.WriteString(strings.Join(nativeAllowed, ", "))
 		sb.WriteString(".\n")
@@ -174,8 +255,13 @@ func ToolPolicyPreambleWithNative(tools []McpTool, nativeBridge map[string]strin
 			sb.WriteString("\n")
 		}
 	}
-	sb.WriteString("Use them for every action you need to take. ")
-	sb.WriteString("If none of them fits, answer in plain text instead of reaching for an unavailable tool.\n")
+	if disableParallel && !disableAll {
+		sb.WriteString("Call at most one tool in this turn; parallel tool calls are disabled by the client.\n")
+	}
+	if !disableAll {
+		sb.WriteString("Use them for every action you need to take. ")
+		sb.WriteString("If none of them fits, answer in plain text instead of reaching for an unavailable tool.\n")
+	}
 	// 长上下文里模型可能把调用写成正文标记（<tool_call>/<invoke> 之类的伪 XML），
 	// 那样的调用没人执行，客户端只会看到一坨原始文本。显式点破这一条。
 	sb.WriteString("Invoke tools only through the tool-calling channel. Never write tool-call ")

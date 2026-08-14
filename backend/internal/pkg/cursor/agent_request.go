@@ -253,6 +253,9 @@ func tiptapDoc(text string) (string, error) {
 
 // EncodeRunRequest 构造 AgentClientMessage，其 field 1 是 RunRequest。
 func EncodeRunRequest(input RunRequestInput) ([]byte, error) {
+	if err := ValidateMcpTools(input.Tools); err != nil {
+		return nil, err
+	}
 	messageID := input.MessageID
 	if messageID == "" {
 		messageID = uuid.NewString()

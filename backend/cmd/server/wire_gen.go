@@ -209,7 +209,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	kiroGatewayService := service.NewKiroGatewayService(kiroTokenProvider, rateLimitService)
 	cursorOAuthService := service.NewCursorOAuthService(proxyRepository)
 	cursorTokenProvider := service.ProvideCursorTokenProvider(accountRepository, geminiTokenCache, cursorOAuthService, oAuthRefreshAPI, tempUnschedCache)
-	cursorGatewayService := service.NewCursorGatewayService(cursorTokenProvider, rateLimitService, accountUsageService)
+	cursorGatewayService := service.NewCursorGatewayService(cursorTokenProvider, rateLimitService, accountUsageService, configConfig)
 	accountTestService := service.ProvideAccountTestService(accountRepository, geminiTokenProvider, claudeTokenProvider, grokTokenProvider, antigravityGatewayService, httpUpstream, kiroGatewayService, cursorGatewayService, configConfig, tlsFingerprintProfileService, openAIGatewayService, settingService)
 	crsSyncService := service.NewCRSSyncService(accountRepository, proxyRepository, oAuthService, openAIOAuthService, geminiOAuthService, configConfig)
 	accountHandler := admin.ProvideAccountHandler(adminService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, rateLimitService, accountUsageService, accountTestService, concurrencyService, crsSyncService, sessionLimitCache, rpmCache, compositeTokenCacheInvalidator, grokQuotaService)

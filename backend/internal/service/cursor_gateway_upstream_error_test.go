@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -85,4 +87,54 @@ func TestCursorGatewayUpstreamErrorFallsBackWithoutDetails(t *testing.T) {
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "Cursor agent stream ended with an error")
+}
+
+func TestCursorGatewayAnthropicStreamUsesProtocolErrorEvent(t *testing.T) {
+	svc := &CursorGatewayService{}
+	c, rec := newCursorGatewayTestContext()
+
+	err := svc.upstreamAnthropicError(context.Background(), c, nil, "cursor/grok-4.6",
+		errors.New("stream broke"), true)
+
+	require.Error(t, err)
+	body := rec.Body.String()
+	require.Contains(t, body, "event: error")
+	require.Contains(t, body, `"type":"error"`)
+	require.NotContains(t, body, "data: [DONE]")
+}
+
+func TestCursorGatewayResponsesStreamUsesResponseFailed(t *testing.T) {
+	svc := &CursorGatewayService{}
+	c, rec := newCursorGatewayTestContext()
+	state := apicompat.NewChatCompletionsToResponsesStreamState("cursor/grok-4.6")
+
+	err := svc.upstreamResponsesError(context.Background(), c, nil, "cursor/grok-4.6",
+		errors.New("stream broke"), true, state)
+
+	require.Error(t, err)
+	body := rec.Body.String()
+	require.Contains(t, body, "event: response.failed")
+	require.Contains(t, body, `"status":"failed"`)
+	require.Contains(t, body, `"object":"response"`)
+	require.NotContains(t, body, `data: {"error":`)
+	require.True(t, state.CompletedSent)
+}
+
+func TestCursorGatewayProtocolErrorsPreserveFailoverBeforeStreamStarts(t *testing.T) {
+	svc := &CursorGatewayService{}
+
+	anthropicCtx, anthropicRec := newCursorGatewayTestContext()
+	err := svc.upstreamAnthropicError(context.Background(), anthropicCtx, nil, "cursor/grok-4.6",
+		errors.New("before first delta"), false)
+	var anthropicFailover *UpstreamFailoverError
+	require.ErrorAs(t, err, &anthropicFailover)
+	require.Empty(t, anthropicRec.Body.String())
+
+	responsesCtx, responsesRec := newCursorGatewayTestContext()
+	err = svc.upstreamResponsesError(context.Background(), responsesCtx, nil, "cursor/grok-4.6",
+		errors.New("before first delta"), false,
+		apicompat.NewChatCompletionsToResponsesStreamState("cursor/grok-4.6"))
+	var responsesFailover *UpstreamFailoverError
+	require.ErrorAs(t, err, &responsesFailover)
+	require.Empty(t, responsesRec.Body.String())
 }

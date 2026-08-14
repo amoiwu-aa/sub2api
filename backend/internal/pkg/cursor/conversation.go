@@ -1,7 +1,8 @@
 package cursor
 
 import (
-	"fmt"
+	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -58,10 +59,15 @@ type Turn struct {
 type Conversation struct {
 	Turns []Turn
 	Tools []McpTool
-	// NativeToolBridge 是原生工具桥映射（内置名 → 客户端工具名）。
+	// NativeToolBridge 是原生工具桥映射（内置名 → 客户端工具）。
 	// 非空时 Render 的工具策略前言会放行对应的内置只读工具；
 	// 这些客户端工具不该再出现在 Tools 里（由 service 层切分）。
-	NativeToolBridge map[string]string
+	NativeToolBridge NativeToolBridge
+	// DisableAllTools is tool_choice=none. It must still emit a policy that
+	// disables Cursor built-ins even though Tools is empty.
+	DisableAllTools bool
+	// DisableParallelToolCalls asks the bridge to return after the first call.
+	DisableParallelToolCalls bool
 	// Err prevents malformed or unsupported images from being silently dropped.
 	Err error
 }
@@ -71,7 +77,7 @@ func (c *Conversation) ValidationError() error {
 	if c == nil {
 		return nil
 	}
-	return c.Err
+	return errors.Join(c.Err, ValidateMcpTools(c.Tools), validateToolHistory(c.Turns))
 }
 
 // Images returns all client-supplied images in message order.
@@ -130,16 +136,22 @@ func (c *Conversation) Render() string {
 	}
 
 	var sb strings.Builder
-	if policy := ToolPolicyPreambleWithNative(c.Tools, c.NativeToolBridge); policy != "" {
+	if policy := ToolPolicyPreambleWithControl(
+		c.Tools,
+		c.NativeToolBridge,
+		c.DisableAllTools,
+		c.DisableParallelToolCalls,
+	); policy != "" {
 		sb.WriteString(policy)
 		sb.WriteString("\n\n")
 	}
 
 	system := collectSystemText(c.Turns)
 	if system != "" {
-		sb.WriteString("<system_instructions>\n")
-		sb.WriteString(system)
-		sb.WriteString("\n</system_instructions>\n\n")
+		sb.WriteString("<system_instructions_json>\n")
+		encoded, _ := json.Marshal(map[string]string{"text": system})
+		sb.Write(encoded)
+		sb.WriteString("\n</system_instructions_json>\n\n")
 	}
 
 	body, endsWithToolResult := renderBody(c.Turns)
@@ -201,11 +213,12 @@ func renderBody(turns []Turn) (string, bool) {
 
 	var sb strings.Builder
 	if split > 0 {
-		sb.WriteString("<conversation_history>\n")
+		toolNames := toolNamesByCallID(conversation[:split])
+		sb.WriteString("<conversation_history_jsonl>\n")
 		for _, turn := range conversation[:split] {
-			sb.WriteString(renderTurn(turn))
+			sb.WriteString(renderTurnJSON(turn, toolNames))
 		}
-		sb.WriteString("</conversation_history>")
+		sb.WriteString("</conversation_history_jsonl>")
 	}
 
 	if split < len(conversation) {
@@ -225,38 +238,108 @@ func renderBody(turns []Turn) (string, bool) {
 	return sb.String(), last.Role == RoleTool
 }
 
-func renderTurn(turn Turn) string {
-	var sb strings.Builder
+type replayToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type replayRecord struct {
+	Role       string           `json:"role"`
+	Text       string           `json:"text,omitempty"`
+	ToolCalls  []replayToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	ToolName   string           `json:"tool_name,omitempty"`
+	Output     string           `json:"output,omitempty"`
+}
+
+func renderTurnJSON(turn Turn, toolNames map[string]string) string {
+	record := replayRecord{}
 	switch turn.Role {
 	case RoleUser:
-		if text := strings.TrimSpace(turn.Text); text != "" {
-			sb.WriteString("<user>\n")
-			sb.WriteString(text)
-			sb.WriteString("\n</user>\n")
-		}
+		record.Role = "user"
+		record.Text = strings.TrimSpace(turn.Text)
 	case RoleAssistant:
-		if text := strings.TrimSpace(turn.Text); text != "" {
-			sb.WriteString("<assistant>\n")
-			sb.WriteString(text)
-			sb.WriteString("\n</assistant>\n")
-		}
+		record.Role = "assistant"
+		record.Text = strings.TrimSpace(turn.Text)
 		for _, call := range turn.ToolCalls {
-			sb.WriteString(fmt.Sprintf("<tool_call id=%q name=%q>\n", call.ID, call.Name))
-			sb.WriteString(strings.TrimSpace(defaultToolArguments(call.Arguments)))
-			sb.WriteString("\n</tool_call>\n")
+			record.ToolCalls = append(record.ToolCalls, replayToolCall{
+				ID:        strings.TrimSpace(call.ID),
+				Name:      strings.TrimSpace(call.Name),
+				Arguments: strings.TrimSpace(defaultToolArguments(call.Arguments)),
+			})
 		}
 	case RoleTool:
-		sb.WriteString(fmt.Sprintf("<tool_result id=%q name=%q>\n", turn.ToolCallID, turn.ToolName))
+		record.Role = "tool"
+		record.ToolCallID = strings.TrimSpace(turn.ToolCallID)
+		record.ToolName = strings.TrimSpace(turn.ToolName)
+		if record.ToolName == "" {
+			record.ToolName = toolNames[record.ToolCallID]
+		}
 		text := strings.TrimSpace(turn.Text)
 		if text == "" {
 			// 空结果要显式说明。留空的话模型会以为工具还没跑完，
 			// 转头把同一个调用再发一遍。
 			text = "(the tool returned no output)"
 		}
-		sb.WriteString(text)
-		sb.WriteString("\n</tool_result>\n")
+		record.Output = text
 	}
-	return sb.String()
+	if record.Role == "" {
+		return ""
+	}
+	encoded, _ := json.Marshal(record)
+	return string(encoded) + "\n"
+}
+
+func toolNamesByCallID(turns []Turn) map[string]string {
+	names := make(map[string]string)
+	for _, turn := range turns {
+		if turn.Role != RoleAssistant {
+			continue
+		}
+		for _, call := range turn.ToolCalls {
+			if id := strings.TrimSpace(call.ID); id != "" {
+				names[id] = strings.TrimSpace(call.Name)
+			}
+		}
+	}
+	return names
+}
+
+func validateToolHistory(turns []Turn) error {
+	calls := make(map[string]string)
+	results := make(map[string]struct{})
+	for _, turn := range turns {
+		if turn.Role == RoleAssistant {
+			for _, call := range turn.ToolCalls {
+				id := strings.TrimSpace(call.ID)
+				if id == "" {
+					return errors.New("assistant tool call id must not be empty")
+				}
+				if _, duplicate := calls[id]; duplicate {
+					return errors.New("duplicate assistant tool call id " + id)
+				}
+				calls[id] = strings.TrimSpace(call.Name)
+			}
+			continue
+		}
+		if turn.Role != RoleTool {
+			continue
+		}
+		id := strings.TrimSpace(turn.ToolCallID)
+		expectedName, exists := calls[id]
+		if !exists {
+			return errors.New("orphan tool result id " + id)
+		}
+		if _, duplicate := results[id]; duplicate {
+			return errors.New("duplicate tool result id " + id)
+		}
+		if name := strings.TrimSpace(turn.ToolName); name != "" && expectedName != "" && name != expectedName {
+			return errors.New("tool result name does not match call id " + id)
+		}
+		results[id] = struct{}{}
+	}
+	return nil
 }
 
 func defaultToolArguments(arguments string) string {

@@ -931,6 +931,12 @@ const (
 
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
+	// CursorNativeToolBridgeMode controls automatic Cursor native-tool bridging:
+	// off, shadow, explicit, infer_readonly, or infer_all.
+	//
+	// The safe default is shadow: explicit cursor_options.native_tools still work,
+	// while inferred mappings are observed without removing MCP tool definitions.
+	CursorNativeToolBridgeMode string `mapstructure:"cursor_native_tool_bridge_mode"`
 	// 等待上游响应头的超时时间（秒），0表示无超时
 	// 注意：这不影响流式数据传输，只控制等待响应头的时间
 	ResponseHeaderTimeout int `mapstructure:"response_header_timeout"`
@@ -2322,6 +2328,7 @@ func setDefaults() {
 
 	// Gateway
 	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久
+	viper.SetDefault("gateway.cursor_native_tool_bridge_mode", "shadow")
 	viper.SetDefault("gateway.openai_response_header_timeout", 0)
 	viper.SetDefault("gateway.openai_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.openai_high_effort_first_output_timeout_seconds", 0)

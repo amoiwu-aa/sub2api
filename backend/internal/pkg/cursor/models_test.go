@@ -158,6 +158,56 @@ func TestResolveModelMaxSuffixOnUnknownBaseFallsBack(t *testing.T) {
 	require.Empty(t, selection.Params)
 }
 
+func TestResolveModelStrictRejectsUnknownInsteadOfFallingBack(t *testing.T) {
+	_, err := ResolveModelStrict("cursor/not-a-real-model")
+	require.ErrorContains(t, err, "unknown cursor model")
+
+	_, err = ResolveModelWithOptionsStrict("cursor/not-a-real-model", nil, nil)
+	require.ErrorContains(t, err, "unknown cursor model")
+
+	selection, err := ResolveModelStrict("cursor/grok-4.6-max")
+	require.NoError(t, err)
+	require.Equal(t, "grok-4.6", selection.ModelID)
+	require.NotNil(t, selection.MaxMode)
+	require.True(t, *selection.MaxMode)
+}
+
+func TestDefaultBridgeCapabilitiesAreVersionedAndDeterministic(t *testing.T) {
+	capabilities := DefaultBridgeCapabilities("shadow")
+	require.Equal(t, BridgeProtocolVersion, capabilities.Version)
+	require.Equal(t, "shadow", capabilities.DefaultMode)
+	require.Equal(t, []string{"chat_completions", "anthropic_messages", "responses"}, capabilities.Protocols)
+	require.True(t, capabilities.ParallelToolCalls)
+	require.True(t, capabilities.ProtocolTerminalErrors)
+	require.False(t, capabilities.InteractionQueries)
+	require.False(t, capabilities.StatefulContinuation)
+	require.Len(t, capabilities.NativeTools, len(NativeToolBridgeKeys()))
+	for i, key := range NativeToolBridgeKeys() {
+		require.Equal(t, key, capabilities.NativeTools[i].Key)
+		require.NotEmpty(t, capabilities.NativeTools[i].Arguments)
+	}
+}
+
+func TestDefaultModelsIncludeVerifiedCursorCapabilities(t *testing.T) {
+	models := DefaultModels()
+	require.NotEmpty(t, models)
+	for _, model := range models {
+		require.NotNil(t, model.CursorCapabilities)
+		require.Equal(t, BridgeProtocolVersion, model.CursorCapabilities.BridgeVersion)
+	}
+	for _, model := range models {
+		if model.ID == "cursor/grok-4.6" {
+			require.Equal(t,
+				[]string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh},
+				model.CursorCapabilities.Efforts)
+			require.True(t, model.CursorCapabilities.Fast)
+			require.True(t, model.CursorCapabilities.MaxMode)
+			return
+		}
+	}
+	t.Fatal("cursor/grok-4.6 missing from default catalog")
+}
+
 // TestMaxVariantsAreNotUpstreamModelIDs 是这次改动最容易回归的地方：
 // MAX 变体进了对外目录，但绝不能被当成可以直接发给上游的 modelId。
 func TestMaxVariantsAreNotUpstreamModelIDs(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -39,6 +40,40 @@ type gatewayReasoningEffortOptionForTest struct {
 	Value   string `json:"value"`
 	Label   string `json:"label"`
 	Default bool   `json:"default"`
+}
+
+func TestWriteCursorModelsListIncludesVersionedBridgeContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	h := &GatewayHandler{}
+
+	h.writeCursorModelsList(c, []string{"cursor/grok-4.6", "cursor/not-real"})
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, cursor.BridgeProtocolVersion, rec.Header().Get("X-RingStar-Cursor-Bridge-Version"))
+	require.Equal(t, service.CursorNativeToolBridgeModeShadow, rec.Header().Get("X-RingStar-Cursor-Bridge-Mode"))
+
+	var payload struct {
+		Object string         `json:"object"`
+		Data   []cursor.Model `json:"data"`
+		Models []struct {
+			Slug                     string `json:"slug"`
+			DisplayName              string `json:"display_name"`
+			SupportedReasoningLevels []any  `json:"supported_reasoning_levels"`
+		} `json:"models"`
+		CursorBridge cursor.BridgeCapabilities `json:"cursor_bridge"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	require.Equal(t, "list", payload.Object)
+	require.Len(t, payload.Data, 1, "未知模型不该出现在严格目录")
+	require.Equal(t, "cursor/grok-4.6", payload.Data[0].ID)
+	require.Equal(t, "cursor/grok-4.6", payload.Models[0].Slug)
+	require.Equal(t, "Cursor Grok 4.6", payload.Models[0].DisplayName)
+	require.NotEmpty(t, payload.Models[0].SupportedReasoningLevels)
+	require.NotNil(t, payload.Data[0].CursorCapabilities)
+	require.Equal(t, cursor.BridgeProtocolVersion, payload.CursorBridge.Version)
+	require.Equal(t, service.CursorNativeToolBridgeModeShadow, payload.CursorBridge.DefaultMode)
 }
 
 func (s *gatewayModelsAccountRepoStub) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]service.Account, error) {

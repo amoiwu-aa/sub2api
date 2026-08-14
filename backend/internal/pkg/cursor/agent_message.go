@@ -236,8 +236,11 @@ func StubExecReplies(exec *ExecRequest) [][]byte {
 		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, 2, encodeShellSuccess(
 			"stub: command execution is disabled on this gateway\n"))}
 	case "read", "redacted_read":
+		// 文件内容在 {1:{2:...}}，不是 {1:{1:...}}。放错位置上游会把结果判成
+		// binary data，模型接着去跑 file / xxd 查是不是二进制，白烧一整轮。
+		// 形状由 TestLiveSpikeReadReplyShapes 实测确定（2026-08-14）。
 		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
-			EncodeBytesField(1, EncodeStringField(1, "stub: file access is disabled on this gateway\n")))}
+			EncodeBytesField(1, EncodeStringField(2, "stub: file access is disabled on this gateway\n")))}
 	default:
 		// 其余工具统一回一个空的成功结果：结构上合法，语义上什么都没做。
 		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
