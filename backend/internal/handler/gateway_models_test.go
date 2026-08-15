@@ -52,7 +52,7 @@ func TestWriteCursorModelsListIncludesVersionedBridgeContract(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, cursor.BridgeProtocolVersion, rec.Header().Get("X-RingStar-Cursor-Bridge-Version"))
-	require.Equal(t, service.CursorNativeToolBridgeModeShadow, rec.Header().Get("X-RingStar-Cursor-Bridge-Mode"))
+	require.Equal(t, service.CursorNativeToolBridgeModeInferAll, rec.Header().Get("X-RingStar-Cursor-Bridge-Mode"))
 
 	var payload struct {
 		Object string         `json:"object"`
@@ -73,7 +73,7 @@ func TestWriteCursorModelsListIncludesVersionedBridgeContract(t *testing.T) {
 	require.NotEmpty(t, payload.Models[0].SupportedReasoningLevels)
 	require.NotNil(t, payload.Data[0].CursorCapabilities)
 	require.Equal(t, cursor.BridgeProtocolVersion, payload.CursorBridge.Version)
-	require.Equal(t, service.CursorNativeToolBridgeModeShadow, payload.CursorBridge.DefaultMode)
+	require.Equal(t, service.CursorNativeToolBridgeModeInferAll, payload.CursorBridge.DefaultMode)
 }
 
 func (s *gatewayModelsAccountRepoStub) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]service.Account, error) {

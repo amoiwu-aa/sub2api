@@ -514,10 +514,11 @@ read / grep / ls，`<tool_policy>` 却告诉它「这些不可用，改用
 不认识它。网关会按客户端声明的工具 schema 计算候选映射，但是否真正启用由
 `gateway.cursor_native_tool_bridge_mode` 控制：
 
-- `shadow`（默认）：只记录拟议映射，所有工具仍走 MCP，不改变请求语义。
+- `infer_all`（默认）：自动桥接所有通过严格 schema 校验的工具，包括 Write。
+  Cursor 训练过的模型会走原生 `write`；不桥的话网关只能 stub，章节永远落不到磁盘。
+- `shadow`：只记录拟议映射，所有工具仍走 MCP。观察/回滚用，不要当生产默认。
 - `explicit`：只接受客户端显式给出的 `native_tools`。
 - `infer_readonly`：只自动桥接 read / grep / glob / ls / fetch / diagnostics。
-- `infer_all`：自动桥接所有通过严格 schema 校验的工具。
 - `off`：全局 kill switch，连显式映射也关闭。
 
 推断只认客户端自己声明的东西，分两步：
@@ -615,15 +616,19 @@ set，下一轮真正加入 `tools[]`，同时更新 prompt profile epoch。
 
 #### 灰度、kill switch 与回滚
 
-线上默认必须是 `shadow`。观察无误后再按组放开，不要一上来 `infer_all`。
+线上默认是 `infer_all`。`shadow` 会把未桥接的原生 Write stub 成空成功，等于
+废掉 grok-4.6-max 训练过的写文件能力；不要靠关掉 MAX 或砍上下文来掩盖这件事。
+需要观察或紧急回退时再显式切 `shadow` / `explicit` / `off`。
 
 ```
-shadow → infer_readonly → Bash/shell → Write/Delete → infer_all（仅已验收客户端）
+infer_all（默认）
+  回退：infer_readonly → explicit → shadow → off
 ```
 
 每档只看这些信号：`cursor.agent_turn_incomplete`、`cursor.agent_tool_bridge`
-（native / mcp / textual）、shadow 拟议映射日志、stub / unknown exec、重复或
-冲突 call ID、任务成功率。写类工具放开后还要核对客户端审批链没有被绕过。
+（native / mcp / textual）、`cursor.native_exec_stubbed`、shadow 拟议映射日志、
+重复或冲突 call ID、任务成功率。写类工具必须出现在客户端 tool_calls 里，
+不能只在上游被 stub。
 
 **Kill switch（无需重建镜像）**，在部署目录改环境变量后只重建应用容器：
 
@@ -833,6 +838,7 @@ base URL 打到 canary」计成成功证据。
 - 图片输入已通过 `UserMessage.field 3` 的 `selected_context` 接通；仍需继续拿
   真实客户端做格式与计费样本对账。
 - 真实 usage decoder 继续遵守独立样本对账门槛，估算用量不得冒充上游 usage。
-- 按 `shadow → infer_readonly → Bash → Write/Delete` 对生产流量分级放开；每档
-  都要有真实客户端（不只是 curl）的成功率对照。
+- 默认 `infer_all` 已覆盖已验收客户端的 Write 桥接。回退路径是
+  `infer_readonly → explicit → shadow → off`；每档都要有真实客户端
+  （不只是 curl）的成功率对照，并确认原生 write 不再被 stub 成成功。
 - Kiro 通道的 `/v1/responses` 仍然 404，可以照本次的路子补上。

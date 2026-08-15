@@ -236,9 +236,12 @@ security:
 gateway:
   # Cursor native-tool bridge mode:
   # off | shadow | explicit | infer_readonly | infer_all
-  # Safe default: shadow records inferred mappings while keeping all tools on MCP.
-  # Cursor 原生工具桥模式；安全默认值 shadow 只观测推断，不摘除 MCP 工具。
-  cursor_native_tool_bridge_mode: shadow
+  # Default infer_all: translate Cursor native exec (especially Write) to the
+  # client's declared tool. shadow is observation-only and stubs unbridged
+  # writes as if they succeeded — that silently drops MAX-quality tool use.
+  # Cursor 原生工具桥模式；默认 infer_all，把原生 Write 转给客户端执行。
+  # shadow 只观测，未桥接的写入会被 stub 成“成功”，等于废掉模型训练过的工具。
+  cursor_native_tool_bridge_mode: infer_all
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600

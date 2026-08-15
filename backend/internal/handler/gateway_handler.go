@@ -1308,7 +1308,7 @@ func (h *GatewayHandler) writeCursorModelsList(c *gin.Context, modelIDs []string
 			WebSearchToolType: "text_and_image",
 		})
 	}
-	mode := service.CursorNativeToolBridgeModeShadow
+	mode := service.CursorNativeToolBridgeModeInferAll
 	if h != nil && h.cursorGatewayService != nil {
 		mode = h.cursorGatewayService.NativeToolBridgeMode()
 	}

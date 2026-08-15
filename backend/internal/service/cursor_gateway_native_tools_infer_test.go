@@ -157,10 +157,26 @@ func TestResolveCursorNativeToolBridgeInfersWhenOptionsAbsent(t *testing.T) {
 		[]byte(`{"model":"cursor/grok-4.6"}`), tools, CursorNativeToolBridgeModeInferAll)
 	require.NoError(t, err)
 	require.Equal(t, "Read", bridge.ClientName("read"))
+	require.Equal(t, "Write", bridge.ClientName("write"))
 
 	// 被桥接的工具从 MCP 注册里摘掉，没桥上的 WebFetch 照常走 MCP。
 	require.Len(t, mcpTools, 1)
 	require.Equal(t, "WebFetch", mcpTools[0].Name)
+}
+
+func TestResolveCursorNativeToolBridgeDefaultModeInfersWrite(t *testing.T) {
+	tools := claudeCodeTools()
+	bridge, mcpTools, err := resolveCursorNativeToolBridge(
+		[]byte(`{"model":"cursor/grok-4.6-max"}`), tools, "")
+	require.NoError(t, err)
+	require.Equal(t, "Write", bridge.ClientName("write"))
+	require.NotContains(t, toolNames(mcpTools), "Write")
+}
+
+func TestNormalizeCursorNativeToolBridgeModeDefaultsToInferAll(t *testing.T) {
+	require.Equal(t, CursorNativeToolBridgeModeInferAll, normalizeCursorNativeToolBridgeMode(""))
+	require.Equal(t, CursorNativeToolBridgeModeShadow, normalizeCursorNativeToolBridgeMode("shadow"))
+	require.Equal(t, CursorNativeToolBridgeModeExplicit, normalizeCursorNativeToolBridgeMode("typo"))
 }
 
 func TestResolveCursorNativeToolBridgeAutoCanBeDisabled(t *testing.T) {

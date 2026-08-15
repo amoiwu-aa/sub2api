@@ -26,9 +26,9 @@ func normalizeCursorNativeToolBridgeMode(raw string) string {
 		return CursorNativeToolBridgeModeExplicit
 	case CursorNativeToolBridgeModeInferReadOnly:
 		return CursorNativeToolBridgeModeInferReadOnly
-	case CursorNativeToolBridgeModeInferAll:
+	case CursorNativeToolBridgeModeInferAll, "":
 		return CursorNativeToolBridgeModeInferAll
-	case CursorNativeToolBridgeModeShadow, "":
+	case CursorNativeToolBridgeModeShadow:
 		return CursorNativeToolBridgeModeShadow
 	default:
 		// Unknown configuration must fail closed. Keep explicit client mappings

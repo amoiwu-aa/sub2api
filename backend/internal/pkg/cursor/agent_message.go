@@ -241,6 +241,12 @@ func StubExecReplies(exec *ExecRequest) [][]byte {
 		// 形状由 TestLiveSpikeReadReplyShapes 实测确定（2026-08-14）。
 		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
 			EncodeBytesField(1, EncodeStringField(2, "stub: file access is disabled on this gateway\n")))}
+	case "write", "delete":
+		// 空成功回执是质量事故：Cursor 训练过的模型会调原生 write，网关若
+		// 假装写完，下一轮 Read 仍是旧文件，模型就会在同一章上空转。
+		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
+			EncodeBytesField(1, EncodeStringField(1,
+				"stub: native "+exec.Kind+" was not forwarded to the client; the file was not changed\n")))}
 	default:
 		// 其余工具统一回一个空的成功结果：结构上合法，语义上什么都没做。
 		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,

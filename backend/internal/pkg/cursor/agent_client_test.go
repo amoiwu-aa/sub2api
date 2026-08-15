@@ -485,6 +485,8 @@ func TestStubExecRepliesCoverKnownToolKinds(t *testing.T) {
 		7:  1, // read
 		8:  1, // ls
 		5:  1, // grep
+		3:  1, // write → honest non-success stub
+		4:  1, // delete
 	}
 	for argField, expected := range cases {
 		exec := &ExecRequest{ID: 1, ExecID: "e", ArgFieldNum: argField, Kind: execArgFields[argField]}
@@ -496,6 +498,15 @@ func TestStubExecRepliesCoverKnownToolKinds(t *testing.T) {
 	require.Len(t, StubExecReplies(unknown), 1)
 	require.Nil(t, StubExecReplies(nil))
 	require.Nil(t, StubExecReplies(&ExecRequest{ID: 1}))
+}
+
+func TestStubExecRepliesWriteIsNotEmptySuccess(t *testing.T) {
+	write := &ExecRequest{ID: 1, ExecID: "e", ArgFieldNum: 3, Kind: "write"}
+	replies := StubExecReplies(write)
+	require.Len(t, replies, 1)
+	emptySuccess := EncodeExecClientMessage(1, "e", 3, EncodeBytesField(1, nil))
+	require.NotEqual(t, emptySuccess, replies[0])
+	require.Contains(t, string(replies[0]), "not forwarded")
 }
 
 func TestParseServerMessageIgnoresUnknownFields(t *testing.T) {

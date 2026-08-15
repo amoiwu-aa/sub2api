@@ -617,6 +617,15 @@ func (s *agentStream) readTurn(
 				continue
 			}
 			// 不回执上游会一直等，整轮对话就挂在那里。
+			if exec := message.Exec; exec != nil {
+				switch exec.Kind {
+				case "write", "delete", "shell", "shell_stream", "background_shell_spawn":
+					slog.Warn("cursor.native_exec_stubbed",
+						"kind", exec.Kind,
+						"arg_field", exec.ArgFieldNum,
+						"exec_id", exec.ExecID)
+				}
+			}
 			replies := StubExecReplies(message.Exec)
 			answered := len(replies) > 0
 			for _, reply := range replies {

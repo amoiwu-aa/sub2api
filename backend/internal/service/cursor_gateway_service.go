@@ -46,7 +46,7 @@ func NewCursorGatewayService(
 	quotaReader cursorQuotaSnapshotReader,
 	cfg *config.Config,
 ) *CursorGatewayService {
-	mode := CursorNativeToolBridgeModeShadow
+	mode := CursorNativeToolBridgeModeInferAll
 	keepalive := defaultCursorStreamKeepalive
 	if cfg != nil {
 		mode = normalizeCursorNativeToolBridgeMode(cfg.Gateway.CursorNativeToolBridgeMode)
@@ -66,7 +66,7 @@ func NewCursorGatewayService(
 // NativeToolBridgeMode exposes the effective mode for capability discovery.
 func (s *CursorGatewayService) NativeToolBridgeMode() string {
 	if s == nil {
-		return CursorNativeToolBridgeModeShadow
+		return CursorNativeToolBridgeModeInferAll
 	}
 	return normalizeCursorNativeToolBridgeMode(s.nativeBridgeMode)
 }
