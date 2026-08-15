@@ -458,6 +458,24 @@ func (s *agentStream) readTurn(
 		stalled.Store(true)
 		s.close()
 	})
+	var shortStallDeadline time.Time
+	activateShortStall := func() {
+		if shortStallDeadline.IsZero() {
+			shortStallDeadline = time.Now().Add(execStallTimeout)
+		}
+	}
+	resetStallTimer := func(timeout time.Duration) {
+		if !shortStallDeadline.IsZero() {
+			remaining := time.Until(shortStallDeadline)
+			if remaining <= 0 {
+				remaining = time.Nanosecond
+			}
+			if timeout > remaining {
+				timeout = remaining
+			}
+		}
+		stallTimer.Reset(timeout)
+	}
 	defer func() {
 		stallTimer.Stop()
 		if graceTimer != nil {
@@ -513,7 +531,7 @@ func (s *agentStream) readTurn(
 			return err
 		}
 		if !closeAfterGrace {
-			stallTimer.Reset(streamStallTimeout)
+			resetStallTimer(streamStallTimeout)
 			return nil
 		}
 		stallTimer.Stop()
@@ -574,7 +592,7 @@ func (s *agentStream) readTurn(
 
 		switch message.Kind {
 		case KindTextDelta:
-			stallTimer.Reset(streamStallTimeout)
+			resetStallTimer(streamStallTimeout)
 			if clean := textFilter.Feed(message.TextDelta); clean != "" {
 				clean, markupCalls := markupFilter.Feed(clean)
 				for _, call := range markupCalls {
@@ -598,7 +616,7 @@ func (s *agentStream) readTurn(
 				}
 			}
 		case KindThinkingDelta:
-			stallTimer.Reset(streamStallTimeout)
+			resetStallTimer(streamStallTimeout)
 			if clean := thinkingFilter.Feed(message.ThinkingDelta); clean != "" {
 				thinking.WriteString(clean)
 				if err := emit(AgentDelta{Thinking: clean}); err != nil {
@@ -629,6 +647,9 @@ func (s *agentStream) readTurn(
 					"kind", exec.Kind,
 					"arg_field", exec.ArgFieldNum,
 					"exec_id", exec.ExecID)
+				if strings.TrimSpace(exec.Kind) == "" {
+					activateShortStall()
+				}
 			}
 			replies := StubExecReplies(message.Exec)
 			answered := len(replies) > 0
@@ -640,13 +661,14 @@ func (s *agentStream) readTurn(
 				result.ExecHandled++
 			}
 			if answered {
-				stallTimer.Reset(streamStallTimeout)
+				resetStallTimer(streamStallTimeout)
 				break
 			}
 			// 认不出的工具，或者回执没写出去：上游在等一个不会到来的回复，
 			// 让看门狗早点收尾，别让客户端干等两分钟。
 			result.ExecUnanswered++
-			stallTimer.Reset(execStallTimeout)
+			activateShortStall()
+			resetStallTimer(execStallTimeout)
 		case KindQuery:
 			// 网关目前不实现 interaction_query 回执。立即关流，调用方会根据
 			// QueryIgnored 将该轮编码成协议对应的失败终态。
@@ -656,9 +678,9 @@ func (s *agentStream) readTurn(
 			s.close()
 		case KindKV:
 			result.KVSeen++
-			stallTimer.Reset(streamStallTimeout)
+			resetStallTimer(streamStallTimeout)
 		case KindCheckpoint:
-			stallTimer.Reset(streamStallTimeout)
+			resetStallTimer(streamStallTimeout)
 			// 防御性拷贝：Field.Bytes 零拷贝指向帧缓冲，这是唯一跨迭代持有
 			// 它的地方。当前 EnvelopeReader.Next 每帧独立分配所以安全，但
 			// 引入缓冲池之类的优化会先炸这里，拷一份把契约固化下来。

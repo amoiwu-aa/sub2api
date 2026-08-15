@@ -38,6 +38,10 @@ func checkpointMessage(state []byte) []byte {
 	return EncodeBytesField(3, state)
 }
 
+func kvServerMessage(value string) []byte {
+	return EncodeStringField(4, value)
+}
+
 // execServerMessage 构造一条要求客户端跑工具的服务端消息。
 func execServerMessage(id uint64, execID string, argFieldNum int) []byte {
 	return EncodeBytesField(2, concat(
@@ -346,6 +350,35 @@ func TestRunAgentTurnWatchdogEndsTurnWhenExecCannotBeAnswered(t *testing.T) {
 	require.Equal(t, 1, result.ExecUnanswered)
 	// 已经产出的文本要留住：调用方靠它给客户端补一个正常的收尾。
 	require.Equal(t, "查一下北京的天气", result.Text)
+}
+
+func TestRunAgentTurnUnknownExecKeepsShortFuseAcrossKVFrames(t *testing.T) {
+	shrinkStallTimeouts(t, time.Second, 100*time.Millisecond)
+
+	server := &agentTestServer{
+		t:               t,
+		hangAfterScript: true,
+		frameDelay:      60 * time.Millisecond,
+		script: [][]byte{
+			execServerMessage(10, "exec-unknown", 17),
+			kvServerMessage("kv-1"),
+			kvServerMessage("kv-2"),
+			kvServerMessage("kv-3"),
+		},
+	}
+	client, host := startAgentTestServer(t, server)
+
+	startedAt := time.Now()
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{Text: "hi", ConversationID: "conv-1"}, nil)
+	elapsed := time.Since(startedAt)
+
+	require.NoError(t, err)
+	require.True(t, result.Stalled)
+	require.Equal(t, 1, result.ExecHandled)
+	require.Zero(t, result.ExecUnanswered)
+	require.Less(t, result.KVSeen, 3, "KV frames must not keep extending the short fuse")
+	require.Less(t, elapsed, 200*time.Millisecond, "KV frames must not restore or extend the stall timeout")
 }
 
 func TestRunAgentTurnCountsIgnoredInteractionQuery(t *testing.T) {
