@@ -189,6 +189,15 @@ func TestResolveCursorNativeToolBridgeAutoCanBeDisabled(t *testing.T) {
 	require.Equal(t, tools, mcpTools)
 }
 
+func TestResolveCursorNativeToolBridgeInferAllFillsWriteOnPartialExplicitMap(t *testing.T) {
+	body := []byte(`{"cursor_options":{"native_tools":{"read":"Read","grep":"Grep"}}}`)
+	bridge, mcpTools, err := resolveCursorNativeToolBridge(body, claudeCodeTools(), CursorNativeToolBridgeModeInferAll)
+	require.NoError(t, err)
+	require.Equal(t, "Read", bridge.ClientName("read"))
+	require.Equal(t, "Write", bridge.ClientName("write"))
+	require.NotContains(t, toolNames(mcpTools), "Write")
+}
+
 // 显式映射是客户端的断言：只认它列出的键，不再自动补别的。
 func TestResolveCursorNativeToolBridgeExplicitBeatsInference(t *testing.T) {
 	body := []byte(`{"cursor_options":{"native_tools":{"read":"Read"}}}`)

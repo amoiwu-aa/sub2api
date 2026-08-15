@@ -509,6 +509,15 @@ func TestStubExecRepliesWriteIsNotEmptySuccess(t *testing.T) {
 	require.Contains(t, string(replies[0]), "not forwarded")
 }
 
+func TestStubExecRepliesUnknownKindIsNotEmptySuccess(t *testing.T) {
+	unknown := &ExecRequest{ID: 1, ExecID: "e", ArgFieldNum: 99, Kind: ""}
+	replies := StubExecReplies(unknown)
+	require.Len(t, replies, 1)
+	emptySuccess := EncodeExecClientMessage(1, "e", 99, EncodeBytesField(1, nil))
+	require.NotEqual(t, emptySuccess, replies[0])
+	require.Contains(t, string(replies[0]), "not forwarded")
+}
+
 func TestParseServerMessageIgnoresUnknownFields(t *testing.T) {
 	// 上游随时可能加新事件，一条不认识的消息不该让整轮对话失败。
 	message, err := ParseServerMessage(EncodeBytesField(99, []byte("future")))

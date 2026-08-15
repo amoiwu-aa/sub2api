@@ -260,12 +260,19 @@ func RunAgentTurn(
 		)
 	}
 	if result != nil && (len(result.ToolCalls) > 0 || result.ExecHandled > 0 || result.QueryIgnored > 0) {
-		slog.Debug("cursor.agent_tool_bridge",
+		callNames := make([]string, 0, len(result.ToolCalls))
+		for _, call := range result.ToolCalls {
+			if name := strings.TrimSpace(call.Name); name != "" {
+				callNames = append(callNames, name)
+			}
+		}
+		slog.Info("cursor.agent_tool_bridge",
 			"conversation_id", conversationID,
 			"model", input.ModelID,
 			"mcp_calls", result.MCPToolCalls,
 			"native_calls", result.NativeToolCalls,
 			"textual_calls", result.TextualToolCalls,
+			"tool_names", callNames,
 			"duplicates", result.DuplicateToolCalls,
 			"conflicts", result.ConflictingToolCalls,
 			"collection_ms", result.ToolCallCollectionMs,
@@ -618,13 +625,10 @@ func (s *agentStream) readTurn(
 			}
 			// 不回执上游会一直等，整轮对话就挂在那里。
 			if exec := message.Exec; exec != nil {
-				switch exec.Kind {
-				case "write", "delete", "shell", "shell_stream", "background_shell_spawn":
-					slog.Warn("cursor.native_exec_stubbed",
-						"kind", exec.Kind,
-						"arg_field", exec.ArgFieldNum,
-						"exec_id", exec.ExecID)
-				}
+				slog.Warn("cursor.native_exec_stubbed",
+					"kind", exec.Kind,
+					"arg_field", exec.ArgFieldNum,
+					"exec_id", exec.ExecID)
 			}
 			replies := StubExecReplies(message.Exec)
 			answered := len(replies) > 0

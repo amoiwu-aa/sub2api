@@ -103,6 +103,7 @@ func resolveCursorNativeToolBridge(
 				return nil, clientTools, nil
 			}
 		}
+		logNativeToolBridgeResolved(mode, clientTools, bridge, "infer")
 		return bridge, splitBridgedMcpTools(bridge, clientTools), nil
 	}
 
@@ -138,7 +139,58 @@ func resolveCursorNativeToolBridge(
 		}
 		bridge[normalizedKey] = explicitNativeToolTarget(normalizedKey, tool)
 	}
+	// AutoClaw 会发一份它“学到的”显式映射。旧网关曾让它以为 grok 只支持
+	// read/grep/ls，映射里就没有 write。infer_all 必须把 schema 能绑上的
+	// Write 补回去，否则模型只会 Read，文件永远落不到磁盘。
+	if mode == CursorNativeToolBridgeModeInferAll || mode == CursorNativeToolBridgeModeInferReadOnly {
+		bridge = mergeInferredNativeToolBridge(bridge, clientTools, mode)
+	}
+	logNativeToolBridgeResolved(mode, clientTools, bridge, "explicit")
 	return bridge, splitBridgedMcpTools(bridge, clientTools), nil
+}
+
+func mergeInferredNativeToolBridge(bridge cursor.NativeToolBridge, clientTools []cursor.McpTool, mode string) cursor.NativeToolBridge {
+	inferred := inferNativeToolBridge(clientTools)
+	if mode == CursorNativeToolBridgeModeInferReadOnly {
+		inferred = filterReadOnlyNativeToolBridge(inferred)
+	}
+	if len(inferred) == 0 {
+		return bridge
+	}
+	if len(bridge) == 0 {
+		return inferred
+	}
+	taken := make(map[string]struct{}, len(bridge))
+	for _, target := range bridge {
+		taken[target.Name] = struct{}{}
+	}
+	for key, target := range inferred {
+		if _, exists := bridge[key]; exists {
+			continue
+		}
+		if _, used := taken[target.Name]; used {
+			continue
+		}
+		bridge[key] = target
+		taken[target.Name] = struct{}{}
+	}
+	return bridge
+}
+
+func logNativeToolBridgeResolved(mode string, clientTools []cursor.McpTool, bridge cursor.NativeToolBridge, source string) {
+	names := make([]string, 0, len(clientTools))
+	for _, tool := range clientTools {
+		if name := strings.TrimSpace(tool.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	slog.Info("cursor.native_tool_bridge",
+		"mode", mode,
+		"source", source,
+		"client_tools", names,
+		"bridged", nativeToolBridgeSummary(bridge),
+		"write_bridged", strings.TrimSpace(bridge.ClientName("write")) != "")
 }
 
 func filterReadOnlyNativeToolBridge(bridge cursor.NativeToolBridge) cursor.NativeToolBridge {

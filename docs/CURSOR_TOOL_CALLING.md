@@ -548,8 +548,9 @@ schema 缺失或没声明任何属性时同样不映射：无从校验，不如�
 绑定改写表。
 
 用 `cursor_options.native_tools_auto: false` 可以让本次请求全部走 MCP；
-显式 `true` 是请求级 opt-in（全局 `off` 除外）。显式 `native_tools` 优先于推断：
-给了就只认它列的键，不再自动补别的。
+显式 `true` 是请求级 opt-in（全局 `off` 除外）。显式 `native_tools` 仍优先；`infer_all` / `infer_readonly` 会把 schema
+能绑上、且未被占用的键补进去。避免 AutoClaw 从旧 400 学到一份只有
+read/grep/ls 的映射后，把 Write 永久留在 MCP，模型只 Read 不写。
 - 模型的调用以映射后的客户端工具名返回（OpenAI `tool_calls` /
   Anthropic `tool_use`），`tool_call_id` 优先取上游入参自带的
   `tool_call_id`（复合 `call...\\nfc...` 只取合法的第一段）。客户端执行后照常把

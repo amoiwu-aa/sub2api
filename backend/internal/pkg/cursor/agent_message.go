@@ -1,6 +1,9 @@
 package cursor
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // AgentServerMessage 的解析，以及 stub exec 的回执编码。
 
@@ -248,7 +251,12 @@ func StubExecReplies(exec *ExecRequest) [][]byte {
 			EncodeBytesField(1, EncodeStringField(1,
 				"stub: native "+exec.Kind+" was not forwarded to the client; the file was not changed\n")))}
 	default:
-		// 其余工具统一回一个空的成功结果：结构上合法，语义上什么都没做。
+		if _, known := execArgFields[exec.ArgFieldNum]; !known || strings.TrimSpace(exec.Kind) == "" {
+			return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
+				EncodeBytesField(1, EncodeStringField(1,
+					"stub: native tool was not forwarded to the client; nothing was changed\n")))}
+		}
+		// 其余已知只读工具统一回一个空的成功结果：结构上合法，语义上什么都没做。
 		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
 			EncodeBytesField(1, nil))}
 	}
