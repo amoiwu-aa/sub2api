@@ -342,6 +342,7 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:         openAIGPT54LongContextInputMultiplier,
 		LongContextOutputMultiplier:        openAIGPT54LongContextOutputMultiplier,
 	}
+	s.fallbackPrices["gpt-5.6-sol-wm"] = s.fallbackPrices["gpt-5.6-sol"]
 	s.fallbackPrices["gpt-5.6-terra"] = &ModelPricing{
 		InputPricePerToken:                 2e-6,
 		InputPricePerTokenPriority:         4e-6,
@@ -612,38 +613,25 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:  false,
 	}
 
-	// Cursor/SpaceXAI Grok 4.6 (cursor.com/docs/models/grok-4-6: standard
-	// $2 input / $0.50 cached input / $6 output per MTok; Fast $4 / $1 / $12).
-	// Fast 档价格在 ServiceTier == "fast" 时生效（Cursor 通道会把生效的
-	// fast 参数记进用量日志的 service_tier）。
-	s.fallbackPrices["grok-4.6"] = &ModelPricing{
-		InputPricePerToken:          2e-6,
-		OutputPricePerToken:         6e-6,
-		CacheReadPricePerToken:      0.5e-6,
-		SupportsCacheBreakdown:      false,
-		LongContextInputThreshold:   200000,
-		LongContextInputMultiplier:  2,
-		LongContextOutputMultiplier: 2,
-		InputPricePerTokenFast:      4e-6,
-		OutputPricePerTokenFast:     12e-6,
-		CacheReadPricePerTokenFast:  1e-6,
-	}
-
 	// xAI Grok 4.5 (cursor.com/docs/models-and-pricing: standard $2 input /
-	// $0.50 cached input / $6 output per MTok; Fast $4 / $1 / $12)
+	// $0.50 cached input / $6 output per MTok; Fast $4 / $1 / $12)。
+	// 官方 ≥200k 长上下文 2× 阶梯一并保留。
 	s.fallbackPrices["grok-4.5"] = &ModelPricing{
-		InputPricePerToken:         2e-6,
-		OutputPricePerToken:        6e-6,
-		CacheReadPricePerToken:     0.5e-6,
-		SupportsCacheBreakdown:     false,
-		InputPricePerTokenFast:     4e-6,
-		OutputPricePerTokenFast:    12e-6,
-		CacheReadPricePerTokenFast: 1e-6,
+		InputPricePerToken:            2e-6,
+		OutputPricePerToken:           6e-6,
+		CacheReadPricePerToken:        0.5e-6,
+		SupportsCacheBreakdown:        false,
+		LongContextInputThreshold:     200000,
+		LongContextThresholdInclusive: true,
+		LongContextInputMultiplier:    2,
+		LongContextOutputMultiplier:   2,
+		InputPricePerTokenFast:        4e-6,
+		OutputPricePerTokenFast:       12e-6,
+		CacheReadPricePerTokenFast:    1e-6,
 	}
 
-	// xAI Grok 4.6 (docs.x.ai/developers/models: $2 input / $0.50 cached input /
-	// $6 output per MTok under 200k prompt tokens; ≥200k is 2× on input,
-	// cached input, and output).
+	// Grok 4.6：xAI 牌价（docs.x.ai）+ Cursor Fast 档（cursor.com/docs/models/grok-4-6）。
+	// $2 input / $0.50 cached / $6 output；≥200k 为 2×；Fast $4 / $1 / $12。
 	s.fallbackPrices["grok-4.6"] = &ModelPricing{
 		InputPricePerToken:            2e-6,
 		OutputPricePerToken:           6e-6,
@@ -653,6 +641,9 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextThresholdInclusive: true,
 		LongContextInputMultiplier:    2,
 		LongContextOutputMultiplier:   2,
+		InputPricePerTokenFast:        4e-6,
+		OutputPricePerTokenFast:       12e-6,
+		CacheReadPricePerTokenFast:    1e-6,
 	}
 
 	// xAI Grok 4.3: $1.25 input / $0.20 cached / $2.50 output below 200k.
@@ -885,10 +876,8 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	switch modelLower {
 	case "grok-4.6", "grok-4.6-latest":
 		return s.fallbackPrices["grok-4.6"]
-	case "grok", "grok-latest", "grok-4.5", "grok-4.5-latest", "grok-build-latest":
+	case "grok", "grok-latest", "grok-4.5", "grok-4.5-latest":
 		return s.fallbackPrices["grok-4.5"]
-	case "grok-4.6", "grok-4.6-latest":
-		return s.fallbackPrices["grok-4.6"]
 	case "grok-4.3",
 		"grok-4.20-0309-reasoning",
 		"grok-4.20-0309-non-reasoning",
@@ -902,7 +891,7 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// 别名配渠道价（默认按 canonical 名计费的分组不受影响）。
 	case "composer-2.5":
 		return s.fallbackPrices["composer-2.5"]
-	case "grok-build", "grok-build-0.1", "grok-composer", "grok-composer-2.5-fast":
+	case "grok-build", "grok-build-latest", "grok-build-0.1", "grok-composer", "grok-composer-2.5-fast":
 		return s.fallbackPrices["grok-build-0.1"]
 	}
 
@@ -913,6 +902,70 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 
 	return nil
+}
+
+func (s *BillingService) grokUnknownTextFamilyFallback(model string) *ModelPricing {
+	if s == nil || !isGrokUnknownTextFamilyModel(model) {
+		return nil
+	}
+	return s.fallbackPrices["grok-4.5"]
+}
+
+func isGrokUnknownTextFamilyModel(model string) bool {
+	native := strings.ToLower(strings.TrimSpace(xai.StripGrokProviderPrefix(model)))
+	if isGrokMediaFamilyModel(native) {
+		return false
+	}
+	switch {
+	case native == "grok", native == "grok-latest":
+		return true
+	case strings.HasPrefix(native, "grok-build"),
+		strings.HasPrefix(native, "grok-composer"),
+		strings.HasPrefix(native, "composer-"):
+		return true
+	case len(native) > 5 && strings.HasPrefix(native, "grok-"):
+		rest := native[len("grok-"):]
+		return rest[0] >= '0' && rest[0] <= '9'
+	default:
+		return false
+	}
+}
+
+// isGrokMediaFamilyModel matches ids that are billed per image/video/audio unit
+// rather than per token, so version-numbered media ids (grok-2-image-1212,
+// grok-5-video) cannot slip into the unknown-text fallback and pick up a token
+// card. "vision" is deliberately absent: multimodal chat models are token billed.
+func isGrokMediaFamilyModel(native string) bool {
+	for _, marker := range []string{"imagine", "image", "video", "audio", "speech", "tts", "transcribe", "realtime"} {
+		if strings.Contains(native, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasIdentifiedTokenPricing 判断模型能否在价格表中被"确定性识别"出 token 价格。
+//
+// 与 GetModelPricing 的关键区别：本函数拒绝按子串猜系列的兜底。GetModelPricing 会
+// 让任意含 "haiku"/"opus"/"claude" 的名字（哪怕是不存在的型号）落到 getFallbackPricing
+// 的系列兜底价上，因此凡是模型名来自外部、且"能查到价"会直接影响计费金额的场景
+// （如按上游响应自报模型计费），都必须用本函数而不是 GetModelPricing 做准入判断。
+func (s *BillingService) HasIdentifiedTokenPricing(model string) bool {
+	if s == nil {
+		return false
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return false
+	}
+	if s.pricingService != nil {
+		// 仅有图片价的条目不能用于 token 计费，口径与 GetModelPricing 保持一致。
+		if pricing := s.pricingService.GetIdentifiedModelPricing(model); pricing != nil && !pricing.TokenPricingAbsent {
+			return true
+		}
+	}
+	pricing, ok := s.fallbackPrices[model]
+	return ok && pricing != nil
 }
 
 // namespacedPricingPrefixes 是自有上游桥平台的模型命名空间前缀。

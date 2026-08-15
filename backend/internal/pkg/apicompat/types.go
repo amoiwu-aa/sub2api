@@ -908,6 +908,7 @@ type ChatMessage struct {
 	Role                  string          `json:"role"` // "system" | "user" | "assistant" | "tool" | "function"
 	Content               json.RawMessage `json:"content,omitempty"`
 	ReasoningContent      string          `json:"reasoning_content,omitempty"`
+	Reasoning             string          `json:"reasoning,omitempty"`
 	Name                  string          `json:"name,omitempty"`
 	ToolCalls             []ChatToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID            string          `json:"tool_call_id,omitempty"`
@@ -937,11 +938,19 @@ type ChatImageURL struct {
 
 // ChatTool describes a tool available to the model.
 type ChatTool struct {
-	Type                  string          `json:"type"` // "function"
+	Type                  string          `json:"type"` // "function" | "x_search"
 	Function              *ChatFunction   `json:"function,omitempty"`
 	CacheControl          json.RawMessage `json:"cache_control,omitempty"`
 	PromptCacheBreakpoint json.RawMessage `json:"prompt_cache_breakpoint,omitempty"`
 	Breakpoint            json.RawMessage `json:"breakpoint,omitempty"`
+
+	// type=x_search
+	AllowedXHandles          []string `json:"allowed_x_handles,omitempty"`
+	ExcludedXHandles         []string `json:"excluded_x_handles,omitempty"`
+	FromDate                 string   `json:"from_date,omitempty"`
+	ToDate                   string   `json:"to_date,omitempty"`
+	EnableImageUnderstanding *bool    `json:"enable_image_understanding,omitempty"`
+	EnableVideoUnderstanding *bool    `json:"enable_video_understanding,omitempty"`
 }
 
 // ChatFunction describes a function tool definition.
