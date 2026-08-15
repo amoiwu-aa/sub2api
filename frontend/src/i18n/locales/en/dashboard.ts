@@ -135,7 +135,14 @@ export default {
         'Add the following environment variables to your terminal profile or run directly in terminal to configure API access.',
       copy: 'Copy',
       copied: 'Copied',
+      copyAll: 'Copy all',
+      copiedAll: 'Copied',
+      copyLine: 'Copy this line',
       note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
+      modelPicker: {
+        label: 'Model',
+        hint: 'Cursor / Kiro model IDs are namespaced. Clients may not list them in a picker, so choose the model here before copying the config below.',
+      },
       claudeSettingsHint: 'User-level persistent configuration. Do not commit this file containing your API key to a project repository.',
       noGroupTitle: 'Please assign a group first',
       noGroupDescription: 'This API key has not been assigned to a group. Please click the group column in the key list to assign one before viewing the configuration.',
@@ -157,6 +164,8 @@ export default {
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
         opencode: 'OpenCode',
+        openaiCompatible: 'OpenAI Compatible',
+        cursorIde: 'Cursor IDE',
       },
       antigravity: {
         description: 'Configure API access for Antigravity group. Select the configuration method based on your client.',
@@ -194,6 +203,38 @@ export default {
         title: 'OpenCode Example',
         subtitle: 'opencode.json',
         hint: 'Config path: ~/.config/opencode/opencode.json (or opencode.jsonc), create if not exists. Use default providers (openai/anthropic/google) or custom provider_id. API Key can be configured directly or via /connect command. This is an example, adjust models and options as needed.',
+      },
+      cursor: {
+        description:
+          'Add these environment variables to send OpenAI-compatible requests through your RingStar Cursor group. Model IDs must use the cursor/ prefix.',
+        claudeDescription: 'Configure Claude Code to send Messages API traffic through your RingStar Cursor group.',
+        codexDescription: 'Configure Codex to send Responses API traffic through your RingStar Cursor group.',
+        ideDescription:
+          'Fill in a custom OpenAI provider in Cursor IDE settings. Official IDE should use /cursor-ide/v1, which strips tool declarations so the IDE tool loop does not stall.',
+        note:
+          'These environment variables apply to the current terminal session. For a permanent setup, add them to ~/.bashrc, ~/.zshrc, or the equivalent file. Third-party clients such as AutoClaw should use /v1, not /cursor-ide/v1.',
+        claudeNote:
+          'Choose one method: terminal env for this session, or ~/.claude/settings.json for persistence. Do not commit files that contain your API key.',
+        codexNote:
+          'Export SUB2API_API_KEY and save config.toml under ~/.codex. Prefer env_key auth; do not commit secrets.',
+        ideNote:
+          'Open Cursor Settings → Models, enable Override OpenAI Base URL, and fill in the three values below. Official IDE must use /cursor-ide/v1, not /v1.',
+        modelComment: 'Must include the cursor/ prefix, e.g. cursor/grok-4.6-max',
+        ideSettingsPath: 'Cursor Settings → Models',
+        ideSettingsHint:
+          'Official Cursor IDE uses its own tool loop and must use /cursor-ide/v1. A /v1 request with tools can leave the model waiting on tool_calls nobody will answer.',
+        codexConfigTomlHint:
+          'The Cursor Codex bridge only exposes HTTP Responses. Keep wire_api = "responses" and do not enable websockets. Back up ~/.codex/config.toml before merging.',
+      },
+      kiro: {
+        description:
+          'Add these environment variables to send OpenAI-compatible requests through your RingStar Kiro group. Model IDs must use the kiro/ prefix.',
+        claudeDescription: 'Configure Claude Code to send Messages API traffic through your RingStar Kiro group.',
+        note:
+          'These environment variables apply to the current terminal session. For a permanent setup, add them to ~/.bashrc, ~/.zshrc, or the equivalent file.',
+        claudeNote:
+          'Choose one method: terminal env for this session, or ~/.claude/settings.json for persistence. Do not commit files that contain your API key.',
+        modelComment: 'Must include the kiro/ prefix',
       },
     },
     customKeyLabel: 'Custom Key',

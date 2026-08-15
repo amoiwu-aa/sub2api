@@ -134,7 +134,14 @@ export default {
       description: '将以下环境变量添加到您的终端配置文件或直接在终端中运行。',
       copy: '复制',
       copied: '已复制',
+      copyAll: '全部复制',
+      copiedAll: '已全部复制',
+      copyLine: '复制此行',
       note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。',
+      modelPicker: {
+        label: '选择模型',
+        hint: 'Cursor / Kiro 的模型 ID 带平台前缀，客户端下拉框可能选不到。请在这里选好模型，再复制下方配置。'
+      },
       claudeSettingsHint: '用户级持久配置。此文件包含 API 密钥，请勿提交到项目仓库。',
       noGroupTitle: '请先分配分组',
       noGroupDescription:
@@ -157,7 +164,9 @@ export default {
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
-        opencode: 'OpenCode'
+        opencode: 'OpenCode',
+        openaiCompatible: 'OpenAI 兼容',
+        cursorIde: 'Cursor IDE'
       },
       antigravity: {
         description: '为 Antigravity 分组配置 API 访问。请根据您使用的客户端选择对应的配置方式。',
@@ -198,6 +207,38 @@ export default {
         title: 'OpenCode 配置示例',
         subtitle: 'opencode.json',
         hint: '配置文件路径：~/.config/opencode/opencode.json（或 opencode.jsonc），不存在需手动创建。可使用默认 provider（openai/anthropic/google）或自定义 provider_id。API Key 支持直接配置或通过客户端 /connect 命令配置。示例仅供参考，模型与选项可按需调整。'
+      },
+      cursor: {
+        description:
+          '将以下环境变量添加到终端，通过 OpenAI 兼容接口访问当前 RingStar Cursor 分组。模型 ID 必须带 cursor/ 前缀。',
+        claudeDescription: '配置 Claude Code，让 Messages API 请求通过当前 RingStar Cursor 分组发送。',
+        codexDescription: '配置 Codex，让 Responses API 请求通过当前 RingStar Cursor 分组发送。',
+        ideDescription:
+          '在 Cursor IDE 设置里填写自定义 OpenAI 服务。官方 IDE 请走 /cursor-ide/v1，该路径会摘掉工具声明，避免 IDE 自己的工具链路卡住。',
+        note:
+          '这些环境变量仅当前终端会话生效。如需永久配置，请添加到 ~/.bashrc、~/.zshrc 或相应配置文件。第三方客户端（如 AutoClaw）请使用 /v1，不要用 /cursor-ide/v1。',
+        claudeNote:
+          '二选一：终端环境变量仅当前会话；~/.claude/settings.json 可持久化。请勿把含 API Key 的文件提交到仓库。',
+        codexNote:
+          '导出 SUB2API_API_KEY，将 config.toml 保存到 ~/.codex。优先 env_key，勿提交密钥。',
+        ideNote:
+          '打开 Cursor Settings → Models，开启 Override OpenAI Base URL，填入下方三项。官方 IDE 请用 /cursor-ide/v1，不要用 /v1。',
+        modelComment: '必须带 cursor/ 前缀，例如 cursor/grok-4.6-max',
+        ideSettingsPath: 'Cursor Settings → Models',
+        ideSettingsHint:
+          '官方 Cursor IDE 走自己的工具链路，必须用 /cursor-ide/v1。带 tools 的 /v1 请求会让模型停在没人接的 tool_calls 上。',
+        codexConfigTomlHint:
+          'Cursor 分组的 Codex 桥只提供 HTTP Responses，wire_api 用 responses，不要开 websockets。合并前备份 ~/.codex/config.toml。'
+      },
+      kiro: {
+        description:
+          '将以下环境变量添加到终端，通过 OpenAI 兼容接口访问当前 RingStar Kiro 分组。模型 ID 必须带 kiro/ 前缀。',
+        claudeDescription: '配置 Claude Code，让 Messages API 请求通过当前 RingStar Kiro 分组发送。',
+        note:
+          '这些环境变量仅当前终端会话生效。如需永久配置，请添加到 ~/.bashrc、~/.zshrc 或相应配置文件。',
+        claudeNote:
+          '二选一：终端环境变量仅当前会话；~/.claude/settings.json 可持久化。请勿把含 API Key 的文件提交到仓库。',
+        modelComment: '必须带 kiro/ 前缀'
       }
     },
     customKeyLabel: '自定义密钥',
