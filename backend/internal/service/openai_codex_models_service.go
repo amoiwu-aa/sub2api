@@ -550,9 +550,10 @@ func codexModelsManifestBodyETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
-	"gpt-5.6-sol":   {},
-	"gpt-5.6-terra": {},
-	"gpt-5.6-luna":  {},
+	"gpt-5.6-sol":    {},
+	"gpt-5.6-sol-wm": {},
+	"gpt-5.6-terra":  {},
+	"gpt-5.6-luna":   {},
 }
 
 // adjustAPIKeyCodexModelsManifest prevents Codex from selecting Responses
