@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 // APIKeyRateLimitCacheData holds rate limit usage data cached in Redis.
@@ -104,6 +105,7 @@ type ModelPricing struct {
 	CacheCreation1hPrice               float64 // 1小时缓存创建每token价格 (USD)
 	SupportsCacheBreakdown             bool    // 是否支持详细的缓存分类
 	LongContextInputThreshold          int     // 超过阈值后按整次会话提升输入价格
+	LongContextThresholdInclusive      bool    // 达到阈值即应用（xAI）；默认保持严格大于以兼容既有模型
 	LongContextInputMultiplier         float64 // 长上下文整次会话输入倍率
 	LongContextOutputMultiplier        float64 // 长上下文整次会话输出倍率
 	ImageOutputPricePerToken           float64 // 图片输出 token 价格 (USD)
@@ -639,23 +641,43 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerTokenFast: 1e-6,
 	}
 
-	// xAI Grok 4.3 (official docs: $1.25 input / $2.50 output per MTok)
+	// xAI Grok 4.6 (docs.x.ai/developers/models: $2 input / $0.50 cached input /
+	// $6 output per MTok under 200k prompt tokens; ≥200k is 2× on input,
+	// cached input, and output).
+	s.fallbackPrices["grok-4.6"] = &ModelPricing{
+		InputPricePerToken:            2e-6,
+		OutputPricePerToken:           6e-6,
+		CacheReadPricePerToken:        0.5e-6,
+		SupportsCacheBreakdown:        false,
+		LongContextInputThreshold:     200000,
+		LongContextThresholdInclusive: true,
+		LongContextInputMultiplier:    2,
+		LongContextOutputMultiplier:   2,
+	}
+
+	// xAI Grok 4.3: $1.25 input / $0.20 cached / $2.50 output below 200k.
 	s.fallbackPrices["grok-4.3"] = &ModelPricing{
-		InputPricePerToken:         1.25e-6,
-		OutputPricePerToken:        2.5e-6,
-		CacheReadPricePerToken:     0.2e-6,
-		SupportsCacheBreakdown:     false,
-		LongContextInputThreshold:  1000000,
-		LongContextInputMultiplier: 1,
+		InputPricePerToken:            1.25e-6,
+		OutputPricePerToken:           2.5e-6,
+		CacheReadPricePerToken:        0.2e-6,
+		SupportsCacheBreakdown:        false,
+		LongContextInputThreshold:     200000,
+		LongContextThresholdInclusive: true,
+		LongContextInputMultiplier:    2,
+		LongContextOutputMultiplier:   2,
 	}
 	// xAI Grok Build 0.1 (official docs: $1 input / $0.20 cached input /
 	// $2 output per MTok). Grok Build 平台的 composer 系别名仍用这条编码
 	// 模型价；Cursor 的 composer-2.5 有官方牌价，见下面的独立条目。
 	s.fallbackPrices["grok-build-0.1"] = &ModelPricing{
-		InputPricePerToken:     1e-6,
-		OutputPricePerToken:    2e-6,
-		CacheReadPricePerToken: 0.2e-6,
-		SupportsCacheBreakdown: false,
+		InputPricePerToken:            1e-6,
+		OutputPricePerToken:           2e-6,
+		CacheReadPricePerToken:        0.2e-6,
+		SupportsCacheBreakdown:        false,
+		LongContextInputThreshold:     200000,
+		LongContextThresholdInclusive: true,
+		LongContextInputMultiplier:    2,
+		LongContextOutputMultiplier:   2,
 	}
 
 	// Cursor Composer 2.5 (cursor.com/docs/models-and-pricing: standard
@@ -865,6 +887,8 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		return s.fallbackPrices["grok-4.6"]
 	case "grok", "grok-latest", "grok-4.5", "grok-4.5-latest", "grok-build-latest":
 		return s.fallbackPrices["grok-4.5"]
+	case "grok-4.6", "grok-4.6-latest":
+		return s.fallbackPrices["grok-4.6"]
 	case "grok-4.3",
 		"grok-4.20-0309-reasoning",
 		"grok-4.20-0309-non-reasoning",
@@ -880,6 +904,12 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		return s.fallbackPrices["composer-2.5"]
 	case "grok-build", "grok-build-0.1", "grok-composer", "grok-composer-2.5-fast":
 		return s.fallbackPrices["grok-build-0.1"]
+	}
+
+	// Unknown Grok text IDs (grok-5, dated snapshots, provider-prefixed) inherit
+	// the current default text card so a new model cannot ship unbilled.
+	if pricing := s.grokUnknownTextFamilyFallback(modelLower); pricing != nil {
+		return pricing
 	}
 
 	return nil
@@ -1061,9 +1091,11 @@ type CostInput struct {
 	Ctx                       context.Context
 	Model                     string
 	GroupID                   *int64 // 用于渠道定价查找
+	Group                     *Group
 	Tokens                    UsageTokens
-	RequestCount              int    // 按次计费时使用
-	SizeTier                  string // 按次/图片模式的层级标签（"1K","2K","4K","HD" 等）
+	RequestCount              int     // 按次计费时使用
+	UsageUnits                float64 // 音频等连续计量单位（分钟/小时/百万字符）
+	SizeTier                  string  // 按次/图片模式的层级标签（"1K","2K","4K","HD" 等）
 	RateMultiplier            float64
 	ServiceTier               string                // "priority","flex","" 等
 	Resolver                  *ModelPricingResolver // 定价解析器
@@ -1096,6 +1128,7 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 		resolved = input.Resolver.Resolve(input.Ctx, PricingInput{
 			Model:   input.Model,
 			GroupID: input.GroupID,
+			Group:   input.Group,
 		})
 	}
 
@@ -1107,7 +1140,7 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 	var breakdown *CostBreakdown
 	var err error
 	switch resolved.Mode {
-	case BillingModePerRequest, BillingModeImage:
+	case BillingModePerRequest, BillingModeImage, BillingModeVideo:
 		breakdown, err = s.calculatePerRequestCost(resolved, input)
 	default: // BillingModeToken
 		breakdown, err = s.calculateTokenCost(resolved, input)
@@ -1133,7 +1166,7 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 	pricing = s.applyModelSpecificPricingPolicy(input.Model, pricing)
 
 	// 长上下文定价仅在无区间定价时应用（区间定价已包含上下文分层）
-	applyLongCtx := len(resolved.Intervals) == 0
+	applyLongCtx := len(resolved.Intervals) == 0 && resolved.longContextPricingEnabled
 	if input.LongContextBillingEnabled != nil {
 		applyLongCtx = applyLongCtx && *input.LongContextBillingEnabled
 	}
@@ -1281,9 +1314,13 @@ func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens 
 
 // calculatePerRequestCost 按次/图片计费
 func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, input CostInput) (*CostBreakdown, error) {
-	count := input.RequestCount
-	if count <= 0 {
-		count = 1
+	units := input.UsageUnits
+	if units <= 0 {
+		count := input.RequestCount
+		if count <= 0 {
+			count = 1
+		}
+		units = float64(count)
 	}
 
 	var unitPrice float64
@@ -1302,7 +1339,7 @@ func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, inpu
 		unitPrice = resolved.DefaultPerRequestPrice
 	}
 
-	totalCost := unitPrice * float64(count)
+	totalCost := unitPrice * units
 	actualCost := totalCost * input.RateMultiplier
 
 	return &CostBreakdown{
@@ -1443,6 +1480,9 @@ func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens
 		return false
 	}
 	totalInputTokens := tokens.InputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
+	if pricing.LongContextThresholdInclusive {
+		return totalInputTokens >= pricing.LongContextInputThreshold
+	}
 	return totalInputTokens > pricing.LongContextInputThreshold
 }
 
@@ -1614,6 +1654,8 @@ const (
 	defaultGrokImagineImagePrice2K        = 0.02
 	defaultGrokImagineImageQualityPrice1K = 0.05
 	defaultGrokImagineImageQualityPrice2K = 0.07
+	defaultGrokImagineImage20Price1K      = 0.06 // default quality is Medium
+	defaultGrokImagineImage20Price2K      = 0.08
 
 	// 视频默认价为 xAI 官方**每秒**输出价格（USD/s），总价 = 每秒价 × 时长（秒）。
 	defaultGrokImagineVideoPrice480P    = 0.05
@@ -1625,14 +1667,14 @@ const (
 	// Codex alpha/search 网页搜索单次默认价：OpenAI 官方 web search 定价 $10/1000 次。
 	defaultWebSearchPricePerCall = 0.01
 
-	// Grok /v1/web_search 与 SearchCount 附加费：与 Codex 对齐 $10/1000 次（按 1k 计价字段存储）。
-	defaultSearchPricePer1k = 10.0
+	// xAI server-side web/X search and code execution are $5/1000 calls.
+	defaultSearchPricePer1k = 5.0
 
-	// Grok Voice 默认价（分组列 NULL 时使用；显式配 0 表示免费）。
-	// 保守运营占位，运维可通过 groups.audio_* 覆盖。
-	defaultAudioRealtimePricePerMin     = 0.10
+	// Generic realtime defaults to think-fast-1.0; think-fast-2.0 can be
+	// configured independently through per-model group/channel pricing.
+	defaultAudioRealtimePricePerMin     = 0.05
 	defaultAudioTTSPricePerMillionChars = 15.0
-	defaultAudioSTTPricePerHour         = 0.36
+	defaultAudioSTTPricePerHour         = 0.10
 )
 
 // CalculateWebSearchCost 计算 Codex alpha/search 网页搜索按次费用。
@@ -1890,6 +1932,12 @@ func (s *BillingService) getDefaultVideoPrice(model string, resolution string) f
 func getDefaultGrokImagineImagePrice(model string, imageSize string) (float64, bool) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	switch model {
+	case "grok-imagine-image-2.0":
+		return getGrokImagineImageTierPrice(
+			imageSize,
+			defaultGrokImagineImage20Price1K,
+			defaultGrokImagineImage20Price2K,
+		), true
 	case "grok-imagine-image-quality":
 		return getGrokImagineImageTierPrice(
 			imageSize,

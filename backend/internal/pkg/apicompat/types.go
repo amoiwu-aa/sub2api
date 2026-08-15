@@ -435,6 +435,14 @@ type ResponsesTool struct {
 	// type=namespace 的子工具列表（tools 与 children 二选一，语义相同）。
 	Tools    []ResponsesTool `json:"tools,omitempty"`
 	Children []ResponsesTool `json:"children,omitempty"`
+
+	// type=x_search
+	AllowedXHandles          []string `json:"allowed_x_handles,omitempty"`
+	ExcludedXHandles         []string `json:"excluded_x_handles,omitempty"`
+	FromDate                 string   `json:"from_date,omitempty"`
+	ToDate                   string   `json:"to_date,omitempty"`
+	EnableImageUnderstanding *bool    `json:"enable_image_understanding,omitempty"`
+	EnableVideoUnderstanding *bool    `json:"enable_video_understanding,omitempty"`
 }
 
 // UnmarshalJSON 容忍字符串形式的工具声明：codex 会以 "name" 简写声明 custom 工具，
@@ -1114,7 +1122,22 @@ type ChatDelta struct {
 	Role             string         `json:"role,omitempty"`
 	Content          *string        `json:"content,omitempty"` // pointer: omit when not present, null vs "" matters
 	ReasoningContent *string        `json:"reasoning_content,omitempty"`
+	Reasoning        *string        `json:"reasoning,omitempty"`
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
+}
+
+func (m ChatMessage) reasoningText() string {
+	if m.ReasoningContent != "" {
+		return m.ReasoningContent
+	}
+	return m.Reasoning
+}
+
+func (d ChatDelta) reasoningText() *string {
+	if d.ReasoningContent != nil {
+		return d.ReasoningContent
+	}
+	return d.Reasoning
 }
 
 // ---------------------------------------------------------------------------

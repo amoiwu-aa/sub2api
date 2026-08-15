@@ -117,6 +117,25 @@ func TestGetAccountSchedulingThresholds_ReadsStoredValue(t *testing.T) {
 	require.NotContains(t, got, "kiro")
 }
 
+func TestGetAccountSchedulingThresholds_MissingSettingUsesDefaultsAndNormalCacheTTL(t *testing.T) {
+	svc := newSettingServiceForPlatformThresholdTest(nil)
+	repo := svc.settingRepo.(*mockSettingRepo)
+	repo.getValueErr = ErrSettingNotFound
+
+	got := svc.GetAccountSchedulingThresholds(context.Background())
+	require.Equal(t, defaultAccountSchedulingThresholds(), got)
+	require.Equal(t, 1, repo.getValueCalls)
+
+	repo.data[SettingKeyAccountSchedulingThresholds] = `{"openai":91}`
+	got = svc.GetAccountSchedulingThresholds(context.Background())
+	require.Equal(t, 100, got[PlatformOpenAI], "missing-setting defaults should remain cached for the normal TTL")
+	require.Equal(t, 1, repo.getValueCalls)
+
+	cached, ok := accountSchedulingThresholdsCache.Load().(*cachedAccountSchedulingThresholds)
+	require.True(t, ok)
+	require.Greater(t, cached.expiresAt, time.Now().Add(accountSchedulingThresholdsCacheTTL-time.Second).UnixNano())
+}
+
 func TestUpdateSettings_OmittedAccountSchedulingThresholdsDoesNotCacheDefaults(t *testing.T) {
 	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
 		SettingKeyAccountSchedulingThresholds: `{"openai":85,"grok":88,"kiro":87}`,
