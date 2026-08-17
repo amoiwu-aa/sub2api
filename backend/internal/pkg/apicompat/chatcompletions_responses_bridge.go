@@ -276,7 +276,21 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 	// across an assistant message (so a following tool call in the same turn
 	// still receives it); any other role ends the thinking span.
 	var pendingReasoning string
+	// lastTurnReasoning is the most recent reasoning text of the current turn,
+	// surviving tool outputs. DeepSeek emits reasoning only once per turn, so
+	// chained tool calls (reasoning → call A → output A → call B) leave call B's
+	// assistant message without reasoning_content and DeepSeek 400s the history;
+	// replaying the turn's reasoning on B's message satisfies the contract. Only
+	// a user-side item ends the turn and clears it.
+	var lastTurnReasoning string
 	mediaByCallID := make(toolOutputMediaByCallID)
+
+	reasoningForAssistant := func() string {
+		if pendingReasoning != "" {
+			return pendingReasoning
+		}
+		return lastTurnReasoning
+	}
 
 	for _, raw := range rawItems {
 		raw = bytesTrimSpace(raw)
@@ -291,6 +305,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 				content, _ := json.Marshal(text)
 				messages = append(messages, ChatMessage{Role: "user", Content: content})
 				pendingReasoning = ""
+				lastTurnReasoning = ""
 				continue
 			}
 			return nil, nil, fmt.Errorf("parse responses input item: %w", err)
@@ -312,6 +327,9 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 					}
 				}
 			}
+			if pendingReasoning != "" {
+				lastTurnReasoning = pendingReasoning
+			}
 			continue
 		case "function_call":
 			arguments := rawString(item["arguments"])
@@ -332,7 +350,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 					Arguments: arguments,
 				},
 			}
-			messages = appendAssistantToolCall(messages, toolCall, pendingReasoning)
+			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
 			pendingReasoning = ""
 			continue
 		case "tool_search_call":
@@ -353,7 +371,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 					Arguments: arguments,
 				},
 			}
-			messages = appendAssistantToolCall(messages, toolCall, pendingReasoning)
+			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
 			pendingReasoning = ""
 			continue
 		case "custom_tool_call":
@@ -369,7 +387,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 					Arguments: string(arguments),
 				},
 			}
-			messages = appendAssistantToolCall(messages, toolCall, pendingReasoning)
+			messages = appendAssistantToolCall(messages, toolCall, reasoningForAssistant())
 			pendingReasoning = ""
 			continue
 		case "function_call_output", "custom_tool_call_output", "tool_search_output":
@@ -401,6 +419,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			content, _ := json.Marshal(rawString(item["text"]))
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
+			lastTurnReasoning = ""
 			continue
 		case "input_image":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
@@ -409,6 +428,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			}
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
+			lastTurnReasoning = ""
 			continue
 		}
 
@@ -433,11 +453,22 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 		if err != nil {
 			return nil, nil, err
 		}
-		messages = append(messages, ChatMessage{Role: role, Content: chatContent})
-		// Reasoning only survives across an assistant text message.
-		if role != "assistant" {
+		msg := ChatMessage{Role: role, Content: chatContent}
+		// DeepSeek thinking mode requires the reasoning_content from a prior
+		// reasoning-only / plain-text assistant turn to be passed back on its
+		// assistant message; dropping it yields 400 "The `reasoning_content` in
+		// the thinking mode must be passed back to the API" on the next turn.
+		// A following function_call in the same turn still receives it because
+		// appendAssistantToolCall merges into this message and only fills
+		// ReasoningContent when it is still empty.
+		if role == "assistant" {
+			msg.ReasoningContent = reasoningForAssistant()
 			pendingReasoning = ""
+		} else {
+			pendingReasoning = ""
+			lastTurnReasoning = ""
 		}
+		messages = append(messages, msg)
 	}
 
 	return messages, mediaByCallID, nil
