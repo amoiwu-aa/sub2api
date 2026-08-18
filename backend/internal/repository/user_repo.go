@@ -78,12 +78,19 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 	} else {
 		var err error
 		tx, err = r.client.Tx(ctx)
-		if err != nil {
+		switch {
+		case errors.Is(err, dbent.ErrTxStarted):
+			// The repository may itself be backed by a transaction-bound
+			// client. Reuse it and let its owner commit or roll back.
+			tx = nil
+			txClient = r.client
+		case err != nil:
 			return err
+		default:
+			defer func() { _ = tx.Rollback() }()
+			txClient = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
 		}
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-		txCtx = dbent.NewTxContext(ctx, tx)
 	}
 
 	lockKeys := []string{normalizedEmailUniquenessLockKey(userIn.Email)}
