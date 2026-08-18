@@ -941,6 +941,9 @@ type GatewayConfig struct {
 	// CursorMaxToolContinuations caps tool-only client continuations after the
 	// latest user instruction. Zero disables the loop guard.
 	CursorMaxToolContinuations int `mapstructure:"cursor_max_tool_continuations"`
+	// CursorRepeatedReadRecoveryThreshold suppresses Read for one turn after
+	// identical arguments and output repeat this many times. Zero disables it.
+	CursorRepeatedReadRecoveryThreshold int `mapstructure:"cursor_repeated_read_recovery_threshold"`
 	// 等待上游响应头的超时时间（秒），0表示无超时
 	// 注意：这不影响流式数据传输，只控制等待响应头的时间
 	ResponseHeaderTimeout int `mapstructure:"response_header_timeout"`
@@ -2338,6 +2341,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久
 	viper.SetDefault("gateway.cursor_native_tool_bridge_mode", "infer_all")
 	viper.SetDefault("gateway.cursor_max_tool_continuations", 24)
+	viper.SetDefault("gateway.cursor_repeated_read_recovery_threshold", 2)
 	viper.SetDefault("gateway.openai_response_header_timeout", 0)
 	viper.SetDefault("gateway.openai_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.openai_high_effort_first_output_timeout_seconds", 0)
@@ -3246,6 +3250,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.CursorMaxToolContinuations < 0 {
 		return fmt.Errorf("gateway.cursor_max_tool_continuations must be non-negative")
+	}
+	if c.Gateway.CursorRepeatedReadRecoveryThreshold < 0 {
+		return fmt.Errorf("gateway.cursor_repeated_read_recovery_threshold must be non-negative")
 	}
 	if c.Gateway.OpenAIResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")

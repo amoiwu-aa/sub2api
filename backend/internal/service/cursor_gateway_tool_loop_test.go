@@ -37,3 +37,77 @@ func TestCursorToolLoopCanBeDisabled(t *testing.T) {
 	require.Zero(t, limit)
 	require.False(t, exceeded)
 }
+
+func TestApplyRepeatedReadRecoverySuppressesReadAndAddsDirection(t *testing.T) {
+	conversation := &cursor.Conversation{Turns: []cursor.Turn{
+		{Role: cursor.RoleUser, Text: "create a summary"},
+		{Role: cursor.RoleAssistant, ToolCalls: []cursor.ToolCall{{
+			ID: "read_1", Name: "Read", Arguments: `{"file_path":"summary.md"}`,
+		}}},
+		{Role: cursor.RoleTool, ToolCallID: "read_1", Text: "file not found"},
+		{Role: cursor.RoleAssistant, ToolCalls: []cursor.ToolCall{{
+			ID: "read_2", Name: "Read", Arguments: `{"file_path":"summary.md"}`,
+		}}},
+		{Role: cursor.RoleTool, ToolCallID: "read_2", Text: "file not found"},
+	}}
+	nativeBridge := cursor.NativeToolBridge{
+		"read":  {Name: "Read"},
+		"write": {Name: "Write"},
+	}
+	mcpTools := []cursor.McpTool{
+		{Name: "Read"},
+		{Name: "Write"},
+		{Name: "TaskList"},
+	}
+
+	service := &CursorGatewayService{repeatedReadRecoveryThreshold: 2}
+	updatedBridge, updatedTools, recovery := service.applyRepeatedReadRecovery(
+		conversation,
+		nativeBridge,
+		mcpTools,
+	)
+
+	require.NotNil(t, recovery)
+	require.Equal(t, "Read", recovery.ToolName)
+	require.Equal(t, 2, recovery.Repeats)
+	require.True(t, recovery.NativeSuppressed)
+	require.True(t, recovery.MCPSuppressed)
+	require.Empty(t, updatedBridge.ClientName("read"))
+	require.Equal(t, "Write", updatedBridge.ClientName("write"))
+	require.Equal(t, []string{"Write", "TaskList"}, cursorMCPToolNames(updatedTools))
+	require.Equal(t, cursor.RoleSystem, conversation.Turns[len(conversation.Turns)-1].Role)
+	require.Contains(t, conversation.Turns[len(conversation.Turns)-1].Text, "use Write or Edit")
+}
+
+func TestApplyRepeatedReadRecoveryCanBeDisabled(t *testing.T) {
+	conversation := &cursor.Conversation{Turns: []cursor.Turn{
+		{Role: cursor.RoleUser, Text: "inspect"},
+		{Role: cursor.RoleAssistant, ToolCalls: []cursor.ToolCall{{
+			ID: "read_1", Name: "Read", Arguments: `{"file_path":"a"}`,
+		}}},
+		{Role: cursor.RoleTool, ToolCallID: "read_1", Text: "same"},
+		{Role: cursor.RoleAssistant, ToolCalls: []cursor.ToolCall{{
+			ID: "read_2", Name: "Read", Arguments: `{"file_path":"a"}`,
+		}}},
+		{Role: cursor.RoleTool, ToolCallID: "read_2", Text: "same"},
+	}}
+	nativeBridge := cursor.NativeToolBridge{"read": {Name: "Read"}}
+
+	service := &CursorGatewayService{repeatedReadRecoveryThreshold: 0}
+	updatedBridge, _, recovery := service.applyRepeatedReadRecovery(
+		conversation,
+		nativeBridge,
+		nil,
+	)
+
+	require.Nil(t, recovery)
+	require.Equal(t, "Read", updatedBridge.ClientName("read"))
+}
+
+func cursorMCPToolNames(tools []cursor.McpTool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}

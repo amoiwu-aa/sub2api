@@ -170,6 +170,57 @@ func TestToolContinuationDepth(t *testing.T) {
 	require.Equal(t, 1, conversation.ToolContinuationDepth())
 }
 
+func TestRepeatedRead(t *testing.T) {
+	repeatedTurns := []Turn{
+		{Role: RoleUser, Text: "inspect the project"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{
+			ID:        "call_1",
+			Name:      "Read",
+			Arguments: `{"offset":1,"file_path":"summary.md"}`,
+		}}},
+		{Role: RoleTool, ToolCallID: "call_1", Text: "file not found"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{
+			ID:        "call_2",
+			Name:      "Read",
+			Arguments: `{"file_path":"summary.md","offset":1}`,
+		}}},
+		{Role: RoleTool, ToolCallID: "call_2", Text: "file not found"},
+	}
+
+	observation, ok := (&Conversation{Turns: repeatedTurns}).RepeatedRead(2)
+	require.True(t, ok)
+	require.Equal(t, "Read", observation.ToolName)
+	require.Equal(t, 2, observation.Repeats)
+
+	t.Run("different result is progress", func(t *testing.T) {
+		turns := append([]Turn(nil), repeatedTurns...)
+		turns[len(turns)-1].Text = "new file contents"
+		_, repeated := (&Conversation{Turns: turns}).RepeatedRead(2)
+		require.False(t, repeated)
+	})
+
+	t.Run("mutation resets observation window", func(t *testing.T) {
+		turns := append([]Turn(nil), repeatedTurns[:3]...)
+		turns = append(turns,
+			Turn{Role: RoleAssistant, ToolCalls: []ToolCall{{
+				ID: "write_1", Name: "Write", Arguments: `{"file_path":"summary.md"}`,
+			}}},
+			Turn{Role: RoleTool, ToolCallID: "write_1", Text: "written"},
+		)
+		turns = append(turns, repeatedTurns[3:]...)
+		_, repeated := (&Conversation{Turns: turns}).RepeatedRead(2)
+		require.False(t, repeated)
+	})
+
+	t.Run("new user instruction resets observation window", func(t *testing.T) {
+		turns := append([]Turn(nil), repeatedTurns[:3]...)
+		turns = append(turns, Turn{Role: RoleUser, Text: "read it again"})
+		turns = append(turns, repeatedTurns[3:]...)
+		_, repeated := (&Conversation{Turns: turns}).RepeatedRead(2)
+		require.False(t, repeated)
+	})
+}
+
 func TestRenderNilAndEmpty(t *testing.T) {
 	var nilConversation *Conversation
 	require.Empty(t, nilConversation.Render())

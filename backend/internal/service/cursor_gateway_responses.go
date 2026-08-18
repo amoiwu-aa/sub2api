@@ -91,7 +91,11 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 		return nil, s.writeResponsesError(c, http.StatusConflict, "invalid_request_error",
 			cursorToolLoopMessage(depth, limit))
 	}
-	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
+	nativeBridge, mcpTools, err := s.resolveNativeToolBridgeWithRecovery(
+		body,
+		conversation,
+		"openai_responses",
+	)
 	if err != nil {
 		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}

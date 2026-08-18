@@ -26,6 +26,9 @@ const (
 	// defaultCursorMaxToolContinuations limits a tool-only continuation chain
 	// without changing the native-tool bridge selected for each turn.
 	defaultCursorMaxToolContinuations = 24
+	// defaultCursorRepeatedReadRecoveryThreshold allows one retry before
+	// temporarily suppressing a no-progress Read tool.
+	defaultCursorRepeatedReadRecoveryThreshold = 2
 )
 
 // CursorGatewayService 把 OpenAI Chat Completions 桥接到 Cursor Agent。
@@ -38,6 +41,8 @@ type CursorGatewayService struct {
 	nativeBridgeMode string
 	// maxToolContinuations protects client-driven tool loops. Zero disables it.
 	maxToolContinuations int
+	// repeatedReadRecoveryThreshold suppresses a repeated Read for one turn.
+	repeatedReadRecoveryThreshold int
 	// quotaReader 用于按模型判定 Auto / API 两档额度是否还有余量。
 	quotaReader cursorQuotaSnapshotReader
 	// streamKeepaliveInterval 是 Cursor 流式等待期间给下游的 SSE 心跳间隔。
@@ -54,20 +59,23 @@ func NewCursorGatewayService(
 	mode := CursorNativeToolBridgeModeInferAll
 	keepalive := defaultCursorStreamKeepalive
 	maxToolContinuations := defaultCursorMaxToolContinuations
+	repeatedReadRecoveryThreshold := defaultCursorRepeatedReadRecoveryThreshold
 	if cfg != nil {
 		mode = normalizeCursorNativeToolBridgeMode(cfg.Gateway.CursorNativeToolBridgeMode)
 		if cfg.Gateway.StreamKeepaliveInterval > 0 {
 			keepalive = time.Duration(cfg.Gateway.StreamKeepaliveInterval) * time.Second
 		}
 		maxToolContinuations = cfg.Gateway.CursorMaxToolContinuations
+		repeatedReadRecoveryThreshold = cfg.Gateway.CursorRepeatedReadRecoveryThreshold
 	}
 	return &CursorGatewayService{
-		tokenProvider:           tokenProvider,
-		rateLimitService:        rateLimitService,
-		nativeBridgeMode:        mode,
-		maxToolContinuations:    maxToolContinuations,
-		quotaReader:             quotaReader,
-		streamKeepaliveInterval: keepalive,
+		tokenProvider:                 tokenProvider,
+		rateLimitService:              rateLimitService,
+		nativeBridgeMode:              mode,
+		maxToolContinuations:          maxToolContinuations,
+		repeatedReadRecoveryThreshold: repeatedReadRecoveryThreshold,
+		quotaReader:                   quotaReader,
+		streamKeepaliveInterval:       keepalive,
 	}
 }
 
@@ -97,6 +105,95 @@ func cursorToolLoopMessage(depth, limit int) string {
 		depth,
 		limit,
 	)
+}
+
+type cursorRepeatedReadRecovery struct {
+	ToolName         string
+	Repeats          int
+	NativeSuppressed bool
+	MCPSuppressed    bool
+}
+
+func (s *CursorGatewayService) resolveNativeToolBridgeWithRecovery(
+	body []byte,
+	conversation *cursor.Conversation,
+	protocol string,
+) (cursor.NativeToolBridge, []cursor.McpTool, error) {
+	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(
+		body,
+		conversation.Tools,
+		s.nativeBridgeMode,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	nativeBridge, mcpTools, recovery := s.applyRepeatedReadRecovery(
+		conversation,
+		nativeBridge,
+		mcpTools,
+	)
+	if recovery != nil {
+		slog.Warn("cursor.repeated_read_recovered",
+			"protocol", protocol,
+			"tool_name", recovery.ToolName,
+			"repeats", recovery.Repeats,
+			"native_suppressed", recovery.NativeSuppressed,
+			"mcp_suppressed", recovery.MCPSuppressed,
+		)
+	}
+	return nativeBridge, mcpTools, nil
+}
+
+func (s *CursorGatewayService) applyRepeatedReadRecovery(
+	conversation *cursor.Conversation,
+	nativeBridge cursor.NativeToolBridge,
+	mcpTools []cursor.McpTool,
+) (cursor.NativeToolBridge, []cursor.McpTool, *cursorRepeatedReadRecovery) {
+	threshold := defaultCursorRepeatedReadRecoveryThreshold
+	if s != nil {
+		threshold = s.repeatedReadRecoveryThreshold
+	}
+	observation, repeated := conversation.RepeatedRead(threshold)
+	if !repeated {
+		return nativeBridge, mcpTools, nil
+	}
+
+	recovery := &cursorRepeatedReadRecovery{
+		ToolName: observation.ToolName,
+		Repeats:  observation.Repeats,
+	}
+	for key, target := range nativeBridge {
+		if strings.EqualFold(strings.TrimSpace(target.Name), observation.ToolName) {
+			delete(nativeBridge, key)
+			recovery.NativeSuppressed = true
+		}
+	}
+
+	filteredTools := make([]cursor.McpTool, 0, len(mcpTools))
+	for _, tool := range mcpTools {
+		if strings.EqualFold(strings.TrimSpace(tool.Name), observation.ToolName) {
+			recovery.MCPSuppressed = true
+			continue
+		}
+		filteredTools = append(filteredTools, tool)
+	}
+	if !recovery.NativeSuppressed && !recovery.MCPSuppressed {
+		return nativeBridge, mcpTools, nil
+	}
+
+	conversation.Turns = append(conversation.Turns, cursor.Turn{
+		Role: cursor.RoleSystem,
+		Text: fmt.Sprintf(
+			"Gateway loop recovery: tool %q returned the same result for identical arguments %d times. "+
+				"It is unavailable for this turn. Use the existing result and continue with a different "+
+				"tool; when the task requires creating or changing a file, use Write or Edit. "+
+				"Do not request the same read again.",
+			observation.ToolName,
+			observation.Repeats,
+		),
+	})
+	return nativeBridge, filteredTools, recovery
 }
 
 // reportUpstreamError 把上游故障喂给账号健康度体系。
@@ -155,7 +252,11 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 		return nil, s.writeError(c, http.StatusConflict, "invalid_request_error",
 			cursorToolLoopMessage(depth, limit))
 	}
-	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
+	nativeBridge, mcpTools, err := s.resolveNativeToolBridgeWithRecovery(
+		body,
+		conversation,
+		"chat_completions",
+	)
 	if err != nil {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
