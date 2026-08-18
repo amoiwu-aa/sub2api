@@ -23,6 +23,9 @@ const (
 	cursorAgentTimeout = 15 * time.Minute
 	// cursorAgentHeaderTimeout 只限制首字节前的等待。
 	cursorAgentHeaderTimeout = 90 * time.Second
+	// defaultCursorMaxToolContinuations limits a tool-only continuation chain
+	// without changing the native-tool bridge selected for each turn.
+	defaultCursorMaxToolContinuations = 24
 )
 
 // CursorGatewayService 把 OpenAI Chat Completions 桥接到 Cursor Agent。
@@ -33,6 +36,8 @@ type CursorGatewayService struct {
 	tokenProvider    *CursorTokenProvider
 	rateLimitService *RateLimitService
 	nativeBridgeMode string
+	// maxToolContinuations protects client-driven tool loops. Zero disables it.
+	maxToolContinuations int
 	// quotaReader 用于按模型判定 Auto / API 两档额度是否还有余量。
 	quotaReader cursorQuotaSnapshotReader
 	// streamKeepaliveInterval 是 Cursor 流式等待期间给下游的 SSE 心跳间隔。
@@ -48,16 +53,19 @@ func NewCursorGatewayService(
 ) *CursorGatewayService {
 	mode := CursorNativeToolBridgeModeInferAll
 	keepalive := defaultCursorStreamKeepalive
+	maxToolContinuations := defaultCursorMaxToolContinuations
 	if cfg != nil {
 		mode = normalizeCursorNativeToolBridgeMode(cfg.Gateway.CursorNativeToolBridgeMode)
 		if cfg.Gateway.StreamKeepaliveInterval > 0 {
 			keepalive = time.Duration(cfg.Gateway.StreamKeepaliveInterval) * time.Second
 		}
+		maxToolContinuations = cfg.Gateway.CursorMaxToolContinuations
 	}
 	return &CursorGatewayService{
 		tokenProvider:           tokenProvider,
 		rateLimitService:        rateLimitService,
 		nativeBridgeMode:        mode,
+		maxToolContinuations:    maxToolContinuations,
 		quotaReader:             quotaReader,
 		streamKeepaliveInterval: keepalive,
 	}
@@ -69,6 +77,26 @@ func (s *CursorGatewayService) NativeToolBridgeMode() string {
 		return CursorNativeToolBridgeModeInferAll
 	}
 	return normalizeCursorNativeToolBridgeMode(s.nativeBridgeMode)
+}
+
+func (s *CursorGatewayService) toolLoopExceeded(conversation *cursor.Conversation) (depth, limit int, exceeded bool) {
+	limit = defaultCursorMaxToolContinuations
+	if s != nil {
+		limit = s.maxToolContinuations
+	}
+	if limit == 0 || conversation == nil {
+		return 0, limit, false
+	}
+	depth = conversation.ToolContinuationDepth()
+	return depth, limit, depth >= limit
+}
+
+func cursorToolLoopMessage(depth, limit int) string {
+	return fmt.Sprintf(
+		"Cursor tool loop guard stopped this conversation after %d consecutive tool continuations (limit %d). Start a new conversation or send a new user instruction before continuing.",
+		depth,
+		limit,
+	)
 }
 
 // reportUpstreamError 把上游故障喂给账号健康度体系。
@@ -117,6 +145,15 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	conversation := req.Conversation()
 	if err := conversation.ValidationError(); err != nil {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	if depth, limit, exceeded := s.toolLoopExceeded(conversation); exceeded {
+		slog.Warn("cursor.tool_loop_blocked",
+			"protocol", "chat_completions",
+			"continuations", depth,
+			"limit", limit,
+		)
+		return nil, s.writeError(c, http.StatusConflict, "invalid_request_error",
+			cursorToolLoopMessage(depth, limit))
 	}
 	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
 	if err != nil {

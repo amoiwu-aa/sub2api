@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -80,6 +81,15 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	conversation := openAIReq.Conversation()
 	if err := conversation.ValidationError(); err != nil {
 		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	if depth, limit, exceeded := s.toolLoopExceeded(conversation); exceeded {
+		slog.Warn("cursor.tool_loop_blocked",
+			"protocol", "openai_responses",
+			"continuations", depth,
+			"limit", limit,
+		)
+		return nil, s.writeResponsesError(c, http.StatusConflict, "invalid_request_error",
+			cursorToolLoopMessage(depth, limit))
 	}
 	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
 	if err != nil {

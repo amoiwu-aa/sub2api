@@ -149,6 +149,27 @@ func TestHasHistory(t *testing.T) {
 	require.True(t, multiTurn.HasHistory())
 }
 
+func TestToolContinuationDepth(t *testing.T) {
+	conversation := &Conversation{Turns: []Turn{
+		{Role: RoleSystem, Text: "system"},
+		{Role: RoleUser, Text: "initial task"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_1", Name: "Read"}}},
+		{Role: RoleTool, ToolCallID: "call_1", Text: "first result"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_2", Name: "Grep"}}},
+		{Role: RoleTool, ToolCallID: "call_2", Text: "second result"},
+	}}
+	require.Equal(t, 2, conversation.ToolContinuationDepth())
+
+	conversation.Turns = append(conversation.Turns, Turn{Role: RoleUser, Text: "change direction"})
+	require.Zero(t, conversation.ToolContinuationDepth())
+
+	conversation.Turns = append(conversation.Turns,
+		Turn{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_3", Name: "Write"}}},
+		Turn{Role: RoleTool, ToolCallID: "call_3", Text: "written"},
+	)
+	require.Equal(t, 1, conversation.ToolContinuationDepth())
+}
+
 func TestRenderNilAndEmpty(t *testing.T) {
 	var nilConversation *Conversation
 	require.Empty(t, nilConversation.Render())

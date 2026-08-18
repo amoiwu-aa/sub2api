@@ -110,6 +110,31 @@ func (c *Conversation) HasHistory() bool {
 	return nonSystem > 1
 }
 
+// ToolContinuationDepth reports assistant tool turns after the latest
+// non-empty user instruction. Tool results alone intentionally do not reset
+// the counter because they are the normal client-driven continuation shape.
+func (c *Conversation) ToolContinuationDepth() int {
+	if c == nil {
+		return 0
+	}
+
+	depth := 0
+	for i := len(c.Turns) - 1; i >= 0; i-- {
+		turn := c.Turns[i]
+		switch turn.Role {
+		case RoleUser:
+			if strings.TrimSpace(turn.Text) != "" {
+				return depth
+			}
+		case RoleAssistant:
+			if len(turn.ToolCalls) > 0 {
+				depth++
+			}
+		}
+	}
+	return depth
+}
+
 // MaxPromptBytes 是渲染后 prompt 的上限，超过就不发给上游。
 //
 // 上游对过大的 prompt 不会报错，而是收下之后彻底沉默：实测 2.5 MB 的 prompt 只
