@@ -739,6 +739,12 @@ export interface SystemSettings {
   model_plaza_require_auth: boolean;
   model_plaza_description: string;
 
+  // Redeem-page card-shop purchase guide
+  redeem_shop_enabled: boolean;
+  redeem_shop_url: string;
+  redeem_shop_button_text: string;
+  redeem_shop_description: string;
+
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: boolean;
 
@@ -1039,6 +1045,12 @@ export interface UpdateSettingsRequest {
   model_plaza_enabled?: boolean;
   model_plaza_require_auth?: boolean;
   model_plaza_description?: string;
+
+  // Redeem-page card-shop purchase guide
+  redeem_shop_enabled?: boolean;
+  redeem_shop_url?: string;
+  redeem_shop_button_text?: string;
+  redeem_shop_description?: string;
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled?: boolean;

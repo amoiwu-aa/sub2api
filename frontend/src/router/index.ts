@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { isAffiliateAdminAllowedAdminPath, resolvePanelHomePath } from '@/utils/adminAccess'
 
 /**
  * Route definitions with lazy loading
@@ -399,7 +400,10 @@ const routes: RouteRecordRaw[] = [
   // ==================== Admin Routes ====================
   {
     path: '/admin',
-    redirect: '/admin/dashboard'
+    redirect: () => {
+      const authStore = useAuthStore()
+      return resolvePanelHomePath(authStore.isAdmin, authStore.isAffiliateAdmin)
+    }
   },
   {
     path: '/admin/dashboard',
@@ -807,7 +811,7 @@ router.beforeEach(async (to, _from, next) => {
     try {
       const status = await getSetupStatus()
       if (!status.needs_setup) {
-        next(resolveCompletedSetupRedirectPath(authStore.isAuthenticated, authStore.isAdmin))
+        next(resolveCompletedSetupRedirectPath(authStore.isAuthenticated, authStore.isAdmin, authStore.isAffiliateAdmin))
         return
       }
     } catch {
@@ -821,12 +825,11 @@ router.beforeEach(async (to, _from, next) => {
     if (authStore.isAuthenticated && (to.path === '/login' || to.path === '/register')) {
       // In backend mode, non-admin users should NOT be redirected away from login
       // (they are blocked from all protected routes, so redirecting would cause a loop)
-      if (appStore.backendModeEnabled && !authStore.isAdmin) {
+      if (appStore.backendModeEnabled && !authStore.canAccessAdminPanel) {
         next()
         return
       }
-      // Admin users go to admin dashboard, regular users go to user dashboard
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(resolvePanelHomePath(authStore.isAdmin, authStore.isAffiliateAdmin))
       return
     }
     // Model Plaza:公开路由但受「启用开关 + 可选强制登录」双重控制(后端同口径 fail-closed)
@@ -843,9 +846,7 @@ router.beforeEach(async (to, _from, next) => {
       if (appStore.publicSettingsLoaded && plazaSettings?.model_plaza_enabled === false) {
         next(
           authStore.isAuthenticated
-            ? authStore.isAdmin
-              ? '/admin/dashboard'
-              : '/dashboard'
+            ? resolvePanelHomePath(authStore.isAdmin, authStore.isAffiliateAdmin)
             : '/home'
         )
         return
@@ -855,7 +856,7 @@ router.beforeEach(async (to, _from, next) => {
         return
       }
       // Backend mode:登录的非管理员也不可见(匿名由下方公共拦截处理,广场不在白名单)
-      if (appStore.backendModeEnabled && authStore.isAuthenticated && !authStore.isAdmin) {
+      if (appStore.backendModeEnabled && authStore.isAuthenticated && !authStore.canAccessAdminPanel) {
         next('/login')
         return
       }
@@ -883,9 +884,13 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   // Check admin requirement
-  if (requiresAdmin && !authStore.isAdmin) {
-    // User is authenticated but not admin, redirect to user dashboard
+  if (requiresAdmin && !authStore.canAccessAdminPanel) {
     next('/dashboard')
+    return
+  }
+
+  if (requiresAdmin && authStore.isAffiliateAdmin && !isAffiliateAdminAllowedAdminPath(to.path)) {
+    next('/admin/users')
     return
   }
 
@@ -922,7 +927,7 @@ router.beforeEach(async (to, _from, next) => {
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.payment_enabled === false
   ) {
-    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    next(resolvePanelHomePath(authStore.isAdmin, authStore.isAffiliateAdmin))
     return
   }
 
@@ -947,14 +952,14 @@ router.beforeEach(async (to, _from, next) => {
 
     if (restrictedPaths.some((path) => to.path.startsWith(path))) {
       // 简易模式下访问受限页面,重定向到仪表板
-      next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+      next(resolvePanelHomePath(authStore.isAdmin, authStore.isAffiliateAdmin))
       return
     }
   }
 
-  // Backend mode: admin gets full access, non-admin blocked
+  // Backend mode: panel roles get access, regular users are blocked
   if (appStore.backendModeEnabled) {
-    if (authStore.isAuthenticated && authStore.isAdmin) {
+    if (authStore.isAuthenticated && authStore.canAccessAdminPanel) {
       next()
       return
     }

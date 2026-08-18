@@ -39,8 +39,8 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 			}
 		}
 	}
-	// 批量加载用户专属分组倍率
-	if s.userGroupRateRepo != nil && len(users) > 0 {
+	// 分销管理员的列表响应不包含专属倍率，也不应为其额外读取敏感配置。
+	if filters.ManagedByAdminID == 0 && s.userGroupRateRepo != nil && len(users) > 0 {
 		if batchRepo, ok := s.userGroupRateRepo.(userGroupRateBatchReader); ok {
 			userIDs := make([]int64, 0, len(users))
 			for i := range users {
@@ -105,14 +105,21 @@ func (s *adminServiceImpl) GetUserIncludeDeleted(ctx context.Context, id int64) 
 	return s.userRepo.GetByIDIncludeDeleted(ctx, id)
 }
 
+func (s *adminServiceImpl) UserIsManagedBy(ctx context.Context, targetUserID, adminID int64) (bool, error) {
+	if store, ok := s.userRepo.(userOwnershipStore); ok {
+		return store.UserIsManagedBy(ctx, targetUserID, adminID)
+	}
+	return false, nil
+}
+
 // normalizeUserRole 校验并归一化角色输入。
 // 空字符串返回 fallback(未提供时的默认角色);非法值返回错误。
 func normalizeUserRole(role, fallback string) (string, error) {
 	if role == "" {
 		return fallback, nil
 	}
-	if role != RoleAdmin && role != RoleUser {
-		return "", fmt.Errorf("invalid role: %q (must be %s or %s)", role, RoleAdmin, RoleUser)
+	if role != RoleAdmin && role != RoleUser && role != RoleAffiliateAdmin {
+		return "", fmt.Errorf("invalid role: %q (must be %s, %s or %s)", role, RoleAdmin, RoleAffiliateAdmin, RoleUser)
 	}
 	return role, nil
 }
@@ -125,27 +132,50 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		balance = s.settingService.GetDefaultBalance(ctx)
 	}
 
-	// 角色可由管理员在创建时指定(admin/user);未提供时默认 user。
+	// 角色可由总管理员在创建时指定;分销管理员只能开普通用户，也不能指定余额/并发/RPM。
+	if input.ActorRole == RoleAffiliateAdmin {
+		input.Role = RoleUser
+		input.Balance = nil
+		input.RPMLimit = 0
+		createdBy := input.ActorAdminID
+		input.CreatedByAdminID = &createdBy
+		balance = 0
+		if s.settingService != nil {
+			balance = s.settingService.GetDefaultBalance(ctx)
+			input.Concurrency = s.settingService.GetDefaultConcurrency(ctx)
+		} else if input.Concurrency <= 0 {
+			input.Concurrency = 1
+		}
+	}
 	role, err := normalizeUserRole(input.Role, RoleUser)
 	if err != nil {
 		return nil, err
 	}
 
 	user := &User{
-		Email:         input.Email,
-		Username:      input.Username,
-		Notes:         input.Notes,
-		Role:          role,
-		Balance:       balance,
-		Concurrency:   input.Concurrency,
-		RPMLimit:      input.RPMLimit,
-		Status:        StatusActive,
-		AllowedGroups: input.AllowedGroups,
+		Email:            input.Email,
+		Username:         input.Username,
+		Notes:            input.Notes,
+		Role:             role,
+		Balance:          balance,
+		Concurrency:      input.Concurrency,
+		RPMLimit:         input.RPMLimit,
+		Status:           StatusActive,
+		AllowedGroups:    input.AllowedGroups,
+		CreatedByAdminID: input.CreatedByAdminID,
 	}
 	if err := user.SetPassword(input.Password); err != nil {
 		return nil, err
 	}
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	if input.ActorRole == RoleAffiliateAdmin {
+		creator, ok := s.userRepo.(managedUserCreator)
+		if !ok {
+			return nil, errors.New("managed user creation is unavailable")
+		}
+		if err := creator.CreateManagedUser(ctx, user, input.ActorAdminID); err != nil {
+			return nil, err
+		}
+	} else if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
 	// 创建管理员属权限敏感操作，落审计日志（含操作者），便于事后追溯。
@@ -202,6 +232,14 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	if input.ActorRole == RoleAffiliateAdmin {
+		input.Role = ""
+		input.Balance = nil
+		input.Concurrency = nil
+		input.RPMLimit = nil
+		input.GroupRates = nil
+	}
+
 	user, err := s.userRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -253,9 +291,10 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		if err != nil {
 			return nil, err
 		}
-		// 防锁死保护：不允许降级系统中最后一个管理员（自我降级已在 handler 层拦截，
-		// 此处兜底覆盖跨管理员互降导致零 admin 的场景）。
-		if user.Role == RoleAdmin && role == RoleUser {
+		// 防锁死保护：不允许把系统中最后一个总管理员改成非 admin
+		//（含降为 user 或 affiliate_admin）。自我降级已在 handler 层拦截，
+		// 此处兜底覆盖跨管理员互降导致零 admin 的场景。
+		if user.Role == RoleAdmin && role != RoleAdmin {
 			if err := s.ensureNotLastAdmin(ctx); err != nil {
 				return nil, err
 			}

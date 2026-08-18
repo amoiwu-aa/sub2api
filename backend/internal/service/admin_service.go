@@ -19,6 +19,9 @@ type AdminService interface {
 	CreateUser(ctx context.Context, input *CreateUserInput) (*User, error)
 	UpdateUser(ctx context.Context, id int64, input *UpdateUserInput) (*User, error)
 	DeleteUser(ctx context.Context, id int64) error
+	// UserIsManagedBy reports whether targetUserID belongs to adminID
+	// (created by them or invited via their affiliate code).
+	UserIsManagedBy(ctx context.Context, targetUserID, adminID int64) (bool, error)
 	UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error)
 	BatchUpdateConcurrency(ctx context.Context, userIDs []int64, value int, mode string) (int, error)
 	BatchUpdateLimits(ctx context.Context, userIDs []int64, concurrency, rpmLimit *int) (int, error)
@@ -151,6 +154,9 @@ type CreateUserInput struct {
 	AllowedGroups []int64
 	// ActorAdminID 执行本次操作的管理员ID(来自JWT)，仅用于权限敏感操作的审计日志。
 	ActorAdminID int64
+	// ActorRole 操作者角色；分销管理员创建时强制普通用户并写入归属。
+	ActorRole        string
+	CreatedByAdminID *int64
 }
 
 type UpdateUserInput struct {
@@ -169,6 +175,8 @@ type UpdateUserInput struct {
 	GroupRates map[int64]*float64
 	// ActorAdminID 执行本次操作的管理员ID(来自JWT)，仅用于权限敏感操作的审计日志。
 	ActorAdminID int64
+	// ActorRole 操作者角色；分销管理员更新时忽略角色/余额/分组等特权字段。
+	ActorRole string
 }
 
 type AdminBindAuthIdentityInput struct {
@@ -706,6 +714,16 @@ type ChannelCacheInvalidator interface {
 
 type adminRechargeAffiliateAccruer interface {
 	AccrueInviteRebate(ctx context.Context, inviteeUserID int64, baseRechargeAmount float64) (float64, error)
+}
+
+type userOwnershipStore interface {
+	UserIsManagedBy(ctx context.Context, userID, adminID int64) (bool, error)
+}
+
+// managedUserCreator atomically creates a panel-managed user and binds its
+// affiliate ownership to the creating distribution administrator.
+type managedUserCreator interface {
+	CreateManagedUser(ctx context.Context, user *User, adminID int64) error
 }
 
 type userGroupRateBatchReader interface {

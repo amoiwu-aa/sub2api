@@ -84,7 +84,7 @@ export interface User {
   linuxdo_bound?: boolean
   oidc_bound?: boolean
   wechat_bound?: boolean
-  role: 'admin' | 'user' // User role for authorization
+  role: 'admin' | 'user' | 'affiliate_admin' // User role for authorization
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
@@ -271,6 +271,10 @@ export interface PublicSettings {
   available_channels_enabled: boolean
   model_plaza_enabled: boolean
   model_plaza_require_auth: boolean
+  redeem_shop_enabled: boolean
+  redeem_shop_url: string
+  redeem_shop_button_text: string
+  redeem_shop_description: string
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean
@@ -1957,6 +1961,12 @@ export interface CacheObservationFields {
   cache_hit_requests?: number
   /** Tokens moved into the cache-read billing bucket by local accounting policy. */
   forced_cache_read_tokens?: number
+  /** Ordinary input tokens on provider-reported requests only. */
+  reported_input_tokens?: number
+  /** Cache-creation tokens on provider-reported requests only. */
+  reported_cache_creation_tokens?: number
+  /** ForceCacheBilling tokens on provider-reported requests only. */
+  reported_forced_cache_read_tokens?: number
   /** Requests whose cache usage was reported by the upstream provider. */
   reported_requests?: number
   /** Requests whose cache usage was estimated locally. */
@@ -1994,6 +2004,9 @@ export interface DashboardStats {
   total_provider_cache_read_tokens?: number
   total_cache_hit_requests?: number
   total_forced_cache_read_tokens?: number
+  total_reported_input_tokens?: number
+  total_reported_cache_creation_tokens?: number
+  total_reported_forced_cache_read_tokens?: number
   total_reported_requests?: number
   total_estimated_requests?: number
   total_unavailable_requests?: number
@@ -2011,6 +2024,9 @@ export interface DashboardStats {
   today_provider_cache_read_tokens?: number
   today_cache_hit_requests?: number
   today_forced_cache_read_tokens?: number
+  today_reported_input_tokens?: number
+  today_reported_cache_creation_tokens?: number
+  today_reported_forced_cache_read_tokens?: number
   today_reported_requests?: number
   today_estimated_requests?: number
   today_unavailable_requests?: number
@@ -2154,7 +2170,7 @@ export interface UpdateUserRequest {
   password?: string
   username?: string
   notes?: string
-  role?: 'admin' | 'user'
+  role?: 'admin' | 'user' | 'affiliate_admin'
   balance?: number
   concurrency?: number
   rpm_limit?: number

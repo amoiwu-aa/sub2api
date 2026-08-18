@@ -25,3 +25,19 @@ func AdminOnly() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequireSuperAdmin 只放行总管理员。分销管理员可以进 /admin，但不能碰全站接口。
+func RequireSuperAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, ok := GetUserRoleFromContext(c)
+		if !ok {
+			AbortWithError(c, 401, "UNAUTHORIZED", "User not found in context")
+			return
+		}
+		if role != service.RoleAdmin {
+			AbortWithError(c, 403, "FORBIDDEN", "Super admin access required")
+			return
+		}
+		c.Next()
+	}
+}

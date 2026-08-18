@@ -191,6 +191,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyHideCcsImportButton,
 		SettingKeyPurchaseSubscriptionEnabled,
 		SettingKeyPurchaseSubscriptionURL,
+		SettingKeyRedeemShopEnabled,
+		SettingKeyRedeemShopURL,
+		SettingKeyRedeemShopButtonText,
+		SettingKeyRedeemShopDescription,
 		SettingKeyTableDefaultPageSize,
 		SettingKeyTablePageSizeOptions,
 		SettingKeyCustomMenuItems,
@@ -330,6 +334,10 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		HideCcsImportButton:                 settings[SettingKeyHideCcsImportButton] == "true",
 		PurchaseSubscriptionEnabled:         settings[SettingKeyPurchaseSubscriptionEnabled] == "true",
 		PurchaseSubscriptionURL:             strings.TrimSpace(settings[SettingKeyPurchaseSubscriptionURL]),
+		RedeemShopEnabled:                   settings[SettingKeyRedeemShopEnabled] == "true",
+		RedeemShopURL:                       strings.TrimSpace(settings[SettingKeyRedeemShopURL]),
+		RedeemShopButtonText:                strings.TrimSpace(settings[SettingKeyRedeemShopButtonText]),
+		RedeemShopDescription:               strings.TrimSpace(settings[SettingKeyRedeemShopDescription]),
 		TableDefaultPageSize:                tableDefaultPageSize,
 		TablePageSizeOptions:                tablePageSizeOptions,
 		CustomMenuItems:                     settings[SettingKeyCustomMenuItems],
@@ -572,6 +580,10 @@ type PublicSettingsInjectionPayload struct {
 	HideCcsImportButton                 bool                     `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled         bool                     `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL             string                   `json:"purchase_subscription_url"`
+	RedeemShopEnabled                   bool                     `json:"redeem_shop_enabled"`
+	RedeemShopURL                       string                   `json:"redeem_shop_url"`
+	RedeemShopButtonText                string                   `json:"redeem_shop_button_text"`
+	RedeemShopDescription               string                   `json:"redeem_shop_description"`
 	TableDefaultPageSize                int                      `json:"table_default_page_size"`
 	TablePageSizeOptions                []int                    `json:"table_page_size_options"`
 	CustomMenuItems                     json.RawMessage          `json:"custom_menu_items"`
@@ -657,6 +669,10 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		HideCcsImportButton:                 settings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:         settings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:             settings.PurchaseSubscriptionURL,
+		RedeemShopEnabled:                   settings.RedeemShopEnabled,
+		RedeemShopURL:                       settings.RedeemShopURL,
+		RedeemShopButtonText:                settings.RedeemShopButtonText,
+		RedeemShopDescription:               settings.RedeemShopDescription,
 		TableDefaultPageSize:                settings.TableDefaultPageSize,
 		TablePageSizeOptions:                settings.TablePageSizeOptions,
 		CustomMenuItems:                     filterUserVisibleMenuItems(settings.CustomMenuItems),

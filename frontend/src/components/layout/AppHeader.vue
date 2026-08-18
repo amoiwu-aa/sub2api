@@ -26,6 +26,16 @@
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
+        <!-- Model Plaza：官方放在顶栏，与文档并排，登录后可见 -->
+        <router-link
+          v-if="user && modelPlazaEnabled"
+          :to="{ path: '/model-plaza', query: { embedded: '1' } }"
+          class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
+        >
+          <Icon name="grid" size="sm" />
+          <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
+        </router-link>
+
         <!-- Language Switcher -->
         <LocaleSwitcher />
 
@@ -141,12 +151,12 @@
                   {{ t('nav.apiKeys') }}
                 </router-link>
 
-                <!-- 次级入口收进用户菜单，顶栏只保留高频状态 -->
+                <!-- 窄屏顶栏不展示广场按钮，保留菜单入口 -->
                 <router-link
                   v-if="modelPlazaEnabled"
                   :to="{ path: '/model-plaza', query: { embedded: '1' } }"
                   @click="closeDropdown"
-                  class="dropdown-item"
+                  class="dropdown-item sm:hidden"
                 >
                   <Icon name="grid" size="sm" />
                   {{ t('nav.modelPlaza') }}

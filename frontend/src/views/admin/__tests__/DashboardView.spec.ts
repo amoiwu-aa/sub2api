@@ -204,6 +204,64 @@ describe('admin DashboardView', () => {
     expect(wrapper.get('[data-testid="today-cache-billing-adjustment"]').text()).toContain('600')
   })
 
+  it('shows reported-subset coverage when mixed traffic includes reported token buckets', async () => {
+    getSnapshotV2.mockResolvedValue({
+      stats: createDashboardStats({
+        today_requests: 3,
+        today_input_tokens: 100,
+        today_cache_creation_tokens: 100,
+        today_cache_read_tokens: 900,
+        today_provider_cache_read_tokens: 300,
+        today_forced_cache_read_tokens: 600,
+        today_reported_input_tokens: 100,
+        today_reported_cache_creation_tokens: 0,
+        today_reported_forced_cache_read_tokens: 300,
+        today_reported_requests: 1,
+        today_estimated_requests: 1,
+        today_unavailable_requests: 1,
+        total_requests: 10,
+        total_input_tokens: 400,
+        total_cache_creation_tokens: 200,
+        total_cache_read_tokens: 1000,
+        total_provider_cache_read_tokens: 400,
+        total_forced_cache_read_tokens: 600,
+        total_reported_input_tokens: 200,
+        total_reported_cache_creation_tokens: 100,
+        total_reported_forced_cache_read_tokens: 300,
+        total_reported_requests: 8,
+        total_estimated_requests: 1,
+        total_unavailable_requests: 1
+      }),
+      trend: [],
+      models: []
+    })
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          CacheHitRateChart: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="today-cache-coverage-value"]').text()).toBe('42.9%')
+    expect(wrapper.get('[data-testid="today-cache-observability"]').text()).toContain(
+      '1/3 (33.3%)'
+    )
+    expect(wrapper.get('[data-testid="total-cache-coverage-value"]').text()).toBe('40.0%')
+    expect(wrapper.get('[data-testid="today-cache-billing-adjustment"]').text()).toContain('300')
+  })
+
   it('falls back to legacy cache reads minus forced adjustments', async () => {
     getSnapshotV2.mockResolvedValue({
       stats: createDashboardStats({

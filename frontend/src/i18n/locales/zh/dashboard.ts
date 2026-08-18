@@ -56,7 +56,9 @@ export default {
     viewUsage: '查看使用记录',
     checkDetailedLogs: '查看详细的使用日志',
     redeemCode: '兑换码',
-    addBalanceWithCode: '使用兑换码充值'
+    purchaseOrRedeem: '购买/兑换',
+    addBalanceWithCode: '使用兑换码充值',
+    buyThenRedeem: '去卡网购买后在此兑换'
   },
 
   // Groups (shared)
@@ -678,8 +680,16 @@ export default {
 
   // Redeem
   redeem: {
-    title: '兑换码',
-    description: '输入兑换码以充值余额或增加并发数',
+    title: '购买/兑换',
+    description: '可先到卡网购买，再输入兑换码充值余额或增加并发数',
+    shop: {
+      step: '步骤 1',
+      title: '去卡网购买',
+      description: '先到卡网选择套餐并完成支付，拿到兑换码后再回到本页兑换。',
+      button: '去卡网购买',
+      redeemStep: '步骤 2',
+      redeemTitle: '兑换已购卡密',
+    },
     currentBalance: '当前余额',
     concurrency: '并发数',
     requests: '请求',

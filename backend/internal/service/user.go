@@ -62,10 +62,22 @@ type User struct {
 
 	APIKeys       []APIKey
 	Subscriptions []UserSubscription
+
+	// CreatedByAdminID is the admin who created this account in the panel.
+	// Nil for self-registered users.
+	CreatedByAdminID *int64
 }
 
 func (u *User) IsAdmin() bool {
 	return u.Role == RoleAdmin
+}
+
+func (u *User) IsAffiliateAdmin() bool {
+	return u.Role == RoleAffiliateAdmin
+}
+
+func (u *User) CanAccessAdminPanel() bool {
+	return u.IsAdmin() || u.IsAffiliateAdmin()
 }
 
 func (u *User) IsActive() bool {

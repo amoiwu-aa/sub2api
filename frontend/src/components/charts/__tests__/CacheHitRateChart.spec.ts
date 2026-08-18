@@ -248,6 +248,45 @@ describe('CacheHitRateChart', () => {
     expect(chartData.datasets[0].data).toEqual([300, 100, 700])
   })
 
+  it('shows reported-subset coverage when mixed traffic includes reported token buckets', async () => {
+    const wrapper = mount(CacheHitRateChart, {
+      props: {
+        stats,
+        modelStats: [
+          {
+            model: 'gpt-5.6',
+            requests: 3,
+            reported_requests: 1,
+            estimated_requests: 1,
+            unavailable_requests: 1,
+            input_tokens: 100,
+            output_tokens: 0,
+            cache_creation_tokens: 100,
+            cache_read_tokens: 900,
+            provider_cache_read_tokens: 300,
+            forced_cache_read_tokens: 600,
+            reported_input_tokens: 100,
+            reported_cache_creation_tokens: 0,
+            reported_forced_cache_read_tokens: 300,
+            total_tokens: 1100,
+            cost: 0,
+            actual_cost: 0
+          }
+        ]
+      }
+    })
+
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'gpt-5.6')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-testid="cache-coverage-value"]').text()).toBe('42.9%')
+    expect(wrapper.get('[data-testid="cache-observability"]').text()).toContain('1/3 (33.3%)')
+    expect(wrapper.get('[data-testid="cache-billing-adjustment"]').text()).toContain('300')
+
+    const chartData = JSON.parse(wrapper.find('.chart-data').text())
+    expect(chartData.datasets[0].data).toEqual([300, 0, 400])
+  })
+
   it('falls back to legacy cache reads minus forced adjustments', async () => {
     const wrapper = mount(CacheHitRateChart, {
       props: {

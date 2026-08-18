@@ -152,13 +152,23 @@ FILTER (WHERE cache_usage_source = 'reported')
 
 `ForceCacheBilling` 会把原普通输入从 `input_tokens` 搬到 `cache_read_tokens`，所以计算总 Prompt 输入时必须把 forced 加回普通输入。
 
-只有当前范围内全部请求都是 `reported` 时，现有 v2 字段才能精确计算全量 token 口径的“缓存读取覆盖率”：
+只有当前范围内全部请求都是 `reported` 时，才能用全量 token 计算“缓存读取覆盖率”：
 
 ```text
 provider_cache_read_tokens
 --------------------------------------------------------------------------------------- × 100%
 input_tokens + forced_cache_read_tokens + cache_creation_tokens + provider_cache_read_tokens
 ```
+
+混合流量（同时有 `reported` 和 Cursor/Grok 等 `estimated`）时，不要按平台名排除，改用 reported 子集桶：
+
+```text
+provider_cache_read_tokens
+---------------------------------------------------------------------------------------------------------------- × 100%
+reported_input_tokens + reported_forced_cache_read_tokens + reported_cache_creation_tokens + provider_cache_read_tokens
+```
+
+`provider_cache_read_tokens` 本身已是 `cache_usage_source = 'reported'`。未回填的聚合行（三个 reported token 桶全为 0）仍隐藏百分比，避免把残留的 `provider_cache_read_tokens` 显示成 100%。
 
 分母不包含输出 token。`forced_cache_read_tokens` 在图表中应归回“普通输入”，另以“账务调整”文字提示，但不能成为缓存读取切片。
 
@@ -204,17 +214,18 @@ reported_ratio = reported_requests / requests
 现有 SessionUsage v2 的安全显示规则：
 
 - `reported_requests == requests`：可显示全量覆盖率；
-- `0 < reported_requests < requests`：显示“部分可观测 reported/requests”，隐藏全量覆盖率；
+- `0 < reported_requests < requests` 且 reported token 桶已回填：圆环显示 **reported 子集覆盖率**，右侧仍写“部分可观测 reported/requests”；
+- `0 < reported_requests < requests` 但三个 reported token 桶全为 0（旧聚合未回填）：继续显示“部分可观测”，隐藏百分比；
 - `reported_requests == 0 && requests > 0`：显示“缓存不可观测”；
 - `unknown_requests > 0`：明确显示历史/未接入请求，不把它们当真实命中。
 
-如果希望在混合来源中仍显示 reported 子集覆盖率，需要扩展下一版 API，额外返回：
+reported-only token 桶：
 
-- `reported_input_tokens`，其中应把 reported 行的 forced 加回普通输入；
+- `reported_input_tokens`：仅 `cache_usage_source = 'reported'` 的普通输入；
 - `reported_cache_creation_tokens`；
-- `reported_provider_cache_read_tokens`。
+- `reported_forced_cache_read_tokens`，计算覆盖率时加回普通输入。
 
-没有这三个 reported-only token 桶时，不要对混合流量计算一个看似精确的百分比。
+不要按 Cursor / Grok 等平台名硬排除。Grok 以后若改为上游上报，会自动进入 reported 子集。
 
 ### 3.4 “覆盖率”不是“请求命中率”
 
@@ -976,7 +987,7 @@ const partiallyObservable = reported > 0 && reported < requests
 const unobservable = requests > 0 && reported === 0
 ```
 
-如果实现了上一节的 reported-only token 桶，混合流量可以改为显示“已上报子集覆盖率”，并清楚标注样本范围。
+reported-only token 桶已落地。混合流量在桶已回填时显示“已上报子集覆盖率”，右侧继续标注 `reported/requests`。三个桶全为 0 的旧聚合行仍隐藏百分比。
 
 现有三个重复计算点也必须同步修改，不能只改共享 helper：
 
@@ -1023,7 +1034,8 @@ export interface CacheCoverageMetrics {
 状态规则：
 
 - 当前范围全部是 `reported`：显示全量覆盖率；
-- 同时有 reported 和其它来源：显示“部分可观测 reported/requests”，隐藏全量覆盖率；
+- 同时有 reported 和其它来源，且 reported token 桶已回填：显示子集覆盖率，右侧保留“部分可观测 reported/requests”；
+- 同时有 reported 和其它来源，但 reported token 桶未回填：显示“部分可观测 reported/requests”，隐藏全量覆盖率；
 - 只有 `estimated` / `unavailable`：显示“缓存不可观测”；
 - 存在 NULL 历史行：显示 unknown 数量，不把其旧 cache read 当真实命中；
 - 没有 v2 契约字段：显示“暂无观测数据”，不要显示红色 0% 告警；

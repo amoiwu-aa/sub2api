@@ -4,6 +4,9 @@ export interface CacheCoverageSource {
   cache_read_tokens?: number | null
   provider_cache_read_tokens?: number | null
   forced_cache_read_tokens?: number | null
+  reported_input_tokens?: number | null
+  reported_cache_creation_tokens?: number | null
+  reported_forced_cache_read_tokens?: number | null
   requests?: number | null
   reported_requests?: number | null
   estimated_requests?: number | null
@@ -30,12 +33,16 @@ export interface CacheCoverageMetrics {
   total: number
   coverage: number
   observability: CacheObservability
+  usesReportedSubset: boolean
+  coverageAvailable: boolean
 }
 
 const toNonNegativeNumber = (value: unknown): number => {
   const numberValue = Number(value)
   return Number.isFinite(numberValue) ? Math.max(numberValue, 0) : 0
 }
+
+const hasValue = (value: unknown): boolean => value !== undefined && value !== null
 
 export const resolveProviderCacheReadTokens = (source: CacheCoverageSource): number => {
   if (source.provider_cache_read_tokens !== undefined && source.provider_cache_read_tokens !== null) {
@@ -83,9 +90,30 @@ export const getCacheObservability = (source: CacheCoverageSource): CacheObserva
 }
 
 export const getCacheCoverageMetrics = (source: CacheCoverageSource): CacheCoverageMetrics => {
-  const forcedAdjustment = toNonNegativeNumber(source.forced_cache_read_tokens)
-  const input = toNonNegativeNumber(source.input_tokens) + forcedAdjustment
-  const creation = toNonNegativeNumber(source.cache_creation_tokens)
+  const observability = getCacheObservability(source)
+  const hasReportedTokenBuckets =
+    hasValue(source.reported_input_tokens) ||
+    hasValue(source.reported_cache_creation_tokens) ||
+    hasValue(source.reported_forced_cache_read_tokens)
+  const reportedInput = toNonNegativeNumber(source.reported_input_tokens)
+  const reportedCreation = toNonNegativeNumber(source.reported_cache_creation_tokens)
+  const reportedForced = toNonNegativeNumber(source.reported_forced_cache_read_tokens)
+  // Un-backfilled aggregate rows are 0/0/0. Do not treat that as a real subset
+  // or leftover provider_cache_read_tokens would become a fake 100%.
+  const usesReportedSubset =
+    hasReportedTokenBuckets &&
+    observability.reported > 0 &&
+    reportedInput + reportedCreation + reportedForced > 0
+
+  const forcedAdjustment = usesReportedSubset
+    ? reportedForced
+    : toNonNegativeNumber(source.forced_cache_read_tokens)
+  const input = usesReportedSubset
+    ? reportedInput + forcedAdjustment
+    : toNonNegativeNumber(source.input_tokens) + toNonNegativeNumber(source.forced_cache_read_tokens)
+  const creation = usesReportedSubset
+    ? reportedCreation
+    : toNonNegativeNumber(source.cache_creation_tokens)
   const providerRead = resolveProviderCacheReadTokens(source)
   const total = input + creation + providerRead
 
@@ -96,7 +124,10 @@ export const getCacheCoverageMetrics = (source: CacheCoverageSource): CacheCover
     forcedAdjustment,
     total,
     coverage: total > 0 ? (providerRead / total) * 100 : 0,
-    observability: getCacheObservability(source)
+    observability,
+    usesReportedSubset,
+    coverageAvailable:
+      !observability.unobservable && (usesReportedSubset || !observability.partiallyObservable)
   }
 }
 

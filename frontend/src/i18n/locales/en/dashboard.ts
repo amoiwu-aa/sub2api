@@ -56,7 +56,9 @@ export default {
     viewUsage: 'View Usage',
     checkDetailedLogs: 'Check detailed usage logs',
     redeemCode: 'Redeem Code',
-    addBalanceWithCode: 'Add balance with a code'
+    purchaseOrRedeem: 'Purchase / Redeem',
+    addBalanceWithCode: 'Add balance with a code',
+    buyThenRedeem: 'Buy from the shop, then redeem here'
   },
 
   // Groups (shared)
@@ -673,8 +675,16 @@ export default {
 
   // Redeem
   redeem: {
-    title: 'Redeem Code',
-    description: 'Enter your redeem code to add balance or increase concurrency',
+    title: 'Purchase / Redeem',
+    description: 'Buy a code from the shop first, then redeem it to add balance or concurrency',
+    shop: {
+      step: 'Step 1',
+      title: 'Buy from the shop',
+      description: 'Choose a plan and pay in the card shop, then come back here to redeem the code.',
+      button: 'Buy from shop',
+      redeemStep: 'Step 2',
+      redeemTitle: 'Redeem your code',
+    },
     currentBalance: 'Current Balance',
     concurrency: 'Concurrency',
     requests: 'requests',

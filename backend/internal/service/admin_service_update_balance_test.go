@@ -78,6 +78,10 @@ func (s *adminRechargeAffiliateAccruerStub) AccrueInviteRebate(_ context.Context
 	return s.rebate, s.err
 }
 
+func (s *adminRechargeAffiliateAccruerStub) BindInviter(context.Context, int64, int64) (bool, error) {
+	return false, nil
+}
+
 func adminRechargeSettingService(enabled bool) *SettingService {
 	values := map[string]string{}
 	if enabled {

@@ -354,6 +354,20 @@ func (_c *UserCreate) SetNillableRpmLimit(v *int) *UserCreate {
 	return _c
 }
 
+// SetCreatedByAdminID sets the "created_by_admin_id" field.
+func (_c *UserCreate) SetCreatedByAdminID(v int64) *UserCreate {
+	_c.mutation.SetCreatedByAdminID(v)
+	return _c
+}
+
+// SetNillableCreatedByAdminID sets the "created_by_admin_id" field if the given value is not nil.
+func (_c *UserCreate) SetNillableCreatedByAdminID(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetCreatedByAdminID(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *UserCreate) AddAPIKeyIDs(ids ...int64) *UserCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -867,6 +881,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(user.FieldRpmLimit, field.TypeInt, value)
 		_node.RpmLimit = value
+	}
+	if value, ok := _c.mutation.CreatedByAdminID(); ok {
+		_spec.SetField(user.FieldCreatedByAdminID, field.TypeInt64, value)
+		_node.CreatedByAdminID = &value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1480,6 +1498,30 @@ func (u *UserUpsert) AddRpmLimit(v int) *UserUpsert {
 	return u
 }
 
+// SetCreatedByAdminID sets the "created_by_admin_id" field.
+func (u *UserUpsert) SetCreatedByAdminID(v int64) *UserUpsert {
+	u.Set(user.FieldCreatedByAdminID, v)
+	return u
+}
+
+// UpdateCreatedByAdminID sets the "created_by_admin_id" field to the value that was provided on create.
+func (u *UserUpsert) UpdateCreatedByAdminID() *UserUpsert {
+	u.SetExcluded(user.FieldCreatedByAdminID)
+	return u
+}
+
+// AddCreatedByAdminID adds v to the "created_by_admin_id" field.
+func (u *UserUpsert) AddCreatedByAdminID(v int64) *UserUpsert {
+	u.Add(user.FieldCreatedByAdminID, v)
+	return u
+}
+
+// ClearCreatedByAdminID clears the value of the "created_by_admin_id" field.
+func (u *UserUpsert) ClearCreatedByAdminID() *UserUpsert {
+	u.SetNull(user.FieldCreatedByAdminID)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -1928,6 +1970,34 @@ func (u *UserUpsertOne) AddRpmLimit(v int) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRpmLimit() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetCreatedByAdminID sets the "created_by_admin_id" field.
+func (u *UserUpsertOne) SetCreatedByAdminID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetCreatedByAdminID(v)
+	})
+}
+
+// AddCreatedByAdminID adds v to the "created_by_admin_id" field.
+func (u *UserUpsertOne) AddCreatedByAdminID(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddCreatedByAdminID(v)
+	})
+}
+
+// UpdateCreatedByAdminID sets the "created_by_admin_id" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateCreatedByAdminID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateCreatedByAdminID()
+	})
+}
+
+// ClearCreatedByAdminID clears the value of the "created_by_admin_id" field.
+func (u *UserUpsertOne) ClearCreatedByAdminID() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearCreatedByAdminID()
 	})
 }
 
@@ -2545,6 +2615,34 @@ func (u *UserUpsertBulk) AddRpmLimit(v int) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRpmLimit() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetCreatedByAdminID sets the "created_by_admin_id" field.
+func (u *UserUpsertBulk) SetCreatedByAdminID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetCreatedByAdminID(v)
+	})
+}
+
+// AddCreatedByAdminID adds v to the "created_by_admin_id" field.
+func (u *UserUpsertBulk) AddCreatedByAdminID(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddCreatedByAdminID(v)
+	})
+}
+
+// UpdateCreatedByAdminID sets the "created_by_admin_id" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateCreatedByAdminID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateCreatedByAdminID()
+	})
+}
+
+// ClearCreatedByAdminID clears the value of the "created_by_admin_id" field.
+func (u *UserUpsertBulk) ClearCreatedByAdminID() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearCreatedByAdminID()
 	})
 }
 

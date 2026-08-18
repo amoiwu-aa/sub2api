@@ -10,7 +10,7 @@
           <button v-for="tab in tabs" :key="tab.key"
             class="flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-all"
             :class="activeTab === tab.key ? 'bg-white text-gray-900 shadow dark:bg-dark-700 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
-            @click="activeTab = tab.key">{{ tab.label }}</button>
+            @click="selectTab(tab.key)">{{ tab.label }}</button>
         </div>
         <!-- Payment in progress (shared by recharge and subscription) -->
         <template v-if="paymentPhase === 'paying'">
@@ -35,30 +35,47 @@
         <template v-else>
           <!-- Top-up Tab -->
           <template v-if="activeTab === 'recharge'">
+            <div
+              v-if="hasExternalRedeemPurchase"
+              class="overflow-hidden rounded-2xl border-2 border-primary-500 bg-primary-700 p-6 text-white shadow-md dark:border-primary-400 dark:bg-primary-800"
+            >
+              <div class="flex items-start gap-4">
+                <div
+                  class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/15"
+                >
+                  <Icon name="gift" size="lg" class="text-white" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-lg font-semibold tracking-tight">
+                    {{ t('payment.externalRedeemPurchaseTitle') }}
+                  </h3>
+                  <p class="mt-1 text-sm leading-relaxed text-primary-100">
+                    {{ t('payment.externalRedeemPurchaseHint') }}
+                  </p>
+                </div>
+              </div>
+              <a
+                :href="externalRedeemPurchaseURL"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn mt-5 w-full bg-white py-3.5 text-base font-semibold text-primary-800 hover:bg-primary-50"
+              >
+                <span>{{ externalRedeemPurchaseLabel }}</span>
+                <Icon name="externalLink" size="md" />
+              </a>
+              <button
+                type="button"
+                class="mt-3 block w-full text-center text-sm font-medium text-primary-100 underline-offset-2 hover:text-white hover:underline"
+                @click="selectTab('redeem')"
+              >
+                {{ t('payment.externalRedeemPurchaseRedeemLink') }}
+              </button>
+            </div>
             <!-- Recharge Account Card -->
             <div class="card p-5">
               <p class="text-xs font-medium text-gray-400 dark:text-gray-500">{{ t('payment.rechargeAccount') }}</p>
               <p class="mt-1 text-base font-semibold text-gray-900 dark:text-white">{{ user?.username || '' }}</p>
               <p class="mt-0.5 text-sm font-medium text-green-600 dark:text-green-400">{{ t('payment.currentBalance') }}: {{ user?.balance?.toFixed(2) || '0.00' }}</p>
-            </div>
-            <div v-if="hasExternalRedeemPurchase" class="card border-primary-100 bg-primary-50/40 p-5 dark:border-primary-900/50 dark:bg-primary-950/20">
-              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('payment.externalRedeemPurchaseTitle') }}</h3>
-                  <p class="mt-1 text-sm leading-relaxed text-gray-500 dark:text-gray-400">{{ t('payment.externalRedeemPurchaseHint') }}</p>
-                </div>
-                <a
-                  :href="externalRedeemPurchaseURL"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="btn shrink-0 px-4 py-2.5 text-sm font-medium"
-                >
-                  <span>{{ externalRedeemPurchaseLabel }}</span>
-                  <svg class="ml-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7m0 0v7m0-7L10 14M5 5v14a2 2 0 002 2h14" />
-                  </svg>
-                </a>
-              </div>
             </div>
             <div v-if="enabledMethods.length === 0 && !hasExternalRedeemPurchase" class="card py-16 text-center">
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
@@ -235,8 +252,11 @@
               </div>
             </template>
           </template>
+          <template v-else-if="activeTab === 'redeem'">
+            <RedeemPanel />
+          </template>
         </template>
-        <div v-if="(checkout.help_text || checkout.help_image_url) && paymentPhase === 'select' && !selectedPlan" class="card p-4">
+        <div v-if="(checkout.help_text || checkout.help_image_url) && paymentPhase === 'select' && !selectedPlan && activeTab !== 'redeem'" class="card p-4">
           <div class="flex flex-col items-center gap-3">
             <img v-if="checkout.help_image_url" :src="checkout.help_image_url" alt=""
               class="h-40 max-w-full cursor-pointer rounded-lg object-contain transition-opacity hover:opacity-80"
@@ -305,6 +325,7 @@ import {
 import { platformAccentBarClass, platformBadgeLightClass, platformBadgeClass, platformTextClass, platformLabel } from '@/utils/platformColors'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import PaymentStatusPanel from '@/components/payment/PaymentStatusPanel.vue'
+import RedeemPanel from '@/components/user/RedeemPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { DEFAULT_PAYMENT_CURRENCY, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import { planValiditySuffix as validitySuffixOf } from '@/components/payment/validity'
@@ -341,7 +362,8 @@ const loading = ref(true)
 const submitting = ref(false)
 const errorMessage = ref('')
 const errorHintMessage = ref('')
-const activeTab = ref<'recharge' | 'subscription'>('recharge')
+type PurchaseTab = 'recharge' | 'subscription' | 'redeem'
+const activeTab = ref<PurchaseTab>('recharge')
 const amount = ref<number | null>(null)
 const selectedMethod = ref('')
 const selectedPlan = ref<SubscriptionPlan | null>(null)
@@ -525,11 +547,44 @@ const checkout = ref<CheckoutInfoResponse>({
 })
 
 const tabs = computed(() => {
-  const result: { key: 'recharge' | 'subscription'; label: string }[] = []
+  const result: { key: PurchaseTab; label: string }[] = []
   if (!checkout.value.balance_disabled) result.push({ key: 'recharge', label: t('payment.tabTopUp') })
   result.push({ key: 'subscription', label: t('payment.tabSubscribe') })
+  result.push({ key: 'redeem', label: t('payment.tabRedeem') })
   return result
 })
+
+function queryTab(): PurchaseTab | '' {
+  const raw = route.query.tab
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (value === 'subscription' || value === 'redeem' || value === 'recharge') return value
+  return ''
+}
+
+function applyTabFromQuery() {
+  const requested = queryTab()
+  const available = new Set(tabs.value.map((tab) => tab.key))
+  if (requested && available.has(requested)) {
+    activeTab.value = requested
+    return
+  }
+  activeTab.value = tabs.value[0]?.key ?? 'subscription'
+}
+
+function selectTab(key: PurchaseTab) {
+  if (paymentPhase.value !== 'select' || selectedPlan.value) return
+  activeTab.value = key
+  const nextQuery = { ...route.query }
+  if (key === 'recharge') {
+    delete nextQuery.tab
+  } else {
+    nextQuery.tab = key
+  }
+  const currentTab = typeof route.query.tab === 'string' ? route.query.tab : undefined
+  const nextTab = typeof nextQuery.tab === 'string' ? nextQuery.tab : undefined
+  if (currentTab === nextTab) return
+  void router.replace({ path: route.path, query: nextQuery })
+}
 
 const visibleMethods = computed(() => getVisibleMethods(checkout.value.methods))
 const enabledMethods = computed(() => Object.keys(visibleMethods.value))
@@ -735,6 +790,14 @@ watch(() => [validAmount.value, selectedMethod.value] as const, ([amt, method]) 
   const available = enabledMethods.value.find((m) => amountFitsMethod(amt, m))
   if (available) selectedMethod.value = available
 })
+
+watch(
+  () => route.query.tab,
+  () => {
+    if (paymentPhase.value !== 'select' || selectedPlan.value) return
+    applyTabFromQuery()
+  },
+)
 
 // Payment button class: follows selected payment method color
 const paymentButtonClass = computed(() => {
@@ -1170,21 +1233,16 @@ onMounted(async () => {
       }
     }
     await resumeWechatPaymentFromQuery()
-    if (checkout.value.balance_disabled) {
-      activeTab.value = 'subscription'
-    }
+    applyTabFromQuery()
     // Handle renewal navigation: ?tab=subscription&group=123
-    if (route.query.tab === 'subscription') {
-      activeTab.value = 'subscription'
-      if (route.query.group) {
-        const groupId = Number(route.query.group)
-        const groupPlans = checkout.value.plans.filter(p => p.group_id === groupId)
-        if (groupPlans.length === 1) {
-          selectedPlan.value = groupPlans[0]
-        } else if (groupPlans.length > 1) {
-          renewGroupId.value = groupId
-          showRenewalModal.value = true
-        }
+    if (activeTab.value === 'subscription' && route.query.group) {
+      const groupId = Number(route.query.group)
+      const groupPlans = checkout.value.plans.filter(p => p.group_id === groupId)
+      if (groupPlans.length === 1) {
+        selectedPlan.value = groupPlans[0]
+      } else if (groupPlans.length > 1) {
+        renewGroupId.value = groupId
+        showRenewalModal.value = true
       }
     }
   } catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }

@@ -342,6 +342,47 @@ describe('useAuthStore', () => {
     })
   })
 
+  describe('affiliate admin roles', () => {
+    const fakeAffiliateAdmin = {
+      ...fakeUser,
+      id: 3,
+      username: 'aff-admin',
+      email: 'aff@example.com',
+      role: 'affiliate_admin' as const,
+    }
+
+    it('keeps isAdmin false and canAccessAdminPanel true', async () => {
+      mockLogin.mockResolvedValue({ ...fakeAuthResponse, user: { ...fakeAffiliateAdmin } })
+      const store = useAuthStore()
+
+      await store.login({ email: 'aff@example.com', password: '123456' })
+
+      expect(store.isAdmin).toBe(false)
+      expect(store.isAffiliateAdmin).toBe(true)
+      expect(store.canAccessAdminPanel).toBe(true)
+    })
+
+    it('regular user cannot access admin panel', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+
+      await store.login({ email: 'test@example.com', password: '123456' })
+
+      expect(store.isAffiliateAdmin).toBe(false)
+      expect(store.canAccessAdminPanel).toBe(false)
+    })
+
+    it('super admin can access admin panel', async () => {
+      mockLogin.mockResolvedValue({ ...fakeAuthResponse, user: { ...fakeAdminUser } })
+      const store = useAuthStore()
+
+      await store.login({ email: 'admin@example.com', password: '123456' })
+
+      expect(store.isAffiliateAdmin).toBe(false)
+      expect(store.canAccessAdminPanel).toBe(true)
+    })
+  })
+
   // --- refreshUser ---
 
   describe('refreshUser', () => {

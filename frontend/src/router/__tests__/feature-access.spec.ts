@@ -14,6 +14,8 @@ const authStore = vi.hoisted(() => ({
   checkAuth: vi.fn(),
   isAuthenticated: true,
   isAdmin: false,
+  isAffiliateAdmin: false,
+  canAccessAdminPanel: false,
   isSimpleMode: false,
   hasPendingAuthSession: false,
 }))
@@ -28,6 +30,12 @@ const appStore = vi.hoisted(() => ({
     custom_menu_items?: []
   },
   fetchPublicSettings: vi.fn(),
+}))
+
+const complianceStore = vi.hoisted(() => ({
+  initialized: false,
+  fetchStatus: vi.fn(),
+  requireAcknowledgement: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -54,11 +62,7 @@ vi.mock('@/stores/adminSettings', () => ({
 }))
 
 vi.mock('@/stores/adminCompliance', () => ({
-  useAdminComplianceStore: () => ({
-    initialized: true,
-    fetchStatus: vi.fn(),
-    requireAcknowledgement: vi.fn(),
-  }),
+  useAdminComplianceStore: () => complianceStore,
 }))
 
 vi.mock('@/composables/useNavigationLoading', () => ({
@@ -113,7 +117,13 @@ describe('feature route guard', () => {
   beforeEach(() => {
     authStore.isAuthenticated = true
     authStore.isAdmin = false
+    authStore.isAffiliateAdmin = false
+    authStore.canAccessAdminPanel = false
     authStore.isSimpleMode = false
+    complianceStore.initialized = false
+    complianceStore.fetchStatus.mockReset()
+    complianceStore.fetchStatus.mockResolvedValue(undefined)
+    complianceStore.requireAcknowledgement.mockReset()
     appStore.publicSettingsLoaded = false
     appStore.cachedPublicSettings = null
     appStore.fetchPublicSettings.mockReset()
@@ -173,5 +183,29 @@ describe('feature route guard', () => {
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith(target)
+  })
+
+  it('does not request super-admin compliance for affiliate admins', async () => {
+    authStore.isAffiliateAdmin = true
+    authStore.canAccessAdminPanel = true
+
+    const { navigation, next } = runGuard({ requiresAdmin: true }, '/admin/users')
+    await navigation
+
+    expect(complianceStore.fetchStatus).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('still requests compliance for super admins', async () => {
+    authStore.isAdmin = true
+    authStore.canAccessAdminPanel = true
+
+    const { navigation, next } = runGuard({ requiresAdmin: true }, '/admin/users')
+    await navigation
+
+    expect(complianceStore.fetchStatus).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
   })
 })

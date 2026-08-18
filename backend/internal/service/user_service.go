@@ -82,6 +82,9 @@ type UserListFilters struct {
 	// IncludeDeleted 为 true 时绕过软删除过滤，返回含已删除（deleted_at 非空）的用户。
 	// 仅供 /admin/usage 的 SearchUsers 端点使用，其他列表调用方不要设置。
 	IncludeDeleted bool
+	// ManagedByAdminID 非 0 时只返回该管理员名下的用户（自己开的号或邀请注册的）。
+	// 由 handler 为分销管理员强制写入，不能从 query 传入。
+	ManagedByAdminID int64
 }
 
 // UserUpdateFields 声明 UserRepository.Update 允许写回的列。

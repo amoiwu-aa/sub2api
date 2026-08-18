@@ -75,6 +75,25 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 	}
 }
 
+func UserFromServiceAffiliateAdmin(u *service.User) *AffiliateAdminUser {
+	if u == nil {
+		return nil
+	}
+	return &AffiliateAdminUser{
+		ID:            u.ID,
+		Email:         u.Email,
+		Username:      u.Username,
+		Notes:         u.Notes,
+		Status:        u.Status,
+		AllowedGroups: u.AllowedGroups,
+		LastActiveAt:  u.LastActiveAt,
+		LastUsedAt:    u.LastUsedAt,
+		CreatedAt:     u.CreatedAt,
+		UpdatedAt:     u.UpdatedAt,
+		DeletedAt:     u.DeletedAt,
+	}
+}
+
 func APIKeyFromService(k *service.APIKey) *APIKey {
 	if k == nil {
 		return nil

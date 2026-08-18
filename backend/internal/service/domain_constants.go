@@ -18,9 +18,15 @@ const (
 
 // Role constants
 const (
-	RoleAdmin = domain.RoleAdmin
-	RoleUser  = domain.RoleUser
+	RoleAdmin          = domain.RoleAdmin
+	RoleAffiliateAdmin = domain.RoleAffiliateAdmin
+	RoleUser           = domain.RoleUser
 )
+
+// RoleCanAccessAdminPanel reports whether a role may enter /admin routes.
+func RoleCanAccessAdminPanel(role string) bool {
+	return role == RoleAdmin || role == RoleAffiliateAdmin
+}
 
 // Affiliate rebate settings
 const (
@@ -310,6 +316,10 @@ const (
 	SettingKeyHideCcsImportButton         = "hide_ccs_import_button"        // 是否隐藏 API Keys 页面的导入 CCS 按钮
 	SettingKeyPurchaseSubscriptionEnabled = "purchase_subscription_enabled" // 是否展示"购买订阅"页面入口
 	SettingKeyPurchaseSubscriptionURL     = "purchase_subscription_url"     // "购买订阅"页面 URL（作为 iframe src）
+	SettingKeyRedeemShopEnabled           = "redeem_shop_enabled"           // 兑换页是否展示卡网购买入口
+	SettingKeyRedeemShopURL               = "redeem_shop_url"               // 卡网购买页绝对 URL（新标签打开）
+	SettingKeyRedeemShopButtonText        = "redeem_shop_button_text"        // 购买按钮文案（空则前端用默认）
+	SettingKeyRedeemShopDescription       = "redeem_shop_description"        // 购买引导说明（空则前端用默认）
 	SettingKeyTableDefaultPageSize        = "table_default_page_size"       // 表格默认每页条数
 	SettingKeyTablePageSizeOptions        = "table_page_size_options"       // 表格可选每页条数（JSON 数组）
 	SettingKeyCustomMenuItems             = "custom_menu_items"             // 自定义菜单项（JSON 数组）

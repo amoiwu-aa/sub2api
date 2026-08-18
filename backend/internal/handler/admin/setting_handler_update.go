@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -164,6 +165,10 @@ type UpdateSettingsRequest struct {
 	HideCcsImportButton         bool                  `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled *bool                 `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL     *string               `json:"purchase_subscription_url"`
+	RedeemShopEnabled           *bool                 `json:"redeem_shop_enabled"`
+	RedeemShopURL               *string               `json:"redeem_shop_url"`
+	RedeemShopButtonText        *string               `json:"redeem_shop_button_text"`
+	RedeemShopDescription       *string               `json:"redeem_shop_description"`
 	TableDefaultPageSize        int                   `json:"table_default_page_size"`
 	TablePageSizeOptions        []int                 `json:"table_page_size_options"`
 	CustomMenuItems             *[]dto.CustomMenuItem `json:"custom_menu_items"`
@@ -1243,6 +1248,52 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
+	// 兑换页卡网购买引导
+	redeemShopEnabled := previousSettings.RedeemShopEnabled
+	if req.RedeemShopEnabled != nil {
+		redeemShopEnabled = *req.RedeemShopEnabled
+	}
+	redeemShopURL := previousSettings.RedeemShopURL
+	if req.RedeemShopURL != nil {
+		redeemShopURL = strings.TrimSpace(*req.RedeemShopURL)
+	}
+	redeemShopButtonText := previousSettings.RedeemShopButtonText
+	if req.RedeemShopButtonText != nil {
+		redeemShopButtonText = strings.TrimSpace(*req.RedeemShopButtonText)
+	}
+	redeemShopDescription := previousSettings.RedeemShopDescription
+	if req.RedeemShopDescription != nil {
+		redeemShopDescription = strings.TrimSpace(*req.RedeemShopDescription)
+	}
+
+	const (
+		maxRedeemShopButtonTextLen  = 40
+		maxRedeemShopDescriptionLen = 500
+	)
+	if utf8.RuneCountInString(redeemShopButtonText) > maxRedeemShopButtonTextLen {
+		response.BadRequest(c, "Redeem shop button text must be at most 40 characters")
+		return
+	}
+	if utf8.RuneCountInString(redeemShopDescription) > maxRedeemShopDescriptionLen {
+		response.BadRequest(c, "Redeem shop description must be at most 500 characters")
+		return
+	}
+	if redeemShopEnabled {
+		if redeemShopURL == "" {
+			response.BadRequest(c, "Redeem shop URL is required when enabled")
+			return
+		}
+		if err := config.ValidateAbsoluteHTTPURL(redeemShopURL); err != nil {
+			response.BadRequest(c, "Redeem shop URL must be an absolute http(s) URL")
+			return
+		}
+	} else if redeemShopURL != "" {
+		if err := config.ValidateAbsoluteHTTPURL(redeemShopURL); err != nil {
+			response.BadRequest(c, "Redeem shop URL must be an absolute http(s) URL")
+			return
+		}
+	}
+
 	// Frontend URL 验证
 	req.FrontendURL = strings.TrimSpace(req.FrontendURL)
 	if req.FrontendURL != "" {
@@ -1622,6 +1673,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		HideCcsImportButton:                    req.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:            purchaseEnabled,
 		PurchaseSubscriptionURL:                purchaseURL,
+		RedeemShopEnabled:                      redeemShopEnabled,
+		RedeemShopURL:                          redeemShopURL,
+		RedeemShopButtonText:                   redeemShopButtonText,
+		RedeemShopDescription:                  redeemShopDescription,
 		TableDefaultPageSize:                   req.TableDefaultPageSize,
 		TablePageSizeOptions:                   req.TablePageSizeOptions,
 		CustomMenuItems:                        customMenuJSON,
@@ -2235,6 +2290,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		HideCcsImportButton:                                    updatedSettings.HideCcsImportButton,
 		PurchaseSubscriptionEnabled:                            updatedSettings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:                                updatedSettings.PurchaseSubscriptionURL,
+		RedeemShopEnabled:                                      updatedSettings.RedeemShopEnabled,
+		RedeemShopURL:                                          updatedSettings.RedeemShopURL,
+		RedeemShopButtonText:                                   updatedSettings.RedeemShopButtonText,
+		RedeemShopDescription:                                  updatedSettings.RedeemShopDescription,
 		TableDefaultPageSize:                                   updatedSettings.TableDefaultPageSize,
 		TablePageSizeOptions:                                   updatedSettings.TablePageSizeOptions,
 		CustomMenuItems:                                        dto.ParseCustomMenuItems(updatedSettings.CustomMenuItems),

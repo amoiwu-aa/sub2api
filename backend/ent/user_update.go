@@ -432,6 +432,33 @@ func (_u *UserUpdate) AddRpmLimit(v int) *UserUpdate {
 	return _u
 }
 
+// SetCreatedByAdminID sets the "created_by_admin_id" field.
+func (_u *UserUpdate) SetCreatedByAdminID(v int64) *UserUpdate {
+	_u.mutation.ResetCreatedByAdminID()
+	_u.mutation.SetCreatedByAdminID(v)
+	return _u
+}
+
+// SetNillableCreatedByAdminID sets the "created_by_admin_id" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableCreatedByAdminID(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetCreatedByAdminID(*v)
+	}
+	return _u
+}
+
+// AddCreatedByAdminID adds value to the "created_by_admin_id" field.
+func (_u *UserUpdate) AddCreatedByAdminID(v int64) *UserUpdate {
+	_u.mutation.AddCreatedByAdminID(v)
+	return _u
+}
+
+// ClearCreatedByAdminID clears the value of the "created_by_admin_id" field.
+func (_u *UserUpdate) ClearCreatedByAdminID() *UserUpdate {
+	_u.mutation.ClearCreatedByAdminID()
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdate) AddAPIKeyIDs(ids ...int64) *UserUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1098,6 +1125,15 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CreatedByAdminID(); ok {
+		_spec.SetField(user.FieldCreatedByAdminID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedByAdminID(); ok {
+		_spec.AddField(user.FieldCreatedByAdminID, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedByAdminIDCleared() {
+		_spec.ClearField(user.FieldCreatedByAdminID, field.TypeInt64)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2108,6 +2144,33 @@ func (_u *UserUpdateOne) AddRpmLimit(v int) *UserUpdateOne {
 	return _u
 }
 
+// SetCreatedByAdminID sets the "created_by_admin_id" field.
+func (_u *UserUpdateOne) SetCreatedByAdminID(v int64) *UserUpdateOne {
+	_u.mutation.ResetCreatedByAdminID()
+	_u.mutation.SetCreatedByAdminID(v)
+	return _u
+}
+
+// SetNillableCreatedByAdminID sets the "created_by_admin_id" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableCreatedByAdminID(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetCreatedByAdminID(*v)
+	}
+	return _u
+}
+
+// AddCreatedByAdminID adds value to the "created_by_admin_id" field.
+func (_u *UserUpdateOne) AddCreatedByAdminID(v int64) *UserUpdateOne {
+	_u.mutation.AddCreatedByAdminID(v)
+	return _u
+}
+
+// ClearCreatedByAdminID clears the value of the "created_by_admin_id" field.
+func (_u *UserUpdateOne) ClearCreatedByAdminID() *UserUpdateOne {
+	_u.mutation.ClearCreatedByAdminID()
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *UserUpdateOne) AddAPIKeyIDs(ids ...int64) *UserUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -2804,6 +2867,15 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(user.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.CreatedByAdminID(); ok {
+		_spec.SetField(user.FieldCreatedByAdminID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedCreatedByAdminID(); ok {
+		_spec.AddField(user.FieldCreatedByAdminID, field.TypeInt64, value)
+	}
+	if _u.mutation.CreatedByAdminIDCleared() {
+		_spec.ClearField(user.FieldCreatedByAdminID, field.TypeInt64)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

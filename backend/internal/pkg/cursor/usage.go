@@ -86,12 +86,17 @@ type UsageSummary struct {
 	TeamUsage       UsageScope `json:"teamUsage"`
 }
 
-// Scope 返回该账号实际生效的额度口径：团队成员看团队池，其余看个人池。
+// Scope 返回该账号实际生效的额度口径。
+//
+// 只有团队池带了 plan 才用团队池。Team / Enterprise 成员常见形态是：
+// individualUsage.plan 有座位额度，teamUsage 只有 onDemand、没有 plan。
+// 旧逻辑把「teamUsage.onDemand != nil」也当成团队池，会把个人进度条整段丢掉，
+// 页面上就只剩 Enterprise 徽标和「查询」。
 func (s *UsageSummary) Scope() UsageScope {
 	if s == nil {
 		return UsageScope{}
 	}
-	if s.TeamUsage.Plan != nil || s.TeamUsage.OnDemand != nil {
+	if s.TeamUsage.Plan != nil {
 		return s.TeamUsage
 	}
 	return s.IndividualUsage

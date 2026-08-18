@@ -266,6 +266,21 @@ func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64)
 	}, nil
 }
 
+// BindInviter attaches invitee userID to inviterID even when the affiliate
+// feature flag is off, so distribution-admin ownership still works.
+func (s *AffiliateService) BindInviter(ctx context.Context, userID, inviterID int64) (bool, error) {
+	if s == nil || s.repo == nil || userID <= 0 || inviterID <= 0 || userID == inviterID {
+		return false, nil
+	}
+	if _, err := s.repo.EnsureUserAffiliate(ctx, userID); err != nil {
+		return false, err
+	}
+	if _, err := s.repo.EnsureUserAffiliate(ctx, inviterID); err != nil {
+		return false, err
+	}
+	return s.repo.BindInviter(ctx, userID, inviterID)
+}
+
 func (s *AffiliateService) BindInviterByCode(ctx context.Context, userID int64, rawCode string) error {
 	code := strings.ToUpper(strings.TrimSpace(rawCode))
 	if code == "" {

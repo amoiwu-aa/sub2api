@@ -197,8 +197,8 @@ func validateJWTForAdmin(
 		return false
 	}
 
-	// 检查管理员权限
-	if !user.IsAdmin() {
+	// 总管理员和分销管理员都可以进后台；具体接口再由 RequireSuperAdmin / 归属校验收口。
+	if !user.CanAccessAdminPanel() {
 		AbortWithError(c, 403, "FORBIDDEN", "Admin access required")
 		return false
 	}

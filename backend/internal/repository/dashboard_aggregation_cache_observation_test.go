@@ -16,13 +16,13 @@ func TestDashboardAggregationPersistsCacheObservationFields(t *testing.T) {
 	start := time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 
-	mock.ExpectExec(`(?s)WITH hourly AS .*GREATEST\(COALESCE\(forced_cache_read_tokens, 0\), 0\).*provider_cache_read_tokens.*cache_hit_requests.*reported_requests.*estimated_requests.*unavailable_requests.*INSERT INTO usage_dashboard_hourly.*ON CONFLICT`).
+	mock.ExpectExec(`(?s)WITH hourly AS .*GREATEST\(COALESCE\(forced_cache_read_tokens, 0\), 0\).*provider_cache_read_tokens.*cache_hit_requests.*reported_input_tokens.*reported_cache_creation_tokens.*reported_forced_cache_read_tokens.*reported_requests.*estimated_requests.*unavailable_requests.*INSERT INTO usage_dashboard_hourly.*ON CONFLICT`).
 		WithArgs(start, end, timezone.Name()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	require.NoError(t, repo.upsertHourlyAggregates(context.Background(), start, end))
 
-	mock.ExpectExec(`(?s)WITH daily AS .*SUM\(provider_cache_read_tokens\).*SUM\(cache_hit_requests\).*SUM\(reported_requests\).*SUM\(estimated_requests\).*SUM\(unavailable_requests\).*INSERT INTO usage_dashboard_daily.*ON CONFLICT`).
+	mock.ExpectExec(`(?s)WITH daily AS .*SUM\(provider_cache_read_tokens\).*SUM\(cache_hit_requests\).*SUM\(reported_input_tokens\).*SUM\(reported_cache_creation_tokens\).*SUM\(reported_forced_cache_read_tokens\).*SUM\(reported_requests\).*SUM\(estimated_requests\).*SUM\(unavailable_requests\).*INSERT INTO usage_dashboard_daily.*ON CONFLICT`).
 		WithArgs(start, end, start, end, timezone.Name()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 

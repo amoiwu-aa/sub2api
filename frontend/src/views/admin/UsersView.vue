@@ -23,12 +23,13 @@
             </div>
 
             <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
+            <div v-if="visibleFilters.has('role') && !isAffiliateAdmin" class="w-full sm:w-32">
               <Select
                 v-model="filters.role"
                 :options="[
                   { value: '', label: t('admin.users.allRoles') },
                   { value: 'admin', label: t('admin.users.admin') },
+                  { value: 'affiliate_admin', label: t('admin.users.affiliateAdmin') },
                   { value: 'user', label: t('admin.users.user') }
                 ]"
                 @change="applyFilter"
@@ -62,7 +63,7 @@
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-full sm:w-44">
+            <div v-if="visibleFilters.has('apiKeyGroup') && !isAffiliateAdmin" class="w-full sm:w-44">
               <Select
                 v-model="filters.apiKeyGroup"
                 :options="apiKeyGroupFilterOptions"
@@ -233,6 +234,7 @@
               </div>
               <!-- Attributes Config Button -->
               <button
+                v-if="!isAffiliateAdmin"
                 @click="showAttributesModal = true"
                 class="btn btn-secondary px-2 md:px-3"
                 :title="t('admin.users.attributes.configButton')"
@@ -243,7 +245,7 @@
             </div>
 
             <button
-              v-if="selectedCount > 0"
+              v-if="selectedCount > 0 && !isAffiliateAdmin"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="bulk-edit-limits"
               @click="showBulkEditModal = true"
@@ -268,7 +270,7 @@
           :data="sortedUsers"
           :loading="loading"
           row-key="id"
-          selectable
+          :selectable="!isAffiliateAdmin"
           :selected-keys="selectedIds"
           :selection-label="getUserSelectionLabel"
           :actions-count="7"
@@ -326,7 +328,7 @@
           </template>
 
           <template #cell-role="{ value }">
-            <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
+            <span :class="['badge', value === 'admin' ? 'badge-purple' : value === 'affiliate_admin' ? 'badge-warning' : 'badge-gray']">
               {{ t('admin.users.roles.' + value) }}
             </span>
           </template>
@@ -336,8 +338,9 @@
               <!-- 专属分组行 -->
               <span
                 v-if="getUserGroups(row).exclusive.length > 0"
-                class="group/ex relative inline-flex cursor-pointer items-center gap-1 whitespace-nowrap text-xs"
-                @click.stop="toggleExpandedGroup(row.id)"
+                class="group/ex relative inline-flex items-center gap-1 whitespace-nowrap text-xs"
+                :class="isAffiliateAdmin ? 'cursor-default' : 'cursor-pointer'"
+                @click.stop="isAffiliateAdmin ? undefined : toggleExpandedGroup(row.id)"
               >
                 <Icon name="shield" size="xs" class="h-3.5 w-3.5 text-purple-500 dark:text-purple-400" />
                 <span class="font-medium text-purple-600 dark:text-purple-400">{{ getUserGroups(row).exclusive.length }}</span>
@@ -354,7 +357,7 @@
                 </div>
                 <!-- 点击展开分组操作菜单 -->
                 <div
-                  v-if="expandedGroupUserId === row.id"
+                  v-if="!isAffiliateAdmin && expandedGroupUserId === row.id"
                   class="absolute left-0 top-full z-50 mt-1.5 min-w-[160px] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-xs shadow-xl dark:border-dark-600 dark:bg-dark-700"
                 >
                   <div class="border-b border-gray-100 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-400 dark:border-dark-600 dark:text-dark-400">
@@ -672,6 +675,15 @@
         <div class="py-1">
           <template v-for="user in users" :key="user.id">
             <template v-if="user.id === activeMenuId">
+              <button
+                @click="handleAllowedGroups(user); closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="users" size="sm" class="text-gray-400" :stroke-width="2" />
+                {{ t('admin.users.groups') }}
+              </button>
+              <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+              <template v-if="!isAffiliateAdmin">
               <!-- View API Keys -->
               <button
                 @click="handleViewApiKeys(user); closeActionMenu()"
@@ -679,15 +691,6 @@
               >
                 <Icon name="key" size="sm" class="text-gray-400" :stroke-width="2" />
                 {{ t('admin.users.apiKeys') }}
-              </button>
-
-              <!-- Allowed Groups -->
-              <button
-                @click="handleAllowedGroups(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <Icon name="users" size="sm" class="text-gray-400" :stroke-width="2" />
-                {{ t('admin.users.groups') }}
               </button>
 
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
@@ -731,6 +734,7 @@
               </button>
 
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+              </template>
 
               <!-- Delete (not for admin) -->
               <button
@@ -775,6 +779,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
@@ -812,6 +817,20 @@ import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryM
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const isAffiliateAdmin = computed(() => authStore.isAffiliateAdmin)
+const AFFILIATE_HIDDEN_COLUMN_KEYS = new Set([
+  'role',
+  'subscriptions',
+  'balance',
+  'balance_platform_quota',
+  'usage',
+  'usage_anthropic',
+  'usage_openai',
+  'usage_gemini',
+  'usage_antigravity',
+  'concurrency'
+])
 
 // Generate dynamic attribute columns from enabled definitions
 const attributeColumns = computed<Column[]>(() =>
@@ -883,7 +902,11 @@ const allColumns = computed<Column[]>(() => [
   { key: 'last_used_at', label: t('admin.users.columns.lastUsed'), sortable: true },
   { key: 'created_at', label: t('admin.users.columns.created'), sortable: true },
   { key: 'actions', label: t('admin.users.columns.actions'), sortable: false }
-])
+].filter((col) => {
+  if (!isAffiliateAdmin.value) return true
+  return !AFFILIATE_HIDDEN_COLUMN_KEYS.has(col.key) && !col.key.startsWith('attr_')
+})
+)
 
 // Columns that can be toggled (exclude email and actions which are always visible)
 const toggleableColumns = computed(() =>
@@ -951,6 +974,9 @@ const loadSavedColumns = () => {
   } catch (e) {
     console.error('Failed to load saved columns:', e)
     DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+  }
+  if (isAffiliateAdmin.value) {
+    hiddenColumns.delete('groups')
   }
 }
 
@@ -1136,12 +1162,17 @@ const filterableAttributes = computed(() =>
 )
 
 // Built-in filter definitions
-const builtInFilters = computed(() => [
-  { key: 'role', name: t('admin.users.columns.role'), type: 'select' as const },
-  { key: 'status', name: t('admin.users.columns.status'), type: 'select' as const },
-  { key: 'group', name: t('admin.users.authorizedGroupFilter'), type: 'select' as const },
-  { key: 'apiKeyGroup', name: t('admin.users.apiKeyGroupFilter'), type: 'select' as const }
-])
+const builtInFilters = computed(() => {
+  const filters = [
+    { key: 'status', name: t('admin.users.columns.status'), type: 'select' as const }
+  ]
+  if (!isAffiliateAdmin.value) {
+    filters.unshift({ key: 'role', name: t('admin.users.columns.role'), type: 'select' as const })
+    filters.push({ key: 'apiKeyGroup', name: t('admin.users.apiKeyGroupFilter'), type: 'select' as const })
+  }
+  filters.push({ key: 'group', name: t('admin.users.authorizedGroupFilter'), type: 'select' as const })
+  return filters
+})
 
 // Load saved filters from localStorage
 const loadSavedFilters = () => {
@@ -1347,7 +1378,7 @@ const loadUsersSecondaryData = async (
   signal?: AbortSignal,
   expectedSeq?: number
 ) => {
-  if (userIds.length === 0) return
+  if (isAffiliateAdmin.value || userIds.length === 0) return
 
   const tasks: Promise<void>[] = []
 
@@ -1832,14 +1863,16 @@ const handleScroll = () => {
 }
 
 onMounted(async () => {
-  await loadAttributeDefinitions()
+  if (!isAffiliateAdmin.value) {
+    await loadAttributeDefinitions()
+  }
   loadSavedFilters()
   loadSavedColumns()
   loadUsers()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()
   }
-  if (visibleFilters.has('apiKeyGroup')) {
+  if (!isAffiliateAdmin.value && visibleFilters.has('apiKeyGroup')) {
     loadAllGroupsForApiKeyFilter()
   }
   document.addEventListener('click', handleClickOutside)

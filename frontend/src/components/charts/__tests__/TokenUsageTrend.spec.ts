@@ -185,6 +185,49 @@ describe('TokenUsageTrend', () => {
     )
   })
 
+  it('plots reported-subset coverage when mixed traffic includes reported token buckets', () => {
+    const wrapper = mount(TokenUsageTrend, {
+      props: {
+        trendData: [
+          {
+            date: '2026-05-08',
+            requests: 4,
+            reported_requests: 1,
+            estimated_requests: 1,
+            unavailable_requests: 2,
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 100,
+            cache_read_tokens: 800,
+            provider_cache_read_tokens: 200,
+            forced_cache_read_tokens: 600,
+            reported_input_tokens: 100,
+            reported_cache_creation_tokens: 0,
+            reported_forced_cache_read_tokens: 300,
+            total_tokens: 1050,
+            cost: 0.02,
+            actual_cost: 0.01
+          }
+        ]
+      },
+      global: {
+        stubs: {
+          LoadingSpinner: true
+        }
+      }
+    })
+
+    const chartData = JSON.parse(wrapper.find('.chart-data').text())
+    const coverageDataset = chartData.datasets.find(
+      (ds: { label: string }) => ds.label === '缓存读取覆盖率'
+    )
+    // 200 / (100 + 300 + 0 + 200) = 33.3%
+    expect(coverageDataset.data[0]).toBeCloseTo(33.333, 2)
+    expect(wrapper.get('[data-testid="cache-observability-summary"]').text()).toContain(
+      '1/4 (25.0%)'
+    )
+  })
+
   it('falls back to cache reads minus forced adjustments when provider reads are absent', () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {

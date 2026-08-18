@@ -174,6 +174,10 @@ func (s *stubAdminService) GetUserIncludeDeleted(ctx context.Context, id int64) 
 	return s.GetUser(ctx, id)
 }
 
+func (s *stubAdminService) UserIsManagedBy(context.Context, int64, int64) (bool, error) {
+	return true, nil
+}
+
 func (s *stubAdminService) CreateUser(ctx context.Context, input *service.CreateUserInput) (*service.User, error) {
 	user := service.User{ID: 100, Email: input.Email, Status: service.StatusActive}
 	return &user, nil

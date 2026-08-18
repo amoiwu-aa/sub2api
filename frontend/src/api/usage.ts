@@ -42,6 +42,9 @@ export interface UserDashboardStats {
   total_provider_cache_read_tokens?: number
   total_cache_hit_requests?: number
   total_forced_cache_read_tokens?: number
+  total_reported_input_tokens?: number
+  total_reported_cache_creation_tokens?: number
+  total_reported_forced_cache_read_tokens?: number
   total_reported_requests?: number
   total_estimated_requests?: number
   total_unavailable_requests?: number
@@ -56,6 +59,9 @@ export interface UserDashboardStats {
   today_provider_cache_read_tokens?: number
   today_cache_hit_requests?: number
   today_forced_cache_read_tokens?: number
+  today_reported_input_tokens?: number
+  today_reported_cache_creation_tokens?: number
+  today_reported_forced_cache_read_tokens?: number
   today_reported_requests?: number
   today_estimated_requests?: number
   today_unavailable_requests?: number

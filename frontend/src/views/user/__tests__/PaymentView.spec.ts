@@ -700,3 +700,55 @@ describe('PaymentView WeChat JSAPI flow', () => {
     expect(window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY)).toContain('weixin://wxpay/bizpayurl?pr=fallback-native')
   })
 })
+
+describe('PaymentView redeem tab', () => {
+  async function mountPurchase(query: Record<string, unknown> = {}) {
+    vi.useRealTimers()
+    routeState.path = '/purchase'
+    routeState.query = query
+    routerReplace.mockReset().mockResolvedValue(undefined)
+    routerPush.mockReset().mockResolvedValue(undefined)
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
+    window.localStorage.clear()
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: {
+            template: '<div><slot /></div>',
+          },
+          RedeemPanel: {
+            template: '<div data-test="redeem-panel" />',
+          },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+    return wrapper
+  }
+
+  it('always includes a redeem tab next to top-up and subscribe', async () => {
+    const wrapper = await mountPurchase()
+    const labels = wrapper.findAll('button').map((button) => button.text())
+    expect(labels).toContain('payment.tabTopUp')
+    expect(labels).toContain('payment.tabSubscribe')
+    expect(labels).toContain('payment.tabRedeem')
+    expect(wrapper.find('[data-test="redeem-panel"]').exists()).toBe(false)
+  })
+
+  it('opens the redeem panel from ?tab=redeem', async () => {
+    const wrapper = await mountPurchase({ tab: 'redeem' })
+    expect(wrapper.find('[data-test="redeem-panel"]').exists()).toBe(true)
+  })
+
+  it('switches to the redeem tab without leaving the page', async () => {
+    const wrapper = await mountPurchase()
+    const redeemTab = wrapper.findAll('button').find((button) => button.text() === 'payment.tabRedeem')
+    expect(redeemTab).toBeTruthy()
+    await redeemTab!.trigger('click')
+    expect(routerReplace).toHaveBeenCalledWith({ path: '/purchase', query: { tab: 'redeem' } })
+  })
+})

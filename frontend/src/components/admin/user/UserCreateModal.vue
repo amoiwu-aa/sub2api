@@ -25,14 +25,15 @@
         <label class="input-label">{{ t('admin.users.username') }}</label>
         <input v-model="form.username" type="text" class="input" :placeholder="t('admin.users.enterUsername')" />
       </div>
-      <div>
+      <div v-if="!isAffiliateAdmin">
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
         <select v-model="form.role" class="input">
           <option value="user">{{ t('admin.users.roles.user') }}</option>
+          <option value="affiliate_admin">{{ t('admin.users.roles.affiliate_admin') }}</option>
           <option value="admin">{{ t('admin.users.roles.admin') }}</option>
         </select>
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div v-if="!isAffiliateAdmin" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label class="input-label">{{ t('admin.users.columns.balance') }}</label>
           <input v-model="form.balance" type="number" step="any" class="input" />
@@ -42,7 +43,25 @@
           <input v-model.number="form.concurrency" type="number" class="input" />
         </div>
       </div>
-      <div>
+      <div v-if="exclusiveGroups.length > 0">
+        <label class="input-label">{{ t('admin.users.exclusiveGroups') }}</label>
+        <div class="mt-2 max-h-48 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+          <label
+            v-for="group in exclusiveGroups"
+            :key="group.id"
+            class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+          >
+            <input
+              type="checkbox"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              :checked="form.allowed_groups.includes(group.id)"
+              @change="toggleAllowedGroup(group.id)"
+            />
+            <span>{{ group.name }}</span>
+          </label>
+        </div>
+      </div>
+      <div v-if="!isAffiliateAdmin">
         <label class="input-label">{{ t('admin.users.form.rpmLimit') }}</label>
         <input
           v-model.number="form.rpm_limit"
@@ -70,9 +89,11 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'; import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import type { AdminGroup } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
@@ -81,8 +102,29 @@ import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const isAffiliateAdmin = computed(() => authStore.isAffiliateAdmin)
 
-const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'admin', balance: '', concurrency: 1, rpm_limit: 0 })
+const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user' as 'user' | 'admin' | 'affiliate_admin', balance: '', concurrency: 1, rpm_limit: 0, allowed_groups: [] as number[] })
+const exclusiveGroups = ref<AdminGroup[]>([])
+
+const toggleAllowedGroup = (groupId: number) => {
+  const idx = form.allowed_groups.indexOf(groupId)
+  if (idx >= 0) {
+    form.allowed_groups.splice(idx, 1)
+  } else {
+    form.allowed_groups.push(groupId)
+  }
+}
+
+const loadExclusiveGroups = async () => {
+  try {
+    const groups = await adminAPI.groups.getAll()
+    exclusiveGroups.value = groups.filter((g) => g.is_exclusive && g.subscription_type === 'standard' && g.status === 'active')
+  } catch {
+    exclusiveGroups.value = []
+  }
+}
 
 const stepUp = useStepUp()
 const loading = ref(false)
@@ -92,13 +134,17 @@ const submit = async () => {
   loading.value = true
   try {
     const { balance: rawBalance, ...rest } = { ...form }
-    const balance = String(rawBalance).trim()
-    const payload: typeof rest & { balance?: number } = { ...rest }
-    if (balance !== '') {
-      payload.balance = Number(balance)
+    const payload: Record<string, unknown> = isAffiliateAdmin.value
+      ? { email: form.email, password: form.password, username: form.username, notes: form.notes, role: 'user', allowed_groups: form.allowed_groups }
+      : { ...rest, allowed_groups: form.allowed_groups }
+    if (!isAffiliateAdmin.value) {
+      const balance = String(rawBalance).trim()
+      if (balance !== '') {
+        payload.balance = Number(balance)
+      }
     }
     // 创建管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
-    await stepUp.run(() => adminAPI.users.create(payload))
+    await stepUp.run(() => adminAPI.users.create(payload as Parameters<typeof adminAPI.users.create>[0]))
     appStore.showSuccess(t('admin.users.userCreated'))
     emit('success'); emit('close')
   } catch (e: any) {
@@ -116,7 +162,12 @@ const submit = async () => {
   } finally { loading.value = false }
 }
 
-watch(() => props.show, (v) => { if(v) Object.assign(form, { email: '', password: '', username: '', notes: '', role: 'user', balance: '', concurrency: 1, rpm_limit: 0 }) })
+watch(() => props.show, (v) => {
+  if (v) {
+    Object.assign(form, { email: '', password: '', username: '', notes: '', role: 'user', balance: '', concurrency: 1, rpm_limit: 0, allowed_groups: [] })
+    void loadExclusiveGroups()
+  }
+})
 
 const generateRandomPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*'

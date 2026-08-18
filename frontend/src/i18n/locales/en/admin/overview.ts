@@ -30,7 +30,7 @@ export default {
       cacheReadCoverage: 'Cache Read Coverage',
       cacheReadCoverageChartTitle: 'Cache Read Coverage',
       cacheReadCoverageTooltip:
-        'Provider cache-read tokens / (uncached input + cache creation + provider cache read). Shown only when every request is provider-reported; this is token coverage, not a request hit rate.',
+        'Provider cache-read tokens / (uncached input + cache creation + provider cache read). Counted only on provider-reported requests; estimated traffic such as Cursor or Grok is excluded. This is token coverage, not a request hit rate.',
       todayPeriod: 'Today',
       totalPeriod: 'All Time',
       currentRange: 'Current Range',
@@ -515,6 +515,7 @@ export default {
       statusFilter: 'Status Filter',
       allStatuses: 'All Status',
       admin: 'Admin',
+      affiliateAdmin: 'Affiliate Admin',
       user: 'User',
       disabled: 'Disabled',
       email: 'Email',
@@ -706,6 +707,7 @@ export default {
       totalRecharged: 'Total Recharged',
       roles: {
         admin: 'Admin',
+        affiliate_admin: 'Affiliate Admin',
         user: 'User'
       },
       // Settings Dropdowns

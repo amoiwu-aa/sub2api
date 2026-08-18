@@ -32,3 +32,16 @@ func TestCacheUsageObservationMigrationAddsPersistenceAndSessionIndex(t *testing
 	require.Contains(t, indexSQL, "on usage_logs (user_id, api_key_id, session_id, created_at)")
 	require.Contains(t, indexSQL, "where session_id is not null")
 }
+
+func TestReportedCacheCoverageTokensMigrationAddsReportedPromptBuckets(t *testing.T) {
+	content, err := FS.ReadFile("224_reported_cache_coverage_tokens.sql")
+	require.NoError(t, err)
+
+	sql := strings.ToLower(string(content))
+	require.Contains(t, sql, "alter table usage_dashboard_hourly")
+	require.Contains(t, sql, "alter table usage_dashboard_daily")
+	require.Contains(t, sql, "reported_input_tokens bigint not null default 0")
+	require.Contains(t, sql, "reported_cache_creation_tokens bigint not null default 0")
+	require.Contains(t, sql, "reported_forced_cache_read_tokens bigint not null default 0")
+	require.Contains(t, sql, "filter (where ul.cache_usage_source = 'reported')")
+}

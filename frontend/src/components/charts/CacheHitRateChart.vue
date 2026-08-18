@@ -101,18 +101,14 @@
           <span
             data-testid="cache-coverage-value"
             class="text-center font-semibold tabular-nums text-gray-900 dark:text-white"
-            :class="
-              metrics.observability.unobservable || metrics.observability.partiallyObservable
-                ? 'max-w-36 text-lg'
-                : 'text-3xl'
-            "
+            :class="metrics.coverageAvailable ? 'text-3xl' : 'max-w-36 text-lg'"
           >
             {{
               metrics.observability.unobservable
                 ? t('admin.dashboard.cacheUnobservable')
-                : metrics.observability.partiallyObservable
-                  ? t('admin.dashboard.cachePartiallyObservable')
-                  : formatPercent(metrics.coverage)
+                : metrics.coverageAvailable
+                  ? formatPercent(metrics.coverage)
+                  : t('admin.dashboard.cachePartiallyObservable')
             }}
           </span>
           <span
@@ -210,7 +206,6 @@ import type { DashboardStats, ModelStat } from '@/types'
 import {
   formatCacheObservability,
   getCacheCoverageMetrics,
-  getCacheObservability,
   type CacheCoverageMetrics
 } from '@/utils/cacheCoverage'
 
@@ -324,56 +319,65 @@ onBeforeUnmount(() => {
 
 const combineModelMetrics = (items: ModelStat[]): CacheCoverageMetrics => {
   let hasObservationFields = false
+  let hasReportedTokenBuckets = false
   const totals = items.reduce(
     (result, item) => {
-      const itemMetrics = getCacheCoverageMetrics(item)
-      const observationFields = [
+      hasObservationFields ||= [
         item.reported_requests,
         item.estimated_requests,
         item.unavailable_requests
-      ]
-      hasObservationFields ||= observationFields.some(
-        (value) => value !== undefined && value !== null
-      )
+      ].some((value) => value !== undefined && value !== null)
+      hasReportedTokenBuckets ||= [
+        item.reported_input_tokens,
+        item.reported_cache_creation_tokens,
+        item.reported_forced_cache_read_tokens
+      ].some((value) => value !== undefined && value !== null)
 
-      result.input += itemMetrics.input
-      result.creation += itemMetrics.creation
-      result.providerRead += itemMetrics.providerRead
-      result.forcedAdjustment += itemMetrics.forcedAdjustment
-      result.reported += itemMetrics.observability.reported
-      result.estimated += itemMetrics.observability.estimated
-      result.unavailable += itemMetrics.observability.unavailable
-      result.requests += item.requests
+      result.input += Number(item.input_tokens) || 0
+      result.creation += Number(item.cache_creation_tokens) || 0
+      result.cacheRead += Number(item.cache_read_tokens) || 0
+      result.providerRead += Number(item.provider_cache_read_tokens) || 0
+      result.forced += Number(item.forced_cache_read_tokens) || 0
+      result.reportedInput += Number(item.reported_input_tokens) || 0
+      result.reportedCreation += Number(item.reported_cache_creation_tokens) || 0
+      result.reportedForced += Number(item.reported_forced_cache_read_tokens) || 0
+      result.reported += Number(item.reported_requests) || 0
+      result.estimated += Number(item.estimated_requests) || 0
+      result.unavailable += Number(item.unavailable_requests) || 0
+      result.requests += Number(item.requests) || 0
       return result
     },
     {
       input: 0,
       creation: 0,
+      cacheRead: 0,
       providerRead: 0,
-      forcedAdjustment: 0,
+      forced: 0,
+      reportedInput: 0,
+      reportedCreation: 0,
+      reportedForced: 0,
       reported: 0,
       estimated: 0,
       unavailable: 0,
       requests: 0
     }
   )
-  const total = totals.input + totals.creation + totals.providerRead
-  const observability = getCacheObservability({
+
+  return getCacheCoverageMetrics({
+    input_tokens: totals.input,
+    cache_creation_tokens: totals.creation,
+    cache_read_tokens: totals.cacheRead,
+    provider_cache_read_tokens:
+      hasObservationFields || totals.providerRead > 0 ? totals.providerRead : undefined,
+    forced_cache_read_tokens: totals.forced,
+    reported_input_tokens: hasReportedTokenBuckets ? totals.reportedInput : undefined,
+    reported_cache_creation_tokens: hasReportedTokenBuckets ? totals.reportedCreation : undefined,
+    reported_forced_cache_read_tokens: hasReportedTokenBuckets ? totals.reportedForced : undefined,
     requests: totals.requests,
     reported_requests: hasObservationFields ? totals.reported : undefined,
     estimated_requests: hasObservationFields ? totals.estimated : undefined,
     unavailable_requests: hasObservationFields ? totals.unavailable : undefined
   })
-
-  return {
-    input: totals.input,
-    creation: totals.creation,
-    providerRead: totals.providerRead,
-    forcedAdjustment: totals.forcedAdjustment,
-    total,
-    coverage: total > 0 ? (totals.providerRead / total) * 100 : 0,
-    observability
-  }
 }
 
 const metrics = computed(() => {
@@ -401,6 +405,15 @@ const metrics = computed(() => {
     forced_cache_read_tokens: isToday
       ? props.stats.today_forced_cache_read_tokens
       : props.stats.total_forced_cache_read_tokens,
+    reported_input_tokens: isToday
+      ? props.stats.today_reported_input_tokens
+      : props.stats.total_reported_input_tokens,
+    reported_cache_creation_tokens: isToday
+      ? props.stats.today_reported_cache_creation_tokens
+      : props.stats.total_reported_cache_creation_tokens,
+    reported_forced_cache_read_tokens: isToday
+      ? props.stats.today_reported_forced_cache_read_tokens
+      : props.stats.total_reported_forced_cache_read_tokens,
     reported_requests: isToday
       ? props.stats.today_reported_requests
       : props.stats.total_reported_requests,

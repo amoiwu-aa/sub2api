@@ -141,6 +141,46 @@ func TestApplyCursorStripeProfileFlagsPastDue(t *testing.T) {
 	require.Equal(t, "pro", usage.CursorPlan)
 }
 
+// 生产 Team Enterprise：teamUsage 只有 onDemand。映射必须落到个人 plan，
+// 否则前端只看得到 Enterprise 徽标，Auto / API 进度条都是空的。
+func TestBuildCursorUsageInfoUsesIndividualPlanWhenTeamHasOnlyOnDemand(t *testing.T) {
+	const enterpriseTeamFixture = `{
+  "billingCycleStart": "2026-08-15T08:36:23.000Z",
+  "billingCycleEnd": "2026-09-15T08:36:23.000Z",
+  "membershipType": "enterprise",
+  "limitType": "team",
+  "isUnlimited": false,
+  "individualUsage": {
+    "plan": {
+      "enabled": true,
+      "used": 2000,
+      "limit": 2000,
+      "remaining": 0,
+      "breakdown": { "included": 2000, "bonus": 51507, "total": 53507 },
+      "autoPercentUsed": 47.58571428571429,
+      "apiPercentUsed": 100,
+      "totalPercentUsed": 59.45222222222222
+    },
+    "onDemand": { "enabled": true, "used": 0, "limit": null, "remaining": null }
+  },
+  "teamUsage": {
+    "onDemand": { "enabled": true, "used": 12105, "limit": null, "remaining": null }
+  }
+}`
+
+	var summary cursor.UsageSummary
+	require.NoError(t, json.Unmarshal([]byte(enterpriseTeamFixture), &summary))
+
+	usage := buildCursorUsageInfo(&summary, time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
+	require.Equal(t, "enterprise", usage.CursorPlan)
+	require.NotNil(t, usage.CursorAutoUsage)
+	require.InDelta(t, 47.586, usage.CursorAutoUsage.Utilization, 0.01)
+	require.NotNil(t, usage.CursorAPIUsage)
+	require.InDelta(t, 100, usage.CursorAPIUsage.Utilization, 0.01)
+	require.InDelta(t, 20, usage.CursorIncludedUsed, 0.001)
+	require.InDelta(t, 20, usage.CursorIncludedLimit, 0.001)
+}
+
 func TestCursorDegradedUsageClassifiesUpstreamErrors(t *testing.T) {
 	unauthorized := cursorDegradedUsage(&cursor.HTTPError{Status: http.StatusUnauthorized, Operation: "usage"})
 	require.NotNil(t, unauthorized)

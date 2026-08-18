@@ -175,6 +175,11 @@ func RpmLimit(v int) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRpmLimit, v))
 }
 
+// CreatedByAdminID applies equality check predicate on the "created_by_admin_id" field. It's identical to CreatedByAdminIDEQ.
+func CreatedByAdminID(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCreatedByAdminID, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldCreatedAt, v))
@@ -1383,6 +1388,56 @@ func RpmLimitLT(v int) predicate.User {
 // RpmLimitLTE applies the LTE predicate on the "rpm_limit" field.
 func RpmLimitLTE(v int) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldRpmLimit, v))
+}
+
+// CreatedByAdminIDEQ applies the EQ predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCreatedByAdminID, v))
+}
+
+// CreatedByAdminIDNEQ applies the NEQ predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldCreatedByAdminID, v))
+}
+
+// CreatedByAdminIDIn applies the In predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldCreatedByAdminID, vs...))
+}
+
+// CreatedByAdminIDNotIn applies the NotIn predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldCreatedByAdminID, vs...))
+}
+
+// CreatedByAdminIDGT applies the GT predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDGT(v int64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldCreatedByAdminID, v))
+}
+
+// CreatedByAdminIDGTE applies the GTE predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDGTE(v int64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldCreatedByAdminID, v))
+}
+
+// CreatedByAdminIDLT applies the LT predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDLT(v int64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldCreatedByAdminID, v))
+}
+
+// CreatedByAdminIDLTE applies the LTE predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDLTE(v int64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldCreatedByAdminID, v))
+}
+
+// CreatedByAdminIDIsNil applies the IsNil predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldCreatedByAdminID))
+}
+
+// CreatedByAdminIDNotNil applies the NotNil predicate on the "created_by_admin_id" field.
+func CreatedByAdminIDNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldCreatedByAdminID))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

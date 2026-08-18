@@ -55,27 +55,33 @@ type DashboardStats struct {
 	TotalOutputTokens            int64   `json:"total_output_tokens"`
 	TotalCacheCreationTokens     int64   `json:"total_cache_creation_tokens"`
 	TotalCacheReadTokens         int64   `json:"total_cache_read_tokens"`
-	TotalProviderCacheReadTokens int64   `json:"total_provider_cache_read_tokens"`
-	TotalCacheHitRequests        int64   `json:"total_cache_hit_requests"`
-	TotalForcedCacheReadTokens   int64   `json:"total_forced_cache_read_tokens"`
-	TotalReportedRequests        int64   `json:"total_reported_requests"`
-	TotalEstimatedRequests       int64   `json:"total_estimated_requests"`
-	TotalUnavailableRequests     int64   `json:"total_unavailable_requests"`
-	TotalTokens                  int64   `json:"total_tokens"`
-	TotalCost                    float64 `json:"total_cost"`         // 累计标准计费
-	TotalActualCost              float64 `json:"total_actual_cost"`  // 累计实际扣除
-	TotalAccountCost             float64 `json:"total_account_cost"` // 累计账号成本
+	TotalProviderCacheReadTokens       int64   `json:"total_provider_cache_read_tokens"`
+	TotalCacheHitRequests              int64   `json:"total_cache_hit_requests"`
+	TotalForcedCacheReadTokens         int64   `json:"total_forced_cache_read_tokens"`
+	TotalReportedInputTokens           int64   `json:"total_reported_input_tokens"`
+	TotalReportedCacheCreationTokens   int64   `json:"total_reported_cache_creation_tokens"`
+	TotalReportedForcedCacheReadTokens int64   `json:"total_reported_forced_cache_read_tokens"`
+	TotalReportedRequests              int64   `json:"total_reported_requests"`
+	TotalEstimatedRequests             int64   `json:"total_estimated_requests"`
+	TotalUnavailableRequests           int64   `json:"total_unavailable_requests"`
+	TotalTokens                        int64   `json:"total_tokens"`
+	TotalCost                          float64 `json:"total_cost"`         // 累计标准计费
+	TotalActualCost                    float64 `json:"total_actual_cost"`  // 累计实际扣除
+	TotalAccountCost                   float64 `json:"total_account_cost"` // 累计账号成本
 
 	// 今日 Token 使用统计
-	TodayRequests                int64   `json:"today_requests"`
-	TodayInputTokens             int64   `json:"today_input_tokens"`
-	TodayOutputTokens            int64   `json:"today_output_tokens"`
-	TodayCacheCreationTokens     int64   `json:"today_cache_creation_tokens"`
-	TodayCacheReadTokens         int64   `json:"today_cache_read_tokens"`
-	TodayProviderCacheReadTokens int64   `json:"today_provider_cache_read_tokens"`
-	TodayCacheHitRequests        int64   `json:"today_cache_hit_requests"`
-	TodayForcedCacheReadTokens   int64   `json:"today_forced_cache_read_tokens"`
-	TodayReportedRequests        int64   `json:"today_reported_requests"`
+	TodayRequests                      int64   `json:"today_requests"`
+	TodayInputTokens                   int64   `json:"today_input_tokens"`
+	TodayOutputTokens                  int64   `json:"today_output_tokens"`
+	TodayCacheCreationTokens           int64   `json:"today_cache_creation_tokens"`
+	TodayCacheReadTokens               int64   `json:"today_cache_read_tokens"`
+	TodayProviderCacheReadTokens       int64   `json:"today_provider_cache_read_tokens"`
+	TodayCacheHitRequests              int64   `json:"today_cache_hit_requests"`
+	TodayForcedCacheReadTokens         int64   `json:"today_forced_cache_read_tokens"`
+	TodayReportedInputTokens           int64   `json:"today_reported_input_tokens"`
+	TodayReportedCacheCreationTokens   int64   `json:"today_reported_cache_creation_tokens"`
+	TodayReportedForcedCacheReadTokens int64   `json:"today_reported_forced_cache_read_tokens"`
+	TodayReportedRequests              int64   `json:"today_reported_requests"`
 	TodayEstimatedRequests       int64   `json:"today_estimated_requests"`
 	TodayUnavailableRequests     int64   `json:"today_unavailable_requests"`
 	TodayTokens                  int64   `json:"today_tokens"`
@@ -99,29 +105,35 @@ type TrendDataPoint struct {
 	OutputTokens            int64   `json:"output_tokens"`
 	CacheCreationTokens     int64   `json:"cache_creation_tokens"`
 	CacheReadTokens         int64   `json:"cache_read_tokens"`
-	ProviderCacheReadTokens int64   `json:"provider_cache_read_tokens"`
-	CacheHitRequests        int64   `json:"cache_hit_requests"`
-	ForcedCacheReadTokens   int64   `json:"forced_cache_read_tokens"`
-	ReportedRequests        int64   `json:"reported_requests"`
-	EstimatedRequests       int64   `json:"estimated_requests"`
-	UnavailableRequests     int64   `json:"unavailable_requests"`
-	TotalTokens             int64   `json:"total_tokens"`
-	Cost                    float64 `json:"cost"`        // 标准计费
-	ActualCost              float64 `json:"actual_cost"` // 实际扣除
+	ProviderCacheReadTokens       int64   `json:"provider_cache_read_tokens"`
+	CacheHitRequests              int64   `json:"cache_hit_requests"`
+	ForcedCacheReadTokens         int64   `json:"forced_cache_read_tokens"`
+	ReportedInputTokens           int64   `json:"reported_input_tokens"`
+	ReportedCacheCreationTokens   int64   `json:"reported_cache_creation_tokens"`
+	ReportedForcedCacheReadTokens int64   `json:"reported_forced_cache_read_tokens"`
+	ReportedRequests              int64   `json:"reported_requests"`
+	EstimatedRequests             int64   `json:"estimated_requests"`
+	UnavailableRequests           int64   `json:"unavailable_requests"`
+	TotalTokens                   int64   `json:"total_tokens"`
+	Cost                          float64 `json:"cost"`        // 标准计费
+	ActualCost                    float64 `json:"actual_cost"` // 实际扣除
 }
 
 // ModelStat represents usage statistics for a single model
 type ModelStat struct {
-	Model                   string  `json:"model"`
-	Requests                int64   `json:"requests"`
-	InputTokens             int64   `json:"input_tokens"`
-	OutputTokens            int64   `json:"output_tokens"`
-	CacheCreationTokens     int64   `json:"cache_creation_tokens"`
-	CacheReadTokens         int64   `json:"cache_read_tokens"`
-	ProviderCacheReadTokens int64   `json:"provider_cache_read_tokens"`
-	CacheHitRequests        int64   `json:"cache_hit_requests"`
-	ForcedCacheReadTokens   int64   `json:"forced_cache_read_tokens"`
-	ReportedRequests        int64   `json:"reported_requests"`
+	Model                         string  `json:"model"`
+	Requests                      int64   `json:"requests"`
+	InputTokens                   int64   `json:"input_tokens"`
+	OutputTokens                  int64   `json:"output_tokens"`
+	CacheCreationTokens           int64   `json:"cache_creation_tokens"`
+	CacheReadTokens               int64   `json:"cache_read_tokens"`
+	ProviderCacheReadTokens       int64   `json:"provider_cache_read_tokens"`
+	CacheHitRequests              int64   `json:"cache_hit_requests"`
+	ForcedCacheReadTokens         int64   `json:"forced_cache_read_tokens"`
+	ReportedInputTokens           int64   `json:"reported_input_tokens"`
+	ReportedCacheCreationTokens   int64   `json:"reported_cache_creation_tokens"`
+	ReportedForcedCacheReadTokens int64   `json:"reported_forced_cache_read_tokens"`
+	ReportedRequests              int64   `json:"reported_requests"`
 	EstimatedRequests       int64   `json:"estimated_requests"`
 	UnavailableRequests     int64   `json:"unavailable_requests"`
 	TotalTokens             int64   `json:"total_tokens"`
@@ -254,26 +266,32 @@ type UserDashboardStats struct {
 	TotalOutputTokens            int64   `json:"total_output_tokens"`
 	TotalCacheCreationTokens     int64   `json:"total_cache_creation_tokens"`
 	TotalCacheReadTokens         int64   `json:"total_cache_read_tokens"`
-	TotalProviderCacheReadTokens int64   `json:"total_provider_cache_read_tokens"`
-	TotalCacheHitRequests        int64   `json:"total_cache_hit_requests"`
-	TotalForcedCacheReadTokens   int64   `json:"total_forced_cache_read_tokens"`
-	TotalReportedRequests        int64   `json:"total_reported_requests"`
-	TotalEstimatedRequests       int64   `json:"total_estimated_requests"`
-	TotalUnavailableRequests     int64   `json:"total_unavailable_requests"`
-	TotalTokens                  int64   `json:"total_tokens"`
-	TotalCost                    float64 `json:"total_cost"`        // 累计标准计费
-	TotalActualCost              float64 `json:"total_actual_cost"` // 累计实际扣除
+	TotalProviderCacheReadTokens       int64   `json:"total_provider_cache_read_tokens"`
+	TotalCacheHitRequests              int64   `json:"total_cache_hit_requests"`
+	TotalForcedCacheReadTokens         int64   `json:"total_forced_cache_read_tokens"`
+	TotalReportedInputTokens           int64   `json:"total_reported_input_tokens"`
+	TotalReportedCacheCreationTokens   int64   `json:"total_reported_cache_creation_tokens"`
+	TotalReportedForcedCacheReadTokens int64   `json:"total_reported_forced_cache_read_tokens"`
+	TotalReportedRequests              int64   `json:"total_reported_requests"`
+	TotalEstimatedRequests             int64   `json:"total_estimated_requests"`
+	TotalUnavailableRequests           int64   `json:"total_unavailable_requests"`
+	TotalTokens                        int64   `json:"total_tokens"`
+	TotalCost                          float64 `json:"total_cost"`        // 累计标准计费
+	TotalActualCost                    float64 `json:"total_actual_cost"` // 累计实际扣除
 
 	// 今日 Token 使用统计
-	TodayRequests                int64   `json:"today_requests"`
-	TodayInputTokens             int64   `json:"today_input_tokens"`
-	TodayOutputTokens            int64   `json:"today_output_tokens"`
-	TodayCacheCreationTokens     int64   `json:"today_cache_creation_tokens"`
-	TodayCacheReadTokens         int64   `json:"today_cache_read_tokens"`
-	TodayProviderCacheReadTokens int64   `json:"today_provider_cache_read_tokens"`
-	TodayCacheHitRequests        int64   `json:"today_cache_hit_requests"`
-	TodayForcedCacheReadTokens   int64   `json:"today_forced_cache_read_tokens"`
-	TodayReportedRequests        int64   `json:"today_reported_requests"`
+	TodayRequests                      int64   `json:"today_requests"`
+	TodayInputTokens                   int64   `json:"today_input_tokens"`
+	TodayOutputTokens                  int64   `json:"today_output_tokens"`
+	TodayCacheCreationTokens           int64   `json:"today_cache_creation_tokens"`
+	TodayCacheReadTokens               int64   `json:"today_cache_read_tokens"`
+	TodayProviderCacheReadTokens       int64   `json:"today_provider_cache_read_tokens"`
+	TodayCacheHitRequests              int64   `json:"today_cache_hit_requests"`
+	TodayForcedCacheReadTokens         int64   `json:"today_forced_cache_read_tokens"`
+	TodayReportedInputTokens           int64   `json:"today_reported_input_tokens"`
+	TodayReportedCacheCreationTokens   int64   `json:"today_reported_cache_creation_tokens"`
+	TodayReportedForcedCacheReadTokens int64   `json:"today_reported_forced_cache_read_tokens"`
+	TodayReportedRequests              int64   `json:"today_reported_requests"`
 	TodayEstimatedRequests       int64   `json:"today_estimated_requests"`
 	TodayUnavailableRequests     int64   `json:"today_unavailable_requests"`
 	TodayTokens                  int64   `json:"today_tokens"`

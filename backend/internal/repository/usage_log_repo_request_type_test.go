@@ -432,8 +432,8 @@ func TestUsageLogRepositoryGetUsageTrendWithFiltersRequestTypePriority(t *testin
 
 	mock.ExpectQuery("AND \\(request_type = \\$3 OR \\(request_type = 0 AND stream = TRUE AND openai_ws_mode = FALSE\\)\\)").
 		WithArgs(start, end, requestType).
-		WillReturnRows(sqlmock.NewRows([]string{"date", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens", "cache_hit_requests", "forced_cache_read_tokens", "reported_requests", "estimated_requests", "unavailable_requests", "total_tokens", "cost", "actual_cost"}).
-			AddRow("2025-01-01", int64(2), int64(10), int64(5), int64(0), int64(4), int64(3), int64(1), int64(1), int64(1), int64(1), int64(0), int64(19), 0.1, 0.08))
+		WillReturnRows(sqlmock.NewRows([]string{"date", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens", "cache_hit_requests", "forced_cache_read_tokens", "reported_input_tokens", "reported_cache_creation_tokens", "reported_forced_cache_read_tokens", "reported_requests", "estimated_requests", "unavailable_requests", "total_tokens", "cost", "actual_cost"}).
+			AddRow("2025-01-01", int64(2), int64(10), int64(5), int64(0), int64(4), int64(3), int64(1), int64(1), int64(0), int64(0), int64(0), int64(1), int64(1), int64(0), int64(19), 0.1, 0.08))
 
 	trend, err := repo.GetUsageTrendWithFilters(context.Background(), start, end, "day", 0, 0, 0, 0, "", &requestType, &stream, nil)
 	require.NoError(t, err)
@@ -458,7 +458,7 @@ func TestUsageLogRepositoryGetUsageTrendWithUsageFiltersRequestedModelSource(t *
 
 	mock.ExpectQuery("AND COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) = \\$3").
 		WithArgs(start, end, "gpt-5").
-		WillReturnRows(sqlmock.NewRows([]string{"date", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens", "cache_hit_requests", "forced_cache_read_tokens", "reported_requests", "estimated_requests", "unavailable_requests", "total_tokens", "cost", "actual_cost"}))
+		WillReturnRows(sqlmock.NewRows([]string{"date", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens", "cache_hit_requests", "forced_cache_read_tokens", "reported_input_tokens", "reported_cache_creation_tokens", "reported_forced_cache_read_tokens", "reported_requests", "estimated_requests", "unavailable_requests", "total_tokens", "cost", "actual_cost"}))
 
 	trend, err := repo.GetUsageTrendWithUsageFilters(context.Background(), start, end, "day", filters)
 	require.NoError(t, err)
@@ -477,7 +477,7 @@ func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testin
 
 	mock.ExpectQuery("AND \\(request_type = \\$3 OR \\(request_type = 0 AND openai_ws_mode = TRUE\\)\\)").
 		WithArgs(start, end, requestType).
-		WillReturnRows(sqlmock.NewRows([]string{"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens", "cache_hit_requests", "forced_cache_read_tokens", "reported_requests", "estimated_requests", "unavailable_requests", "total_tokens", "cost", "actual_cost", "account_cost"}))
+		WillReturnRows(sqlmock.NewRows([]string{"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens", "cache_hit_requests", "forced_cache_read_tokens", "reported_input_tokens", "reported_cache_creation_tokens", "reported_forced_cache_read_tokens", "reported_requests", "estimated_requests", "unavailable_requests", "total_tokens", "cost", "actual_cost", "account_cost"}))
 
 	stats, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, &requestType, &stream, nil)
 	require.NoError(t, err)
@@ -497,10 +497,12 @@ func TestUsageLogRepositoryGetUserModelStatsUsesRequestedModel(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"model", "requests", "input_tokens", "output_tokens",
 			"cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens",
-			"cache_hit_requests", "forced_cache_read_tokens", "reported_requests",
+			"cache_hit_requests", "forced_cache_read_tokens",
+			"reported_input_tokens", "reported_cache_creation_tokens", "reported_forced_cache_read_tokens",
+			"reported_requests",
 			"estimated_requests", "unavailable_requests", "total_tokens",
 			"cost", "actual_cost", "account_cost",
-		}).AddRow("gpt-5.5", int64(2), int64(10), int64(20), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(2), int64(30), 0.1, 0.08, 0.07))
+		}).AddRow("gpt-5.5", int64(2), int64(10), int64(20), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(2), int64(30), 0.1, 0.08, 0.07))
 
 	stats, err := repo.GetUserModelStats(context.Background(), 7, start, end)
 	require.NoError(t, err)
@@ -616,12 +618,14 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"model", "requests", "input_tokens", "output_tokens",
 			"cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens",
-			"cache_hit_requests", "forced_cache_read_tokens", "reported_requests",
+			"cache_hit_requests", "forced_cache_read_tokens",
+			"reported_input_tokens", "reported_cache_creation_tokens", "reported_forced_cache_read_tokens",
+			"reported_requests",
 			"estimated_requests", "unavailable_requests", "total_tokens",
 			"cost", "actual_cost", "account_cost",
 		}).
-			AddRow("claude-opus-4-6", int64(10), int64(100), int64(200), int64(5), int64(3), int64(3), int64(1), int64(0), int64(10), int64(0), int64(0), int64(308), 2.5, 2.0, 1.8).
-			AddRow("claude-sonnet-4-6", int64(5), int64(50), int64(100), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(5), int64(150), 1.0, 0.8, 0.7))
+			AddRow("claude-opus-4-6", int64(10), int64(100), int64(200), int64(5), int64(3), int64(3), int64(1), int64(0), int64(0), int64(0), int64(0), int64(10), int64(0), int64(0), int64(308), 2.5, 2.0, 1.8).
+			AddRow("claude-sonnet-4-6", int64(5), int64(50), int64(100), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(5), int64(150), 1.0, 0.8, 0.7))
 
 	results, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, nil, nil, nil)
 	require.NoError(t, err)
@@ -651,10 +655,12 @@ func TestUsageLogRepositoryGetModelStatsWithUsageFiltersAppliesRequestedModelFil
 		WillReturnRows(sqlmock.NewRows([]string{
 			"model", "requests", "input_tokens", "output_tokens",
 			"cache_creation_tokens", "cache_read_tokens", "provider_cache_read_tokens",
-			"cache_hit_requests", "forced_cache_read_tokens", "reported_requests",
+			"cache_hit_requests", "forced_cache_read_tokens",
+			"reported_input_tokens", "reported_cache_creation_tokens", "reported_forced_cache_read_tokens",
+			"reported_requests",
 			"estimated_requests", "unavailable_requests", "total_tokens",
 			"cost", "actual_cost", "account_cost",
-		}).AddRow("gpt-5", int64(1), int64(10), int64(20), int64(0), int64(0), int64(0), int64(0), int64(0), int64(1), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07))
+		}).AddRow("gpt-5", int64(1), int64(10), int64(20), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), int64(1), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07))
 
 	results, err := repo.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, filters, usagestats.ModelSourceRequested)
 	require.NoError(t, err)

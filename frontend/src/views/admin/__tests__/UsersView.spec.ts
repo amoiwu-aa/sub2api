@@ -9,13 +9,23 @@ const {
   getAllGroups,
   getBatchUsersUsage,
   listEnabledDefinitions,
-  getBatchUserAttributes
+  getBatchUserAttributes,
+  authState
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn()
+  getBatchUserAttributes: vi.fn(),
+  authState: {
+    isAdmin: true,
+    isAffiliateAdmin: false,
+    canAccessAdminPanel: true
+  }
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -123,6 +133,9 @@ describe('admin UsersView', () => {
   beforeEach(() => {
     vi.useRealTimers()
     localStorage.clear()
+    authState.isAdmin = true
+    authState.isAffiliateAdmin = false
+    authState.canAccessAdminPanel = true
 
     listUsers.mockReset()
     getAllGroups.mockReset()
@@ -368,5 +381,53 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('refreshed-page-two@example.com')
     expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
+  })
+
+  it('hides privileged columns and bulk actions for affiliate admins', async () => {
+    authState.isAdmin = false
+    authState.isAffiliateAdmin = true
+    authState.canAccessAdminPanel = true
+
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          EmptyState: true,
+          GroupBadge: true,
+          Select: true,
+          UserAttributesConfigModal: true,
+          UserConcurrencyCell: true,
+          UserCreateModal: true,
+          UserEditModal: true,
+          BulkEditUserModal: BulkEditUserModalStub,
+          UserPlatformQuotaModal: true,
+          UserApiKeysModal: true,
+          UserAllowedGroupsModal: true,
+          UserBalanceModal: true,
+          UserBalanceHistoryModal: true,
+          GroupReplaceModal: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const columns = wrapper.get('[data-test="columns"]').text()
+    expect(columns).not.toContain('balance')
+    expect(columns).not.toContain('concurrency')
+    expect(columns).not.toContain('usage')
+    expect(columns).not.toContain('role')
+    expect(columns).toContain('groups')
+    expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
+    expect(listEnabledDefinitions).not.toHaveBeenCalled()
+    expect(getAllGroups).toHaveBeenCalled()
   })
 })

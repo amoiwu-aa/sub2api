@@ -63,6 +63,8 @@ const (
 	FieldTotalRecharged = "total_recharged"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
+	// FieldCreatedByAdminID holds the string denoting the created_by_admin_id field in the database.
+	FieldCreatedByAdminID = "created_by_admin_id"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -218,6 +220,7 @@ var Columns = []string{
 	FieldBalanceNotifyExtraEmails,
 	FieldTotalRecharged,
 	FieldRpmLimit,
+	FieldCreatedByAdminID,
 }
 
 var (
@@ -418,6 +421,11 @@ func ByTotalRecharged(opts ...sql.OrderTermOption) OrderOption {
 // ByRpmLimit orders the results by the rpm_limit field.
 func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRpmLimit, opts...).ToFunc()
+}
+
+// ByCreatedByAdminID orders the results by the created_by_admin_id field.
+func ByCreatedByAdminID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCreatedByAdminID, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

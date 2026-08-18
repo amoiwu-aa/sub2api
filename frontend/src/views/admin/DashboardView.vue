@@ -47,7 +47,7 @@
               <span class="dash-hero__foot">
                 {{ t('admin.dashboard.providerCacheReadShort') }}
                 {{ formatTokens(todayCacheMetrics.providerRead) }}
-                · {{ t('admin.dashboard.cacheCreateShort') }} {{ formatTokens(stats.today_cache_creation_tokens) }}
+                · {{ t('admin.dashboard.cacheCreateShort') }} {{ formatTokens(todayCacheMetrics.creation) }}
               </span>
               <span
                 v-if="todayCacheMetrics.observability.available"
@@ -148,7 +148,7 @@
             <span class="dash-inventory__meta">
               {{ t('admin.dashboard.providerCacheReadShort') }}
               {{ formatTokens(totalCacheMetrics.providerRead) }}
-              · {{ t('admin.dashboard.cacheCreateShort') }} {{ formatTokens(stats.total_cache_creation_tokens) }}
+              · {{ t('admin.dashboard.cacheCreateShort') }} {{ formatTokens(totalCacheMetrics.creation) }}
             </span>
             <span
               v-if="totalCacheMetrics.observability.available"
@@ -365,6 +365,15 @@ const getDashboardCacheMetrics = (
     forced_cache_read_tokens: isToday
       ? dashboardStats.today_forced_cache_read_tokens
       : dashboardStats.total_forced_cache_read_tokens,
+    reported_input_tokens: isToday
+      ? dashboardStats.today_reported_input_tokens
+      : dashboardStats.total_reported_input_tokens,
+    reported_cache_creation_tokens: isToday
+      ? dashboardStats.today_reported_cache_creation_tokens
+      : dashboardStats.total_reported_cache_creation_tokens,
+    reported_forced_cache_read_tokens: isToday
+      ? dashboardStats.today_reported_forced_cache_read_tokens
+      : dashboardStats.total_reported_forced_cache_read_tokens,
     reported_requests: isToday
       ? dashboardStats.today_reported_requests
       : dashboardStats.total_reported_requests,
@@ -565,9 +574,9 @@ const formatNumber = (value: number | null | undefined): string => {
 const formatCacheCoverage = (metrics: CacheCoverageMetrics): string =>
   metrics.observability.unobservable
     ? t('admin.dashboard.cacheUnobservable')
-    : metrics.observability.partiallyObservable
-      ? t('admin.dashboard.cachePartiallyObservable')
-      : `${metrics.coverage.toFixed(1)}%`
+    : metrics.coverageAvailable
+      ? `${metrics.coverage.toFixed(1)}%`
+      : t('admin.dashboard.cachePartiallyObservable')
 
 const formatCost = (value: number | null | undefined): string => {
   const safeValue = toFiniteNumber(value)

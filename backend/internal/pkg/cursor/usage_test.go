@@ -83,6 +83,23 @@ func TestUsageSummaryScopePrefersTeamPool(t *testing.T) {
 	require.Equal(t, team, member.Scope().Plan)
 }
 
+// 生产 Team Enterprise（SELF_SERVE）的真实形态：团队侧只有 onDemand，
+// 座位额度在 individualUsage.plan。不能因为 team onDemand 存在就丢掉个人 plan。
+func TestUsageSummaryScopeKeepsIndividualPlanWhenTeamHasOnlyOnDemand(t *testing.T) {
+	individual := &PlanUsage{UsedCents: 2000, AutoPercentUsed: 47.58, APIPercentUsed: 100}
+	summary := &UsageSummary{
+		MembershipType:  "enterprise",
+		LimitType:       "team",
+		IndividualUsage: UsageScope{Plan: individual, OnDemand: &OnDemandUsage{Enabled: true}},
+		TeamUsage:       UsageScope{OnDemand: &OnDemandUsage{Enabled: true, UsedCents: 12105}},
+	}
+
+	scope := summary.Scope()
+	require.Equal(t, individual, scope.Plan)
+	require.NotNil(t, scope.OnDemand)
+	require.Zero(t, scope.OnDemand.UsedCents)
+}
+
 func TestStripeProfileHealthy(t *testing.T) {
 	require.True(t, (*StripeProfile)(nil).Healthy())
 	require.True(t, (&StripeProfile{SubscriptionStatus: "active"}).Healthy())

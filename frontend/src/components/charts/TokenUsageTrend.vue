@@ -182,9 +182,7 @@ const chartData = computed(() => {
       {
         label: t('admin.dashboard.cacheReadCoverage'),
         data: trendMetrics.value.map((metrics) =>
-          metrics.observability.unobservable || metrics.observability.partiallyObservable
-            ? null
-            : metrics.coverage
+          metrics.coverageAvailable ? metrics.coverage : null
         ),
         borderColor: chartColors.value.cacheCoverage,
         backgroundColor: `${chartColors.value.cacheCoverage}20`,

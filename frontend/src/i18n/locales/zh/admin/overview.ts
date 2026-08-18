@@ -34,7 +34,7 @@ export default {
       cacheReadCoverage: '缓存读取覆盖率',
       cacheReadCoverageChartTitle: '缓存读取覆盖率统计',
       cacheReadCoverageTooltip:
-        '上游缓存读取 Token /（普通输入 + 缓存创建 + 上游缓存读取）。仅全部请求均由上游上报时显示；这是 Token 覆盖率，不是请求命中率。',
+        '上游缓存读取 Token /（普通输入 + 缓存创建 + 上游缓存读取）。只统计上游已上报缓存用量的请求；Cursor、Grok 等估算流量不计入。这是 Token 覆盖率，不是请求命中率。',
       todayPeriod: '今日',
       totalPeriod: '累计',
       currentRange: '当前范围',
@@ -515,6 +515,7 @@ export default {
       statusFilter: '状态筛选',
       allStatuses: '全部状态',
       admin: '管理员',
+      affiliateAdmin: '分销管理员',
       user: '用户',
       disabled: '禁用',
       email: '邮箱',
@@ -595,6 +596,7 @@ export default {
       deleteConfirm: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       roles: {
         admin: '管理员',
+        affiliate_admin: '分销管理员',
         user: '用户'
       },
       form: {

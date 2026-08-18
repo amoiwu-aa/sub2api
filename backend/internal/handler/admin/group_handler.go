@@ -417,6 +417,10 @@ func parsePositiveIDParam(c *gin.Context, name string) (int64, bool) {
 func (h *GroupHandler) GetAll(c *gin.Context) {
 	platform := c.Query("platform")
 	includeInactive := c.Query("include_inactive") == "true"
+	affiliateActor := isAffiliateAdminActor(c)
+	if affiliateActor {
+		includeInactive = false
+	}
 
 	var groups []service.Group
 	var err error
@@ -431,6 +435,17 @@ func (h *GroupHandler) GetAll(c *gin.Context) {
 
 	if err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+
+	if affiliateActor {
+		outGroups := make([]dto.Group, 0, len(groups))
+		for i := range groups {
+			if g := dto.GroupFromServiceShallow(&groups[i]); g != nil {
+				outGroups = append(outGroups, *g)
+			}
+		}
+		response.Success(c, outGroups)
 		return
 	}
 

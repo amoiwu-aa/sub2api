@@ -68,26 +68,22 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		return nil
 	}
 
-	// 统一使用 ent 的事务：保证用户与允许分组的更新原子化，
-	// 并避免基于 *sql.Tx 手动构造 ent client 导致的 ExecQuerier 断言错误。
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-
+	// 复用 context 中已有的 ent 事务；仅在没有外部事务时自行开启。
+	// 这保证 CreateManagedUser 能把用户行与邀请归属放进同一事务。
+	var tx *dbent.Tx
 	var txClient *dbent.Client
 	txCtx := ctx
-	if err == nil {
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		txClient = existingTx.Client()
+	} else {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil {
+			return err
+		}
 		defer func() { _ = tx.Rollback() }()
 		txClient = tx.Client()
 		txCtx = dbent.NewTxContext(ctx, tx)
-	} else {
-		// 已处于外部事务中（ErrTxStarted），复用当前事务 client 并由调用方负责提交/回滚。
-		if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-			txClient = existingTx.Client()
-		} else {
-			txClient = r.client
-		}
 	}
 
 	lockKeys := []string{normalizedEmailUniquenessLockKey(userIn.Email)}
@@ -146,6 +142,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetNillableLastLoginAt(userIn.LastLoginAt).
 		SetNillableLastActiveAt(userIn.LastActiveAt).
 		SetRpmLimit(userIn.RPMLimit).
+		SetNillableCreatedByAdminID(userIn.CreatedByAdminID).
 		Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
@@ -520,6 +517,17 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	}
 
 	q := r.client.User.Query()
+
+	if filters.ManagedByAdminID > 0 {
+		managedIDs, managedErr := r.listManagedUserIDs(ctx, filters.ManagedByAdminID, filters.IncludeDeleted)
+		if managedErr != nil {
+			return nil, nil, managedErr
+		}
+		if len(managedIDs) == 0 {
+			return []service.User{}, paginationResultFromTotal(0, params), nil
+		}
+		q = q.Where(dbuser.IDIn(managedIDs...))
+	}
 
 	if filters.Status != "" {
 		q = q.Where(dbuser.StatusEQ(filters.Status))
@@ -1459,6 +1467,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 	dst.LastActiveAt = src.LastActiveAt
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
+	dst.CreatedByAdminID = src.CreatedByAdminID
 }
 
 func userSignupSourceOrDefault(signupSource string) string {

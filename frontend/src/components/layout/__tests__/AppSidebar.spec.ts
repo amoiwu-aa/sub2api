@@ -53,3 +53,23 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar user billing nav', () => {
+  it('folds redeem into purchase when payment is enabled', () => {
+    expect(componentSource).toContain("path: '/purchase'")
+    expect(componentSource).toContain('flagPaymentDisabled')
+    expect(componentSource).toMatch(/path: '\/redeem'[\s\S]*featureFlag: flagPaymentDisabled/)
+  })
+})
+
+describe('AppSidebar affiliate admin', () => {
+  it('gates the admin menu on canAccessAdminPanel', () => {
+    expect(componentSource).toContain('v-if="canAccessAdminPanel"')
+    expect(componentSource).toContain('authStore.isAffiliateAdmin')
+  })
+
+  it('only lists users for affiliate admins', () => {
+    expect(componentSource).toContain('if (isAffiliateAdmin.value)')
+    expect(componentSource).toContain("path: '/admin/users'")
+  })
+})

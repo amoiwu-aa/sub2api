@@ -502,6 +502,7 @@ import GalaxyBackground from '@/components/common/GalaxyBackground.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { sanitizeUrl } from '@/utils/url'
+import { resolvePanelHomePath } from '@/utils/adminAccess'
 
 const { t } = useI18n()
 
@@ -527,7 +528,7 @@ const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
 const isAdmin = computed(() => authStore.isAdmin)
-const dashboardPath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
+const dashboardPath = computed(() => resolvePanelHomePath(isAdmin.value, authStore.isAffiliateAdmin))
 const userInitial = computed(() => {
   const user = authStore.user
   if (!user || !user.email) return ''

@@ -63,7 +63,7 @@ type CreateUserRequest struct {
 	Password      string   `json:"password" binding:"required,min=6"`
 	Username      string   `json:"username"`
 	Notes         string   `json:"notes"`
-	Role          string   `json:"role" binding:"omitempty,oneof=admin user"`
+	Role          string   `json:"role" binding:"omitempty,oneof=admin user affiliate_admin"`
 	Balance       *float64 `json:"balance"`
 	Concurrency   int      `json:"concurrency"`
 	RPMLimit      int      `json:"rpm_limit"`
@@ -77,7 +77,7 @@ type UpdateUserRequest struct {
 	Password      string   `json:"password" binding:"omitempty,min=6"`
 	Username      *string  `json:"username"`
 	Notes         *string  `json:"notes"`
-	Role          string   `json:"role" binding:"omitempty,oneof=admin user"`
+	Role          string   `json:"role" binding:"omitempty,oneof=admin user affiliate_admin"`
 	Balance       *float64 `json:"balance"`
 	Concurrency   *int     `json:"concurrency"`
 	RPMLimit      *int     `json:"rpm_limit"`
@@ -148,10 +148,31 @@ func (h *UserHandler) List(c *gin.Context) {
 		includeSubscriptions := parseBoolQueryWithDefault(raw, true)
 		filters.IncludeSubscriptions = &includeSubscriptions
 	}
+	if isAffiliateAdminActor(c) {
+		filters.ManagedByAdminID = getAdminIDFromContext(c)
+		filters.Role = service.RoleUser
+		filters.APIKeyGroupID = 0
+		filters.Attributes = nil
+		includeSubscriptions := false
+		filters.IncludeSubscriptions = &includeSubscriptions
+		if !isAffiliateAdminSafeUserSort(sortBy) {
+			sortBy = "created_at"
+			sortOrder = "desc"
+		}
+	}
 
 	users, total, err := h.adminService.ListUsers(c.Request.Context(), page, pageSize, filters, sortBy, sortOrder)
 	if err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+
+	if isAffiliateAdminActor(c) {
+		out := make([]dto.AffiliateAdminUser, len(users))
+		for i := range users {
+			out[i] = *dto.UserFromServiceAffiliateAdmin(&users[i])
+		}
+		response.Paginated(c, out, total, page, pageSize)
 		return
 	}
 
@@ -213,6 +234,9 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 		response.BadRequest(c, "Invalid user ID")
 		return
 	}
+	if !h.allowManagedUser(c, userID) {
+		return
+	}
 
 	var user *service.User
 	if c.Query("include_deleted") == "true" {
@@ -225,7 +249,7 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, userResponseForActor(c, user))
 }
 
 // BindAuthIdentity manually binds a canonical auth identity to a user.
@@ -276,6 +300,14 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
+	actorRole := actorRoleFromContext(c)
+	if actorRole == service.RoleAffiliateAdmin {
+		req.Role = service.RoleUser
+		req.Balance = nil
+		req.Concurrency = 0
+		req.RPMLimit = 0
+	}
+
 	// 创建管理员账号属权限敏感操作：需最近完成 step-up 2FA 验证。
 	if req.Role == service.RoleAdmin {
 		if !middleware.EnforceStepUp(c, h.totpService, h.userService, h.settingService) {
@@ -294,13 +326,14 @@ func (h *UserHandler) Create(c *gin.Context) {
 		RPMLimit:      req.RPMLimit,
 		AllowedGroups: req.AllowedGroups,
 		ActorAdminID:  getAdminIDFromContext(c),
+		ActorRole:     actorRole,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, userResponseForActor(c, user))
 }
 
 // Update handles updating a user
@@ -311,6 +344,9 @@ func (h *UserHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "Invalid user ID")
 		return
 	}
+	if !h.allowManagedUser(c, userID) {
+		return
+	}
 
 	var req UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -318,9 +354,8 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// 防锁死保护：管理员不能把自己降级为普通用户(单管理员场景下会失去后台访问权)。
-	// 与既有"不能禁用/删除 admin"保护一致。降级其他管理员仍然允许。
-	if req.Role == service.RoleUser && userID == getAdminIDFromContext(c) {
+	// 防锁死保护：总管理员不能把自己改成非 admin（普通用户或分销管理员）。
+	if (req.Role == service.RoleUser || req.Role == service.RoleAffiliateAdmin) && userID == getAdminIDFromContext(c) {
 		response.BadRequest(c, "cannot demote yourself from admin")
 		return
 	}
@@ -354,13 +389,14 @@ func (h *UserHandler) Update(c *gin.Context) {
 		AllowedGroups: req.AllowedGroups,
 		GroupRates:    req.GroupRates,
 		ActorAdminID:  getAdminIDFromContext(c),
+		ActorRole:     actorRoleFromContext(c),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	response.Success(c, userResponseForActor(c, user))
 }
 
 // Delete handles deleting a user
@@ -369,6 +405,9 @@ func (h *UserHandler) Delete(c *gin.Context) {
 	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	if !h.allowManagedUser(c, userID) {
 		return
 	}
 
@@ -965,4 +1004,45 @@ func (h *UserHandler) ResetUserPlatformQuotaWindow(c *gin.Context) {
 		out = append(out, quotaview.LazyZeroQuotaForResponse(records[i], now, true))
 	}
 	response.Success(c, map[string]any{"platform_quotas": out})
+}
+
+func actorRoleFromContext(c *gin.Context) string {
+	role, _ := middleware.GetUserRoleFromContext(c)
+	return role
+}
+
+func isAffiliateAdminActor(c *gin.Context) bool {
+	return actorRoleFromContext(c) == service.RoleAffiliateAdmin
+}
+
+func userResponseForActor(c *gin.Context, user *service.User) any {
+	if isAffiliateAdminActor(c) {
+		return dto.UserFromServiceAffiliateAdmin(user)
+	}
+	return dto.UserFromServiceAdmin(user)
+}
+
+func isAffiliateAdminSafeUserSort(sortBy string) bool {
+	switch sortBy {
+	case "email", "id", "username", "status", "last_used_at", "last_active_at", "created_at":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *UserHandler) allowManagedUser(c *gin.Context, userID int64) bool {
+	if !isAffiliateAdminActor(c) {
+		return true
+	}
+	ok, err := h.adminService.UserIsManagedBy(c.Request.Context(), userID, getAdminIDFromContext(c))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
+	if !ok {
+		response.Forbidden(c, "user is outside your managed scope")
+		return false
+	}
+	return true
 }

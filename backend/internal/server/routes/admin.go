@@ -28,105 +28,110 @@ func RegisterAdminRoutes(
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
-		// 部署与运营合规确认
-		registerAdminComplianceRoutes(admin, h)
+		// 用户管理（分销管理员仅能访问白名单接口）
+		registerUserManagementRoutes(admin, h)
+		// 分销管理员开号/授权分组需要只读分组目录；经营字段在 handler 内裁掉。
+		admin.GET("/groups/all", h.Admin.Group.GetAll)
+
+		super := admin.Group("")
+		super.Use(middleware.RequireSuperAdmin())
+
+		// 部署与运营合规确认（仅总管理员）
+		registerAdminComplianceRoutes(super, h)
 
 		// 仪表盘
-		registerDashboardRoutes(admin, h)
-
-		// 用户管理
-		registerUserManagementRoutes(admin, h)
+		registerDashboardRoutes(super, h)
 
 		// 分组管理
-		registerGroupRoutes(admin, h)
+		registerGroupRoutes(super, h)
 
 		// 账号管理
-		registerAccountRoutes(admin, h, stepUpAuth)
+		registerAccountRoutes(super, h, stepUpAuth)
 
 		// 公告管理
-		registerAnnouncementRoutes(admin, h)
+		registerAnnouncementRoutes(super, h)
 
 		// OpenAI OAuth
-		registerOpenAIOAuthRoutes(admin, h)
+		registerOpenAIOAuthRoutes(super, h)
 
 		// Gemini OAuth
-		registerGeminiOAuthRoutes(admin, h)
+		registerGeminiOAuthRoutes(super, h)
 
 		// Antigravity OAuth
-		registerAntigravityOAuthRoutes(admin, h)
+		registerAntigravityOAuthRoutes(super, h)
 
 		// Grok OAuth
-		registerGrokOAuthRoutes(admin, h)
+		registerGrokOAuthRoutes(super, h)
 
 		// Kiro（粘贴式导入，无服务端 OAuth 流程）
-		registerKiroRoutes(admin, h)
+		registerKiroRoutes(super, h)
 
 		// Cursor（浏览器 PKCE 登录 + 粘贴 Cookie）
-		registerCursorRoutes(admin, h)
+		registerCursorRoutes(super, h)
 
 		// 代理管理
-		registerProxyRoutes(admin, h, stepUpAuth)
+		registerProxyRoutes(super, h, stepUpAuth)
 
 		// 卡密管理
-		registerRedeemCodeRoutes(admin, h)
+		registerRedeemCodeRoutes(super, h)
 
 		// 优惠码管理
-		registerPromoCodeRoutes(admin, h)
+		registerPromoCodeRoutes(super, h)
 
 		// 系统设置
-		registerSettingsRoutes(admin, h)
+		registerSettingsRoutes(super, h)
 
 		// 数据管理
-		registerDataManagementRoutes(admin, h, stepUpAuth)
+		registerDataManagementRoutes(super, h, stepUpAuth)
 
 		// 数据库备份恢复
-		registerBackupRoutes(admin, h, stepUpAuth)
+		registerBackupRoutes(super, h, stepUpAuth)
 
 		// 运维监控（Ops）
-		registerOpsRoutes(admin, h)
+		registerOpsRoutes(super, h)
 
 		// 系统管理
-		registerSystemRoutes(admin, h)
+		registerSystemRoutes(super, h)
 
 		// 订阅管理
-		registerSubscriptionRoutes(admin, h)
+		registerSubscriptionRoutes(super, h)
 
 		// 使用记录管理
-		registerUsageRoutes(admin, h)
+		registerUsageRoutes(super, h)
 
 		// 用户属性管理
-		registerUserAttributeRoutes(admin, h)
+		registerUserAttributeRoutes(super, h)
 
 		// 错误透传规则管理
-		registerErrorPassthroughRoutes(admin, h)
+		registerErrorPassthroughRoutes(super, h)
 
 		// TLS 指纹模板管理
-		registerTLSFingerprintProfileRoutes(admin, h)
+		registerTLSFingerprintProfileRoutes(super, h)
 
 		// API Key 管理
-		registerAdminAPIKeyRoutes(admin, h)
+		registerAdminAPIKeyRoutes(super, h)
 
 		// 定时测试计划
-		registerScheduledTestRoutes(admin, h)
+		registerScheduledTestRoutes(super, h)
 
 		// 渠道管理
-		registerChannelRoutes(admin, h)
+		registerChannelRoutes(super, h)
 
 		// 渠道监控
-		registerChannelMonitorRoutes(admin, h, settingService)
-		registerChannelMonitorV2Routes(admin, h, settingService)
+		registerChannelMonitorRoutes(super, h, settingService)
+		registerChannelMonitorV2Routes(super, h, settingService)
 
 		// 风控中心
-		registerContentModerationRoutes(admin, h)
+		registerContentModerationRoutes(super, h)
 
 		// 独立提示词输入审计
-		registerPromptAuditRoutes(admin, h)
+		registerPromptAuditRoutes(super, h)
 
 		// 邀请返利（专属用户管理）
-		registerAffiliateRoutes(admin, h)
+		registerAffiliateRoutes(super, h)
 
 		// 操作审计日志
-		registerAuditLogRoutes(admin, h, stepUpAuth)
+		registerAuditLogRoutes(super, h, stepUpAuth)
 	}
 }
 
@@ -299,25 +304,28 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		users.GET("", h.Admin.User.List)
 		users.GET("/:id", h.Admin.User.GetByID)
-		users.POST("/:id/auth-identities", h.Admin.User.BindAuthIdentity)
 		users.POST("", h.Admin.User.Create)
 		users.PUT("/:id", h.Admin.User.Update)
 		users.DELETE("/:id", h.Admin.User.Delete)
-		users.POST("/:id/balance", h.Admin.User.UpdateBalance)
-		users.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)
-		users.GET("/:id/usage", h.Admin.User.GetUserUsage)
-		users.GET("/:id/balance-history", h.Admin.User.GetBalanceHistory)
-		users.POST("/:id/replace-group", h.Admin.User.ReplaceGroup)
-		users.GET("/:id/rpm-status", h.Admin.User.GetUserRPMStatus)
-		users.POST("/batch-concurrency", h.Admin.User.BatchUpdateConcurrency)
-		users.POST("/batch-limits", h.Admin.User.BatchUpdateLimits)
-		users.GET("/:id/platform-quotas", h.Admin.User.GetUserPlatformQuotas)
-		users.PUT("/:id/platform-quotas", h.Admin.User.UpdateUserPlatformQuotas)
-		users.POST("/:id/platform-quotas/reset", h.Admin.User.ResetUserPlatformQuotaWindow)
+	}
 
-		// User attribute values
-		users.GET("/:id/attributes", h.Admin.UserAttribute.GetUserAttributes)
-		users.PUT("/:id/attributes", h.Admin.UserAttribute.UpdateUserAttributes)
+	privileged := users.Group("")
+	privileged.Use(middleware.RequireSuperAdmin())
+	{
+		privileged.POST("/:id/auth-identities", h.Admin.User.BindAuthIdentity)
+		privileged.POST("/:id/balance", h.Admin.User.UpdateBalance)
+		privileged.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)
+		privileged.GET("/:id/usage", h.Admin.User.GetUserUsage)
+		privileged.GET("/:id/balance-history", h.Admin.User.GetBalanceHistory)
+		privileged.POST("/:id/replace-group", h.Admin.User.ReplaceGroup)
+		privileged.GET("/:id/rpm-status", h.Admin.User.GetUserRPMStatus)
+		privileged.POST("/batch-concurrency", h.Admin.User.BatchUpdateConcurrency)
+		privileged.POST("/batch-limits", h.Admin.User.BatchUpdateLimits)
+		privileged.GET("/:id/platform-quotas", h.Admin.User.GetUserPlatformQuotas)
+		privileged.PUT("/:id/platform-quotas", h.Admin.User.UpdateUserPlatformQuotas)
+		privileged.POST("/:id/platform-quotas/reset", h.Admin.User.ResetUserPlatformQuotaWindow)
+		privileged.GET("/:id/attributes", h.Admin.UserAttribute.GetUserAttributes)
+		privileged.PUT("/:id/attributes", h.Admin.UserAttribute.UpdateUserAttributes)
 	}
 }
 
@@ -325,7 +333,6 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	groups := admin.Group("/groups")
 	{
 		groups.GET("", h.Admin.Group.List)
-		groups.GET("/all", h.Admin.Group.GetAll)
 		groups.GET("/usage-summary", h.Admin.Group.GetUsageSummary)
 		groups.GET("/capacity-summary", h.Admin.Group.GetCapacitySummary)
 		groups.GET("/live-capability", h.Admin.Group.GetLiveCapability)
