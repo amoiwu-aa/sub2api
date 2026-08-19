@@ -31,6 +31,7 @@ const {
 
 const messages: Record<string, string> = {
   'common.actions': 'Actions',
+  'common.cancel': 'Cancel',
   'common.name': 'Name',
   'common.refresh': 'Refresh',
   'common.status': 'Status',
@@ -43,6 +44,7 @@ const messages: Record<string, string> = {
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
   'keys.id': 'ID',
+  'keys.importToCcSwitch': 'Import to CCS',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
   'keys.lastUsedIP': 'Last Used IP',
@@ -57,6 +59,23 @@ const messages: Record<string, string> = {
   'keys.tokens': 'tokens',
   'keys.tokenUsageHint': '{count} tokens total',
   'keys.usage': 'Usage',
+  'keys.ccSwitchDownload.title': 'Open or Install CC-Switch',
+  'keys.ccSwitchDownload.description': 'Install CC-Switch before importing.',
+  'keys.ccSwitchDownload.windows': 'Windows',
+  'keys.ccSwitchDownload.windowsDesc': 'Installer (.msi)',
+  'keys.ccSwitchDownload.macos': 'macOS',
+  'keys.ccSwitchDownload.macosDesc': 'Installer (.dmg)',
+  'keys.ccSwitchDownload.linux': 'Linux',
+  'keys.ccSwitchDownload.linuxDesc': 'AppImage',
+  'keys.ccSwitchDownload.other': 'Other versions',
+  'keys.ccSwitchDownload.otherDesc': 'Portable, ARM, and older releases',
+  'keys.ccSwitchDownload.recommended': 'Recommended for this device',
+  'keys.ccSwitchDownload.afterInstall': 'Return here after installing.',
+  'keys.ccSwitchDownload.continueImport': 'Installed, continue import',
+  'keys.ccsClientSelect.title': 'Select Import Tool',
+  'keys.ccsClientSelect.description': 'Choose the import tool.',
+  'keys.ccsClientSelect.claudeCode': 'Claude Code',
+  'keys.ccsClientSelect.claudeCodeDesc': 'Import as Claude Code configuration',
 }
 
 vi.mock('@/api', () => ({
@@ -98,6 +117,16 @@ vi.mock('@/composables/useClipboard', () => ({
     copyToClipboard,
   }),
 }))
+
+vi.mock('@/utils/ccswitchDownload', async () => {
+  const actual = await vi.importActual<typeof import('@/utils/ccswitchDownload')>(
+    '@/utils/ccswitchDownload'
+  )
+  return {
+    ...actual,
+    loadCcSwitchDownloadLinks: vi.fn().mockResolvedValue(actual.CC_SWITCH_FALLBACK_DOWNLOADS),
+  }
+})
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -186,6 +215,9 @@ const DataTableStub = {
         <div data-test="usage">
           <slot name="cell-usage" :row="row" />
         </div>
+        <div data-test="actions">
+          <slot name="cell-actions" :row="row" />
+        </div>
         <div
           v-if="columns.some((col) => col.key === 'last_used_ip')"
           data-test="last-used-ip"
@@ -228,6 +260,19 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
+const BaseDialogStub = {
+  name: 'BaseDialog',
+  props: ['show', 'title'],
+  emits: ['close'],
+  template: `
+    <section v-if="show" class="base-dialog" :data-title="title">
+      <h2>{{ title }}</h2>
+      <slot />
+      <slot name="footer" />
+    </section>
+  `,
+}
+
 const mountView = async () => {
   const wrapper = mount(KeysView, {
     global: {
@@ -236,7 +281,7 @@ const mountView = async () => {
         TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,
         Pagination: PaginationStub,
-        BaseDialog: true,
+        BaseDialog: BaseDialogStub,
         ConfirmDialog: true,
         EmptyState: true,
         Select: SelectStub,
@@ -474,5 +519,25 @@ describe('user KeysView column settings', () => {
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+  })
+
+  it('shows installer choices before invoking the CC-Switch protocol', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const wrapper = await mountView()
+
+    await getButtonByText(wrapper, 'Import to CCS').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Open or Install CC-Switch')
+    expect(wrapper.text()).toContain('Recommended for this device')
+    expect(openSpy).not.toHaveBeenCalled()
+
+    await getButtonByText(wrapper, 'Installed, continue import').trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Select Import Tool')
+    expect(openSpy).not.toHaveBeenCalled()
+
+    openSpy.mockRestore()
   })
 })

@@ -257,6 +257,12 @@ func (s *RedeemService) CreateCode(ctx context.Context, code *RedeemCode) error 
 	if code.Type != RedeemTypeInvitation && code.Value == 0 {
 		return errors.New("value must not be zero")
 	}
+	if code.BalanceValidityDays < 0 || code.BalanceValidityDays > 3650 {
+		return errors.New("balance_validity_days must be between 0 and 3650")
+	}
+	if code.BalanceValidityDays > 0 && (code.Type != RedeemTypeBalance || code.Value <= 0) {
+		return errors.New("balance_validity_days requires a positive balance redeem code")
+	}
 	if code.Status == "" {
 		code.Status = StatusUnused
 	}
@@ -466,6 +472,21 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 			}
 		} else if err := s.userRepo.UpdateBalance(txCtx, userID, amount); err != nil {
 			return nil, fmt.Errorf("update user balance: %w", err)
+		}
+		if amount > 0 && redeemCode.BalanceValidityDays > 0 {
+			expiringRepo, ok := s.userRepo.(ExpiringBalanceRepository)
+			if !ok {
+				return nil, errors.New("user repository does not support expiring balance grants")
+			}
+			if err := expiringRepo.CreateExpiringBalanceGrant(
+				txCtx,
+				userID,
+				redeemCode.ID,
+				amount,
+				redeemCode.BalanceValidityDays,
+			); err != nil {
+				return nil, fmt.Errorf("create expiring balance grant: %w", err)
+			}
 		}
 
 	case RedeemTypeConcurrency:

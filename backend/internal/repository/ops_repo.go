@@ -255,7 +255,7 @@ SELECT
   e.api_key_id,
   e.account_id,
   COALESCE(a.name, ''),
-  e.group_id,
+  COALESCE(e.group_id, ak.group_id),
   COALESCE(g.name, ''),
   CASE WHEN e.client_ip IS NULL THEN NULL ELSE host(e.client_ip) END,
   COALESCE(e.request_path, ''),
@@ -270,10 +270,10 @@ SELECT
   ak.deleted_at
 FROM ops_error_logs e
 LEFT JOIN accounts a ON e.account_id = a.id
-LEFT JOIN groups g ON e.group_id = g.id
+LEFT JOIN api_keys ak ON ak.id = e.api_key_id
+LEFT JOIN groups g ON g.id = COALESCE(e.group_id, ak.group_id)
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN users u2 ON e.resolved_by_user_id = u2.id
-LEFT JOIN api_keys ak ON ak.id = e.api_key_id
 ` + where + `
 ORDER BY ` + opsErrorLogsOrderBy(filter) + `
 LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
@@ -431,7 +431,7 @@ SELECT
   e.api_key_id,
   e.account_id,
   COALESCE(a.name, ''),
-  e.group_id,
+  COALESCE(e.group_id, ak.group_id),
   COALESCE(g.name, ''),
   CASE WHEN e.client_ip IS NULL THEN NULL ELSE host(e.client_ip) END,
   COALESCE(e.request_path, ''),
@@ -453,8 +453,8 @@ SELECT
 FROM ops_error_logs e
 LEFT JOIN users u ON e.user_id = u.id
 LEFT JOIN accounts a ON e.account_id = a.id
-LEFT JOIN groups g ON e.group_id = g.id
 LEFT JOIN api_keys ak ON ak.id = e.api_key_id
+LEFT JOIN groups g ON g.id = COALESCE(e.group_id, ak.group_id)
 WHERE e.id = $1
 LIMIT 1`
 
@@ -768,10 +768,16 @@ SELECT
   l.user_id,
   l.api_key_id,
   l.account_id,
+  COALESCE(a.name, ''),
+  k.group_id,
+  COALESCE(g.name, ''),
   COALESCE(l.platform, ''),
   COALESCE(l.model, ''),
   COALESCE(l.extra::text, '{}')
 FROM ops_system_logs l
+LEFT JOIN accounts a ON a.id = l.account_id
+LEFT JOIN api_keys k ON k.id = l.api_key_id
+LEFT JOIN groups g ON g.id = k.group_id
 ` + where + `
 ORDER BY l.created_at DESC, l.id DESC
 LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
@@ -788,6 +794,7 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		var userID sql.NullInt64
 		var apiKeyID sql.NullInt64
 		var accountID sql.NullInt64
+		var groupID sql.NullInt64
 		var extraRaw string
 		if err := rows.Scan(
 			&item.ID,
@@ -801,6 +808,9 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 			&userID,
 			&apiKeyID,
 			&accountID,
+			&item.AccountName,
+			&groupID,
+			&item.GroupName,
 			&item.Platform,
 			&item.Model,
 			&extraRaw,
@@ -818,6 +828,10 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 		if accountID.Valid {
 			v := accountID.Int64
 			item.AccountID = &v
+		}
+		if groupID.Valid {
+			v := groupID.Int64
+			item.GroupID = &v
 		}
 		extraRaw = strings.TrimSpace(extraRaw)
 		if extraRaw != "" && extraRaw != "null" && extraRaw != "{}" {

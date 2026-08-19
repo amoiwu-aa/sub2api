@@ -88,7 +88,7 @@ func TestAffiliateAdminList_ForcesManagedScope(t *testing.T) {
 	router := affiliateAdminRouter(stub, http.MethodGet, "/admin/users", h.List)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/admin/users?role=admin&group_name=secret&api_key_group_id=3&attr[1]=hidden&include_subscriptions=true&sort_by=balance&sort_order=asc", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/admin/users?role=admin&group_name=secret&api_key_group_id=3&attr[1]=hidden&include_subscriptions=true&sort_by=concurrency&sort_order=asc", nil)
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -244,7 +244,6 @@ func assertAffiliateAdminUserIsRedacted(t *testing.T, user map[string]any) {
 	t.Helper()
 	for _, field := range []string{
 		"role",
-		"balance",
 		"frozen_balance",
 		"concurrency",
 		"current_concurrency",
@@ -262,4 +261,5 @@ func assertAffiliateAdminUserIsRedacted(t *testing.T, user map[string]any) {
 	require.NotEmpty(t, user["email"])
 	require.Equal(t, service.StatusActive, user["status"])
 	require.Contains(t, user, "allowed_groups")
+	require.Contains(t, user, "balance")
 }

@@ -1,6 +1,7 @@
 package cursor
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -108,6 +109,155 @@ func (c *Conversation) HasHistory() bool {
 		nonSystem++
 	}
 	return nonSystem > 1
+}
+
+// ToolContinuationDepth reports assistant tool turns after the latest
+// non-empty user instruction. Tool results alone intentionally do not reset
+// the counter because they are the normal client-driven continuation shape.
+func (c *Conversation) ToolContinuationDepth() int {
+	if c == nil {
+		return 0
+	}
+
+	depth := 0
+	for i := len(c.Turns) - 1; i >= 0; i-- {
+		turn := c.Turns[i]
+		switch turn.Role {
+		case RoleUser:
+			if strings.TrimSpace(turn.Text) != "" {
+				return depth
+			}
+		case RoleAssistant:
+			if len(turn.ToolCalls) > 0 {
+				depth++
+			}
+		}
+	}
+	return depth
+}
+
+// RepeatedReadObservation describes a completed read call that returned the
+// same result repeatedly without an intervening user instruction or mutation.
+type RepeatedReadObservation struct {
+	ToolName string
+	Repeats  int
+}
+
+// RepeatedRead reports a no-progress read loop. JSON arguments are
+// canonicalized so property ordering does not hide an otherwise identical
+// call. A write or command tool resets the observation window.
+func (c *Conversation) RepeatedRead(limit int) (RepeatedReadObservation, bool) {
+	if c == nil || limit <= 0 {
+		return RepeatedReadObservation{}, false
+	}
+
+	type pendingRead struct {
+		toolName  string
+		signature string
+	}
+	type completedRead struct {
+		signature string
+		result    [sha256.Size]byte
+	}
+
+	pending := make(map[string]pendingRead)
+	completed := make(map[completedRead]int)
+	reset := func() {
+		clear(pending)
+		clear(completed)
+	}
+
+	for _, turn := range c.Turns {
+		switch turn.Role {
+		case RoleUser:
+			if strings.TrimSpace(turn.Text) != "" {
+				reset()
+			}
+		case RoleAssistant:
+			if containsWorkspaceMutation(turn.ToolCalls) {
+				reset()
+				continue
+			}
+			for _, call := range turn.ToolCalls {
+				if !isReadToolName(call.Name) {
+					continue
+				}
+				id := strings.TrimSpace(call.ID)
+				name := strings.TrimSpace(call.Name)
+				if id == "" || name == "" {
+					continue
+				}
+				pending[id] = pendingRead{
+					toolName:  name,
+					signature: strings.ToLower(name) + "\x00" + canonicalToolArguments(call.Arguments),
+				}
+			}
+		case RoleTool:
+			id := strings.TrimSpace(turn.ToolCallID)
+			call, ok := pending[id]
+			if !ok {
+				continue
+			}
+			delete(pending, id)
+			key := completedRead{
+				signature: call.signature,
+				result:    sha256.Sum256([]byte(strings.TrimSpace(turn.Text))),
+			}
+			completed[key]++
+			if completed[key] >= limit {
+				return RepeatedReadObservation{
+					ToolName: call.toolName,
+					Repeats:  completed[key],
+				}, true
+			}
+		}
+	}
+
+	return RepeatedReadObservation{}, false
+}
+
+func canonicalToolArguments(arguments string) string {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" {
+		return "{}"
+	}
+	var value any
+	if err := json.Unmarshal([]byte(trimmed), &value); err != nil {
+		return trimmed
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return trimmed
+	}
+	return string(encoded)
+}
+
+func isReadToolName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "read", "read_file", "readfile", "viewfile", "view_file", "open_file":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsWorkspaceMutation(calls []ToolCall) bool {
+	for _, call := range calls {
+		name := strings.ToLower(strings.TrimSpace(call.Name))
+		switch name {
+		case "write", "write_file", "writefile", "create_file", "save_file",
+			"edit", "notebookedit", "apply_patch",
+			"delete", "delete_file", "deletefile", "remove_file", "rm",
+			"bash", "powershell", "shell", "run_terminal_cmd", "terminal",
+			"execute_command", "run_command", "run_commands":
+			return true
+		}
+		if strings.HasSuffix(name, "__run_command") ||
+			strings.HasSuffix(name, "__run_commands") {
+			return true
+		}
+	}
+	return false
 }
 
 // MaxPromptBytes 是渲染后 prompt 的上限，超过就不发给上游。

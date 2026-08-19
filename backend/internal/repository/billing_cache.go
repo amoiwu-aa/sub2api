@@ -78,9 +78,16 @@ var (
 		if current == false then
 			return 0
 		end
+		local ttl = redis.call('PTTL', KEYS[1])
 		local newVal = tonumber(current) - tonumber(ARGV[1])
 		redis.call('SET', KEYS[1], newVal)
-		redis.call('EXPIRE', KEYS[1], ARGV[2])
+		if ttl == 0 then
+			redis.call('DEL', KEYS[1])
+		elseif ttl > 0 then
+			redis.call('PEXPIRE', KEYS[1], ttl)
+		else
+			redis.call('EXPIRE', KEYS[1], ARGV[2])
+		end
 		return 1
 	`)
 
@@ -156,6 +163,21 @@ func (c *billingCache) GetUserBalance(ctx context.Context, userID int64) (float6
 func (c *billingCache) SetUserBalance(ctx context.Context, userID int64, balance float64) error {
 	key := billingBalanceKey(userID)
 	return c.rdb.Set(ctx, key, balance, jitteredTTL()).Err()
+}
+
+func (c *billingCache) SetUserBalanceWithTTL(ctx context.Context, userID int64, balance float64, ttl time.Duration) error {
+	key := billingBalanceKey(userID)
+	if ttl <= 0 {
+		return c.rdb.Del(ctx, key).Err()
+	}
+	maxTTL := jitteredTTL()
+	if ttl > maxTTL {
+		ttl = maxTTL
+	}
+	if ttl < time.Millisecond {
+		ttl = time.Millisecond
+	}
+	return c.rdb.Set(ctx, key, balance, ttl).Err()
 }
 
 func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {

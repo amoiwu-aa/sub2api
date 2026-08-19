@@ -51,14 +51,15 @@ type AdminUser struct {
 }
 
 // AffiliateAdminUser is the least-privilege projection returned to
-// distribution administrators. Billing, quota and credential-related
-// fields are intentionally absent from the JSON response.
+// distribution administrators. Billing internals, quotas and credentials
+// stay hidden; wallet balance is included so they can allocate quota.
 type AffiliateAdminUser struct {
 	ID            int64      `json:"id"`
 	Email         string     `json:"email"`
 	Username      string     `json:"username"`
 	Notes         string     `json:"notes"`
 	Status        string     `json:"status"`
+	Balance       float64    `json:"balance"`
 	AllowedGroups []int64    `json:"allowed_groups"`
 	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
 	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
@@ -431,8 +432,9 @@ type RedeemCode struct {
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 
-	GroupID      *int64 `json:"group_id"`
-	ValidityDays int    `json:"validity_days"`
+	GroupID             *int64 `json:"group_id"`
+	ValidityDays        int    `json:"validity_days"`
+	BalanceValidityDays int    `json:"balance_validity_days"`
 
 	// Notes is only populated for admin_balance/admin_concurrency types
 	// so users can see why they were charged or credited

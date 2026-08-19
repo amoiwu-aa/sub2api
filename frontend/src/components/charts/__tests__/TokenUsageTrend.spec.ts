@@ -181,7 +181,7 @@ describe('TokenUsageTrend', () => {
     expect(adjustmentDataset.data).toEqual([600])
     expect(coverageDataset.data).toEqual([null])
     expect(wrapper.get('[data-testid="cache-observability-summary"]').text()).toContain(
-      '1/4 (25.0%)'
+      '1/3 (33.3%)'
     )
   })
 
@@ -224,7 +224,7 @@ describe('TokenUsageTrend', () => {
     // 200 / (100 + 300 + 0 + 200) = 33.3%
     expect(coverageDataset.data[0]).toBeCloseTo(33.333, 2)
     expect(wrapper.get('[data-testid="cache-observability-summary"]').text()).toContain(
-      '1/4 (25.0%)'
+      '1/3 (33.3%)'
     )
   })
 
@@ -297,7 +297,7 @@ describe('TokenUsageTrend', () => {
     expect(coverageDataset.data).toEqual([null])
     const observability = wrapper.get('[data-testid="cache-observability-summary"]')
     expect(observability.text()).toContain('缓存不可观测')
-    expect(observability.text()).toContain('0/2')
+    expect(observability.text()).toContain('0/1')
     expect(observability.text()).not.toContain('0.0%')
   })
 })

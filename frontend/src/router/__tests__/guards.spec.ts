@@ -278,14 +278,27 @@ describe('路由守卫逻辑', () => {
       hasPendingAuthSession: false,
     }
 
-    it('访问 /login 重定向到 /admin/users', () => {
+    it('访问 /login 重定向到 /admin/distribution/dashboard', () => {
       const redirect = simulateGuard('/login', { requiresAuth: false }, authState)
-      expect(redirect).toBe('/admin/users')
+      expect(redirect).toBe('/admin/distribution/dashboard')
     })
 
     it('可以进入用户管理页', () => {
       const redirect = simulateGuard('/admin/users', { requiresAdmin: true }, authState)
       expect(redirect).toBeNull()
+    })
+
+    it('获得通知权限后可以进入公告页，接口继续校验实际权限', () => {
+      const redirect = simulateGuard('/admin/announcements', { requiresAdmin: true }, authState)
+      expect(redirect).toBeNull()
+    })
+
+    it('可以进入分销中心页面', () => {
+      expect(simulateGuard('/admin/distribution', { requiresAdmin: true }, authState)).toBeNull()
+      expect(simulateGuard('/admin/distribution/dashboard', { requiresAdmin: true }, authState)).toBeNull()
+      expect(simulateGuard('/admin/distribution/usage', { requiresAdmin: true }, authState)).toBeNull()
+      expect(simulateGuard('/admin/distribution/balance', { requiresAdmin: true }, authState)).toBeNull()
+      expect(simulateGuard('/admin/distribution/invites', { requiresAdmin: true }, authState)).toBeNull()
     })
 
     it('访问其它后台页面被重定向到 /admin/users', () => {
@@ -296,6 +309,11 @@ describe('路由守卫逻辑', () => {
     it('访问系统设置被重定向到 /admin/users', () => {
       const redirect = simulateGuard('/admin/settings', { requiresAdmin: true }, authState)
       expect(redirect).toBe('/admin/users')
+    })
+
+    it('访问邀请返利和分组管理被重定向到 /admin/users', () => {
+      expect(simulateGuard('/admin/affiliates', { requiresAdmin: true }, authState)).toBe('/admin/users')
+      expect(simulateGuard('/admin/groups', { requiresAdmin: true }, authState)).toBe('/admin/users')
     })
   })
 

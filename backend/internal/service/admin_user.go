@@ -146,6 +146,9 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		} else if input.Concurrency <= 0 {
 			input.Concurrency = 1
 		}
+		if err := s.ensureAffiliateAllowedGroups(ctx, input.ActorAdminID, input.AllowedGroups); err != nil {
+			return nil, err
+		}
 	}
 	role, err := normalizeUserRole(input.Role, RoleUser)
 	if err != nil {
@@ -238,6 +241,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		input.Concurrency = nil
 		input.RPMLimit = nil
 		input.GroupRates = nil
+		if input.AllowedGroups != nil {
+			if err := s.ensureAffiliateAllowedGroups(ctx, input.ActorAdminID, *input.AllowedGroups); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	user, err := s.userRepo.GetByID(ctx, id)
@@ -343,6 +351,12 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	if input.ActorRole != RoleAffiliateAdmin && input.AllowedGroups != nil && user.Role == RoleAffiliateAdmin {
+		if revoked := RevokedAllowedGroupIDs(oldAllowedGroups, user.AllowedGroups); len(revoked) > 0 {
+			s.cascadeRevokeAffiliateAdminGroups(ctx, user.ID, revoked, input.ActorAdminID)
+		}
+	}
+
 	concurrencyDiff := user.Concurrency - oldConcurrency
 	if concurrencyDiff != 0 {
 		code, err := GenerateRedeemCode()
@@ -365,6 +379,59 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	return user, nil
+}
+
+func (s *adminServiceImpl) ensureAffiliateAllowedGroups(ctx context.Context, actorID int64, submitted []int64) error {
+	if actorID <= 0 {
+		return errDistributionGroupNotAllowed()
+	}
+	actor, err := s.userRepo.GetByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if actor == nil || !AllowedGroupsAreSubset(submitted, actor.AllowedGroups) {
+		return errDistributionGroupNotAllowed()
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) cascadeRevokeAffiliateAdminGroups(ctx context.Context, affiliateAdminID int64, revoked []int64, actorAdminID int64) {
+	if affiliateAdminID <= 0 || len(revoked) == 0 {
+		return
+	}
+	store, ok := s.userRepo.(userOwnershipStore)
+	if !ok {
+		logger.LegacyPrintf("service.admin", "distribution group cascade skipped: ownership store unavailable affiliate_admin_id=%d", affiliateAdminID)
+		return
+	}
+	managedIDs, err := store.ListManagedUserIDs(ctx, affiliateAdminID, false)
+	if err != nil {
+		logger.LegacyPrintf("service.admin", "distribution group cascade list managed users failed: affiliate_admin_id=%d err=%v", affiliateAdminID, err)
+		return
+	}
+	for _, userID := range managedIDs {
+		for _, groupID := range revoked {
+			if err := s.userRepo.RemoveGroupFromUserAllowedGroups(ctx, userID, groupID); err != nil {
+				logger.LegacyPrintf("service.admin", "distribution group cascade remove failed: user_id=%d group_id=%d err=%v", userID, groupID, err)
+				continue
+			}
+		}
+		if s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+		}
+	}
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, affiliateAdminID)
+	}
+	if s.inviteDefaults != nil {
+		for _, groupID := range revoked {
+			if err := s.inviteDefaults.RemoveDefaultGroupID(ctx, affiliateAdminID, groupID); err != nil {
+				logger.LegacyPrintf("service.admin", "distribution invite default group cascade failed: affiliate_admin_id=%d group_id=%d err=%v", affiliateAdminID, groupID, err)
+			}
+		}
+	}
+	logger.LegacyPrintf("service.admin", "audit: affiliate_admin allowed_groups shrunk actor_admin_id=%d affiliate_admin_id=%d revoked_group_ids=%v managed_user_count=%d",
+		actorAdminID, affiliateAdminID, revoked, len(managedIDs))
 }
 
 func sameInt64Set(a, b []int64) bool {
@@ -1287,6 +1354,12 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
 		return nil, ErrRedeemCodeExpired
 	}
+	if input.BalanceValidityDays < 0 || input.BalanceValidityDays > 3650 {
+		return nil, errors.New("balance_validity_days must be between 0 and 3650")
+	}
+	if input.BalanceValidityDays > 0 && (input.Type != RedeemTypeBalance || input.Value <= 0) {
+		return nil, errors.New("balance_validity_days requires a positive balance redeem code")
+	}
 
 	// 如果是订阅类型，验证必须有 GroupID
 	if input.Type == RedeemTypeSubscription {
@@ -1310,11 +1383,12 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 			return nil, err
 		}
 		code := RedeemCode{
-			Code:      codeValue,
-			Type:      input.Type,
-			Value:     input.Value,
-			Status:    StatusUnused,
-			ExpiresAt: input.ExpiresAt,
+			Code:                codeValue,
+			Type:                input.Type,
+			Value:               input.Value,
+			Status:              StatusUnused,
+			ExpiresAt:           input.ExpiresAt,
+			BalanceValidityDays: input.BalanceValidityDays,
 		}
 		// 订阅类型专用字段
 		if input.Type == RedeemTypeSubscription {

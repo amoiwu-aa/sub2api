@@ -1024,7 +1024,7 @@ func userResponseForActor(c *gin.Context, user *service.User) any {
 
 func isAffiliateAdminSafeUserSort(sortBy string) bool {
 	switch sortBy {
-	case "email", "id", "username", "status", "last_used_at", "last_active_at", "created_at":
+	case "email", "id", "username", "status", "balance", "last_used_at", "last_active_at", "created_at":
 		return true
 	default:
 		return false

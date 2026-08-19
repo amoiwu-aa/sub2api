@@ -14,13 +14,38 @@ import (
 )
 
 const (
-	conditionalBalanceDeductSQL = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND balance >= \$1\s+RETURNING balance`
-	overdraftBalanceDeductSQL   = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL\s+RETURNING balance`
-	reserveBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) \+ \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND balance >= \$1\s+RETURNING balance, frozen_balance`
-	captureBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance\s+\+ CASE WHEN \$1 > \$2 THEN \$1 - \$2 ELSE 0 END\s+- CASE WHEN \$2 > \$1 THEN \$2 - \$1 ELSE 0 END,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$3 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
-	releaseBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance \+ \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
-	userExistsForBillingSQL     = `(?s)SELECT 1\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL`
+	lockUserBalanceSQL       = `(?s)SELECT balance\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL\s+FOR UPDATE`
+	settleExpiredGrantsSQL   = `(?s)WITH expired_candidates AS MATERIALIZED .*SELECT COALESCE\(SUM\(remaining_amount\), 0\)\s+FROM marked`
+	nextExpiringGrantSQL     = `(?s)SELECT MIN\(expires_at\)\s+FROM user_balance_grants\s+WHERE user_id = \$1.*expires_at > NOW\(\)`
+	consumeExpiringGrantsSQL = `(?s)SELECT id, remaining_amount\s+FROM user_balance_grants\s+WHERE user_id = \$1.*ORDER BY expires_at ASC, id ASC\s+FOR UPDATE`
+	updateExpiringGrantSQL   = `(?s)UPDATE user_balance_grants\s+SET remaining_amount = remaining_amount - \$1,.*WHERE id = \$2`
+	updateBillingBalanceSQL  = `(?s)UPDATE users\s+SET balance = \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL\s+RETURNING balance`
+	reserveBatchImageHoldSQL = `(?s)UPDATE users\s+SET balance = \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) \+ \$2,\s+updated_at = NOW\(\)\s+WHERE id = \$3 AND deleted_at IS NULL\s+RETURNING balance, frozen_balance`
+	captureBatchImageHoldSQL = `(?s)UPDATE users\s+SET balance = balance\s+\+ CASE WHEN \$1 > \$2 THEN \$1 - \$2 ELSE 0 END\s+- CASE WHEN \$2 > \$1 THEN \$2 - \$1 ELSE 0 END,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$3 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
+	releaseBatchImageHoldSQL = `(?s)UPDATE users\s+SET balance = balance \+ \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
+	userExistsForBillingSQL  = `(?s)SELECT 1\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL`
 )
+
+func expectLockedBalance(mock sqlmock.Sqlmock, userID int64, balance float64) {
+	mock.ExpectQuery(lockUserBalanceSQL).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(balance))
+}
+
+func expectNoExpiredBalanceGrants(mock sqlmock.Sqlmock, userID int64) {
+	mock.ExpectQuery(settleExpiredGrantsSQL).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"expired"}).AddRow(0))
+	mock.ExpectQuery(nextExpiringGrantSQL).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"next_expiry"}).AddRow(nil))
+}
+
+func expectNoExpiringBalanceGrantConsumption(mock sqlmock.Sqlmock, userID int64) {
+	mock.ExpectQuery(consumeExpiringGrantsSQL).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "remaining_amount"}))
+}
 
 func TestDeductUsageBillingBalance_UsesSufficientBalanceGuard(t *testing.T) {
 	ctx := context.Background()
@@ -31,8 +56,41 @@ func TestDeductUsageBillingBalance_UsesSufficientBalanceGuard(t *testing.T) {
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	mock.ExpectQuery(conditionalBalanceDeductSQL).
-		WithArgs(2.5, int64(42)).
+	expectLockedBalance(mock, 42, 10)
+	expectNoExpiredBalanceGrants(mock, 42)
+	expectNoExpiringBalanceGrantConsumption(mock, 42)
+	mock.ExpectQuery(updateBillingBalanceSQL).
+		WithArgs(7.5, int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(7.5))
+	mock.ExpectCommit()
+
+	newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, 42, 2.5)
+	require.NoError(t, err)
+	require.True(t, sufficient)
+	require.InDelta(t, 7.5, newBalance, 0.000001)
+	require.NoError(t, tx.Commit())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestDeductUsageBillingBalance_ConsumesExpiringGrantFirst(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	expectLockedBalance(mock, 42, 10)
+	expectNoExpiredBalanceGrants(mock, 42)
+	mock.ExpectQuery(consumeExpiringGrantsSQL).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "remaining_amount"}).AddRow(int64(11), 4.0))
+	mock.ExpectExec(updateExpiringGrantSQL).
+		WithArgs(2.5, int64(11)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(updateBillingBalanceSQL).
+		WithArgs(7.5, int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(7.5))
 	mock.ExpectCommit()
 
@@ -53,11 +111,11 @@ func TestDeductUsageBillingBalance_RecordsOverdraftWhenGuardMisses(t *testing.T)
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	mock.ExpectQuery(conditionalBalanceDeductSQL).
-		WithArgs(10.0, int64(42)).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(overdraftBalanceDeductSQL).
-		WithArgs(10.0, int64(42)).
+	expectLockedBalance(mock, 42, 5)
+	expectNoExpiredBalanceGrants(mock, 42)
+	expectNoExpiringBalanceGrantConsumption(mock, 42)
+	mock.ExpectQuery(updateBillingBalanceSQL).
+		WithArgs(-5.0, int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(-5.0))
 	mock.ExpectCommit()
 
@@ -78,11 +136,11 @@ func TestApplyUsageBillingEffects_FlagsBalanceOverdraft(t *testing.T) {
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	mock.ExpectQuery(conditionalBalanceDeductSQL).
-		WithArgs(10.0, int64(42)).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(overdraftBalanceDeductSQL).
-		WithArgs(10.0, int64(42)).
+	expectLockedBalance(mock, 42, 5)
+	expectNoExpiredBalanceGrants(mock, 42)
+	expectNoExpiringBalanceGrantConsumption(mock, 42)
+	mock.ExpectQuery(updateBillingBalanceSQL).
+		WithArgs(-5.0, int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(-5.0))
 	mock.ExpectCommit()
 
@@ -108,12 +166,9 @@ func TestDeductUsageBillingBalance_ReturnsUserNotFoundWhenNoUserUpdated(t *testi
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	mock.ExpectQuery(conditionalBalanceDeductSQL).
-		WithArgs(10.0, int64(42)).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(overdraftBalanceDeductSQL).
-		WithArgs(10.0, int64(42)).
-		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(lockUserBalanceSQL).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"balance"}))
 	mock.ExpectRollback()
 
 	_, _, err = deductUsageBillingBalance(ctx, tx, 42, 10)
@@ -131,8 +186,11 @@ func TestReserveUsageBillingBatchImageBalance_MovesAvailableToFrozen(t *testing.
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
+	expectLockedBalance(mock, 42, 10)
+	expectNoExpiredBalanceGrants(mock, 42)
+	expectNoExpiringBalanceGrantConsumption(mock, 42)
 	mock.ExpectQuery(reserveBatchImageHoldSQL).
-		WithArgs(2.5, int64(42)).
+		WithArgs(7.5, 2.5, int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance", "frozen_balance"}).AddRow(7.5, 2.5))
 	mock.ExpectCommit()
 
@@ -155,12 +213,8 @@ func TestReserveUsageBillingBatchImageBalance_InsufficientBalance(t *testing.T) 
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	mock.ExpectQuery(reserveBatchImageHoldSQL).
-		WithArgs(10.0, int64(42)).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(userExistsForBillingSQL).
-		WithArgs(int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"?column?"}).AddRow(1))
+	expectLockedBalance(mock, 42, 5)
+	expectNoExpiredBalanceGrants(mock, 42)
 	mock.ExpectRollback()
 
 	_, err = reserveUsageBillingBatchImageBalance(ctx, tx, &service.BatchImageBalanceHoldCommand{UserID: 42, HoldAmount: 10})

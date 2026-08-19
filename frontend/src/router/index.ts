@@ -454,6 +454,58 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/distribution',
+    redirect: '/admin/distribution/dashboard'
+  },
+  {
+    path: '/admin/distribution/dashboard',
+    name: 'AdminDistributionDashboard',
+    component: () => import('@/views/admin/distribution/DistributionDashboardView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Distribution Dashboard',
+      titleKey: 'admin.distribution.dashboard.title',
+      descriptionKey: 'admin.distribution.dashboard.description'
+    }
+  },
+  {
+    path: '/admin/distribution/usage',
+    name: 'AdminDistributionUsage',
+    component: () => import('@/views/admin/distribution/DistributionUsageView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Distribution Usage',
+      titleKey: 'admin.distribution.usage.title',
+      descriptionKey: 'admin.distribution.usage.description'
+    }
+  },
+  {
+    path: '/admin/distribution/balance',
+    name: 'AdminDistributionBalance',
+    component: () => import('@/views/admin/distribution/DistributionBalanceView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Distribution Balance',
+      titleKey: 'admin.distribution.balance.title',
+      descriptionKey: 'admin.distribution.balance.description'
+    }
+  },
+  {
+    path: '/admin/distribution/invites',
+    name: 'AdminDistributionInvites',
+    component: () => import('@/views/admin/distribution/DistributionInvitesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Distribution Invites',
+      titleKey: 'admin.distribution.invites.title',
+      descriptionKey: 'admin.distribution.invites.description'
+    }
+  },
+  {
     path: '/admin/groups',
     name: 'AdminGroups',
     component: () => import('@/views/admin/GroupsView.vue'),

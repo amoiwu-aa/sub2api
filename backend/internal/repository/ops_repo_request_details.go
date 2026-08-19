@@ -101,7 +101,9 @@ WITH combined AS (
     ul.user_id AS user_id,
     ul.api_key_id AS api_key_id,
     ul.account_id AS account_id,
+    COALESCE(NULLIF(a.name, ''), '') AS account_name,
     ul.group_id AS group_id,
+    COALESCE(NULLIF(g.name, ''), '') AS group_name,
     ul.stream AS stream
   FROM usage_logs ul
   LEFT JOIN groups g ON g.id = ul.group_id
@@ -125,10 +127,13 @@ WITH combined AS (
     o.user_id AS user_id,
     o.api_key_id AS api_key_id,
     o.account_id AS account_id,
-    o.group_id AS group_id,
+    COALESCE(NULLIF(a.name, ''), '') AS account_name,
+    COALESCE(o.group_id, k.group_id) AS group_id,
+    COALESCE(NULLIF(g.name, ''), '') AS group_name,
     o.stream AS stream
   FROM ops_error_logs o
-  LEFT JOIN groups g ON g.id = o.group_id
+  LEFT JOIN api_keys k ON k.id = o.api_key_id
+  LEFT JOIN groups g ON g.id = COALESCE(o.group_id, k.group_id)
   LEFT JOIN accounts a ON a.id = o.account_id
   WHERE o.created_at >= $1 AND o.created_at < $2
     AND COALESCE(o.status_code, 0) >= 400
@@ -174,7 +179,9 @@ SELECT
   user_id,
   api_key_id,
   account_id,
+  account_name,
   group_id,
+  group_name,
   stream
 FROM combined
 %s
@@ -221,10 +228,12 @@ LIMIT $%d OFFSET $%d
 			severity sql.NullString
 			message  sql.NullString
 
-			userID    sql.NullInt64
-			apiKeyID  sql.NullInt64
-			accountID sql.NullInt64
-			groupID   sql.NullInt64
+			userID      sql.NullInt64
+			apiKeyID    sql.NullInt64
+			accountID   sql.NullInt64
+			accountName sql.NullString
+			groupID     sql.NullInt64
+			groupName   sql.NullString
 
 			stream bool
 		)
@@ -244,7 +253,9 @@ LIMIT $%d OFFSET $%d
 			&userID,
 			&apiKeyID,
 			&accountID,
+			&accountName,
 			&groupID,
+			&groupName,
 			&stream,
 		); err != nil {
 			return nil, 0, err
@@ -264,10 +275,12 @@ LIMIT $%d OFFSET $%d
 			Severity:   severity.String,
 			Message:    message.String,
 
-			UserID:    toInt64Ptr(userID),
-			APIKeyID:  toInt64Ptr(apiKeyID),
-			AccountID: toInt64Ptr(accountID),
-			GroupID:   toInt64Ptr(groupID),
+			UserID:      toInt64Ptr(userID),
+			APIKeyID:    toInt64Ptr(apiKeyID),
+			AccountID:   toInt64Ptr(accountID),
+			AccountName: strings.TrimSpace(accountName.String),
+			GroupID:     toInt64Ptr(groupID),
+			GroupName:   strings.TrimSpace(groupName.String),
 
 			Stream: stream,
 		}

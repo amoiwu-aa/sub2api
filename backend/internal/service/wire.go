@@ -70,6 +70,7 @@ func ProvideAuthService(
 	defaultSubAssigner DefaultSubscriptionAssigner,
 	affiliateService *AffiliateService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	distributionInviteService *DistributionInviteService,
 ) *AuthService {
 	svc := NewAuthService(
 		entClient,
@@ -88,6 +89,7 @@ func ProvideAuthService(
 	)
 	svc.SetTencentCaptchaService(tencentCaptchaService)
 	svc.SetAliyunCaptchaService(aliyunCaptchaService)
+	svc.SetDistributionInviteService(distributionInviteService)
 	return svc
 }
 
@@ -816,7 +818,8 @@ var ProviderSet = wire.NewSet(
 	NewBillingService,
 	ProvideBillingCacheService,
 	NewAnnouncementService,
-	NewAdminService,
+	NewAffiliateAdminPermissionService,
+	ProvideAdminService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
 	ProvideImageStorageSettingService,
@@ -917,6 +920,9 @@ var ProviderSet = wire.NewSet(
 	NewModelPricingResolver,
 	NewContentModerationService,
 	NewAffiliateService,
+	ProvideDistributionDashboardService,
+	ProvideDistributionBalanceService,
+	NewDistributionInviteService,
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,
@@ -1011,4 +1017,23 @@ func ProvideChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.
 	}
 	aggregator.Start()
 	return aggregator
+}
+
+func ProvideDistributionDashboardService(
+	usage DistributionUsageRepository,
+	users UserRepository,
+	balances DistributionBalanceRepository,
+) *DistributionDashboardService {
+	return NewDistributionDashboardService(usage, users, balances)
+}
+
+func ProvideDistributionBalanceService(
+	entClient *dbent.Client,
+	users UserRepository,
+	transfers DistributionBalanceRepository,
+	authCache APIKeyAuthCacheInvalidator,
+	billingCache *BillingCacheService,
+) *DistributionBalanceService {
+	store, _ := users.(DistributionBalanceUserStore)
+	return NewDistributionBalanceService(entClient, store, transfers, authCache, billingCache)
 }

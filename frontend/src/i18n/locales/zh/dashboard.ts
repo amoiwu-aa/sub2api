@@ -9,6 +9,9 @@ export default {
     todayTokens: '今日 Token',
     totalTokens: '累计 Token',
     cacheToday: '今日缓存',
+    todayCacheHitRate: '今日缓存命中率',
+    totalCacheHitRate: '累计缓存命中率',
+    cacheReadShort: '缓存读取',
     performance: '性能指标',
     avgResponse: '平均响应',
     averageTime: '平均时间',
@@ -258,14 +261,54 @@ export default {
     ipBlacklistHint: '每行一个 IP 或 CIDR，这些 IP 将被禁止使用此密钥',
     ipRestrictionEnabled: '已配置 IP 限制',
     ccSwitchNotInstalled:
-      'CC-Switch 未安装或协议处理程序未注册。请先安装 CC-Switch 或手动复制 API 密钥。',
+      '未检测到 CC-Switch。请先下载安装，然后再重新点击「导入到 CCS」。也可手动复制 API 密钥。',
+    ccSwitchDownload: {
+      title: '打开或安装 CC-Switch',
+      description: '导入配置需要 CC-Switch 桌面客户端。若尚未安装，请选择适合当前系统的版本。',
+      windows: 'Windows',
+      windowsDesc: '安装包（.msi）',
+      macos: 'macOS',
+      macosDesc: '安装包（.dmg）',
+      linux: 'Linux',
+      linuxDesc: 'AppImage',
+      other: '其他版本',
+      otherDesc: '便携版、ARM、旧版本',
+      recommended: '当前系统推荐',
+      afterInstall: '安装完成后，请回到此页并点击「已安装，继续导入」。',
+      continueImport: '已安装，继续导入'
+    },
     ccsClientSelect: {
-      title: '选择客户端',
-      description: '请选择您要导入到 CC-Switch 的客户端类型：',
+      title: '选择导入工具',
+      description: '请选择要导入到 CC-Switch 的工具：',
       claudeCode: 'Claude Code',
       claudeCodeDesc: '导入为 Claude Code 配置',
+      codex: 'Codex',
+      codexDesc: '导入为 Codex 配置',
       geminiCli: 'Gemini CLI',
-      geminiCliDesc: '导入为 Gemini CLI 配置'
+      geminiCliDesc: '导入为 Gemini CLI 配置',
+      grokBuild: 'Grok Build',
+      grokBuildDesc: '导入为 Grok Build 配置',
+      openCode: 'OpenCode',
+      openCodeDesc: '导入为 OpenCode 配置',
+      openClaw: 'OpenClaw',
+      openClawDesc: '导入为 OpenClaw 配置',
+      hermes: 'Hermes',
+      hermesDesc: '导入为 Hermes 配置'
+    },
+    ccsModelSelect: {
+      title: '选择导入模型',
+      description: '请选择要写入 CC-Switch 配置的模型：',
+      models: {
+        cursorDefault: '自动选择（推荐）',
+        cursorGrok45: 'Grok 4.5',
+        cursorGrok45Max: 'Grok 4.5（Max）',
+        cursorClaudeFable5: 'Claude Fable 5',
+        cursorClaudeSonnet5: 'Claude Sonnet 5',
+        cursorGpt56Sol: 'GPT 5.6 Sol',
+        cursorGrok46: 'Grok 4.6',
+        cursorGrok46Max: 'Grok 4.6（Max）',
+        cursorComposer25: 'Composer 2.5'
+      }
     },
     // 配额和有效期
     quotaLimit: '额度限制',

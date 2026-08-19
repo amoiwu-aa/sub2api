@@ -184,6 +184,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import { updateUserGroups } from '@/api/admin/distribution'
 import type { AdminUser, Group, GroupPlatform } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
@@ -301,10 +302,14 @@ const handleSave = async () => {
       }
     }
 
-    await adminAPI.users.update(props.user.id, {
-      allowed_groups: allowedGroups,
-      group_rates: isAffiliateAdmin.value || Object.keys(groupRates).length === 0 ? undefined : groupRates,
-    })
+    if (isAffiliateAdmin.value) {
+      await updateUserGroups(props.user.id, { group_ids: allowedGroups })
+    } else {
+      await adminAPI.users.update(props.user.id, {
+        allowed_groups: allowedGroups,
+        group_rates: Object.keys(groupRates).length === 0 ? undefined : groupRates,
+      })
+    }
 
     appStore.showSuccess(t('admin.users.groupConfigUpdated'))
     emit('success')

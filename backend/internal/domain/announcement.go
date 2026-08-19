@@ -38,6 +38,10 @@ var (
 )
 
 type AnnouncementTargeting struct {
+	// AffiliateAdminID 是内部受众边界。设置后，公告只对该分销管理员
+	// 名下的普通用户可见；该字段只能由服务端管理端逻辑写入。
+	AffiliateAdminID *int64 `json:"affiliate_admin_id,omitempty"`
+
 	// AnyOf 表示 OR：任意一个条件组满足即可展示。
 	AnyOf []AnnouncementConditionGroup `json:"any_of,omitempty"`
 }
@@ -131,6 +135,13 @@ func (c AnnouncementCondition) Matches(balance float64, activeSubscriptionGroupI
 
 func (t AnnouncementTargeting) NormalizeAndValidate() (AnnouncementTargeting, error) {
 	normalized := AnnouncementTargeting{AnyOf: make([]AnnouncementConditionGroup, 0, len(t.AnyOf))}
+	if t.AffiliateAdminID != nil {
+		if *t.AffiliateAdminID <= 0 {
+			return AnnouncementTargeting{}, ErrAnnouncementInvalidTarget
+		}
+		ownerID := *t.AffiliateAdminID
+		normalized.AffiliateAdminID = &ownerID
+	}
 
 	// 允许空 targeting（展示给所有用户）
 	if len(t.AnyOf) == 0 {

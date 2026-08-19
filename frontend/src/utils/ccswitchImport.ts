@@ -1,14 +1,15 @@
 import type { GroupPlatform } from '@/types'
 
 export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
+export const ANTHROPIC_CC_SWITCH_MODEL = 'claude-sonnet-4-6'
+export const GEMINI_CC_SWITCH_MODEL = 'gemini-2.5-flash'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
-/** Cursor 的模型 id 带 cursor/ 命名空间，cursor/default 即上游的 Auto 档 */
 export const CURSOR_CC_SWITCH_MODEL = 'cursor/default'
+export const KIRO_CC_SWITCH_MODEL = 'kiro/auto'
+
 /**
- * 分组没配模型白名单时，Cursor 导入弹窗退而求其次给出的候选。
- *
- * 只列常年可用的那几个：Claude / GPT 系要吃订阅里「包含的 API 用量」，
- * 那份额度耗尽后上游直接回 429，摆进选项里只会让人选中一个用不了的模型。
+ * Cursor models use the cursor/ namespace. Keep the fallback list focused on
+ * models that remain usable when the separate API quota is exhausted.
  */
 export const CURSOR_CC_SWITCH_MODEL_FALLBACKS = [
   'cursor/default',
@@ -18,19 +19,18 @@ export const CURSOR_CC_SWITCH_MODEL_FALLBACKS = [
   'cursor/grok-4.5-max',
   'cursor/composer-2.5'
 ]
-/**
- * Kiro 的模型 id 带 kiro/ 命名空间；导入 Claude Code 时须锁定各档位模型。
- *
- * 取 auto 而不是某个具体模型：可用模型随订阅档位变化，只有 auto 在免费号和
- * 企业号上都存在，也是上游自己返回的 defaultModel。早先默认 claude-sonnet-4.6，
- * 那是企业号才有的，免费号导入后第一个请求就被上游回 INVALID_MODEL_ID。
- */
-export const KIRO_CC_SWITCH_MODEL = 'kiro/auto'
 
-export type CcSwitchClientType = 'claude' | 'gemini'
+export type CcSwitchClientType =
+  | 'claude'
+  | 'codex'
+  | 'gemini'
+  | 'grokbuild'
+  | 'opencode'
+  | 'openclaw'
+  | 'hermes'
 
 export interface CcSwitchImportConfig {
-  app: string
+  app: CcSwitchClientType
   endpoint: string
   model?: string
 }
@@ -42,23 +42,98 @@ export interface CcSwitchImportDeeplinkInput {
   providerName: string
   apiKey: string
   usageScript: string
-  /**
-   * 覆盖平台默认模型。留空则沿用 resolveCcSwitchImportConfig 给的默认值。
-   *
-   * 平台默认值是保守选的（Cursor 用 Auto），但一个分组开放了哪些模型只有运行时
-   * 才知道，所以让调用方把用户选中的那个带进来——否则导入后还得去 CC Switch 里
-   * 手工改一遍模型字段。
-   */
   modelOverride?: string | null
 }
 
-function withV1Endpoint(baseUrl: string): string {
-  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '')
-  return normalizedBaseUrl.endsWith('/v1') ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`
+const ADDITIVE_CC_SWITCH_CLIENTS: CcSwitchClientType[] = ['opencode', 'openclaw', 'hermes']
+
+const CLIENTS_BY_PLATFORM: Record<GroupPlatform, CcSwitchClientType[]> = {
+  anthropic: ['claude', 'opencode', 'openclaw', 'hermes'],
+  openai: ['codex', 'opencode', 'openclaw', 'hermes'],
+  gemini: ['gemini', 'opencode', 'openclaw', 'hermes'],
+  antigravity: ['claude', 'gemini', 'opencode', 'openclaw', 'hermes'],
+  grok: ['grokbuild', 'claude', 'codex', 'opencode', 'openclaw', 'hermes'],
+  cursor: ['claude', 'codex', 'opencode', 'openclaw', 'hermes'],
+  kiro: ['claude', 'opencode', 'openclaw', 'hermes'],
+  composite: [
+    'claude',
+    'codex',
+    'gemini',
+    'grokbuild',
+    'opencode',
+    'openclaw',
+    'hermes'
+  ]
 }
 
-function withoutV1Suffix(endpoint: string): string {
-  return endpoint.replace(/\/v1$/, '')
+/**
+ * Returns only clients backed by an endpoint RingStar exposes for the group.
+ * OpenAI groups gain the Claude clients only when Messages dispatch is enabled.
+ */
+export function getCcSwitchClientTypes(
+  platform: GroupPlatform | undefined | null,
+  allowMessagesDispatch = false
+): CcSwitchClientType[] {
+  const normalizedPlatform = platform || 'anthropic'
+  const clients = [...CLIENTS_BY_PLATFORM[normalizedPlatform]]
+
+  if (normalizedPlatform === 'openai' && allowMessagesDispatch) {
+    clients.splice(1, 0, 'claude')
+  }
+
+  return clients
+}
+
+/**
+ * Namespaced and mixed-platform groups need an explicit model to avoid the
+ * imported tool falling back to a model from the wrong upstream family.
+ */
+export function ccSwitchImportNeedsModel(
+  platform: GroupPlatform | undefined | null,
+  clientType: CcSwitchClientType
+): boolean {
+  const normalizedPlatform = platform || 'anthropic'
+  return (
+    normalizedPlatform === 'cursor' ||
+    normalizedPlatform === 'kiro' ||
+    normalizedPlatform === 'composite' ||
+    ADDITIVE_CC_SWITCH_CLIENTS.includes(clientType)
+  )
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+}
+
+function withV1Endpoint(baseUrl: string): string {
+  return `${normalizeBaseUrl(baseUrl)}/v1`
+}
+
+function defaultModelFor(
+  platform: GroupPlatform,
+  clientType: CcSwitchClientType
+): string | undefined {
+  switch (platform) {
+    case 'openai':
+      return clientType === 'claude' ? undefined : OPENAI_CC_SWITCH_CODEX_MODEL
+    case 'gemini':
+      return clientType === 'gemini' ? undefined : GEMINI_CC_SWITCH_MODEL
+    case 'antigravity':
+      if (clientType === 'claude' || clientType === 'gemini') {
+        return undefined
+      }
+      return ANTHROPIC_CC_SWITCH_MODEL
+    case 'grok':
+      return GROK_CC_SWITCH_MODEL
+    case 'cursor':
+      return CURSOR_CC_SWITCH_MODEL
+    case 'kiro':
+      return KIRO_CC_SWITCH_MODEL
+    case 'composite':
+      return undefined
+    default:
+      return clientType === 'claude' ? undefined : ANTHROPIC_CC_SWITCH_MODEL
+  }
 }
 
 export function resolveCcSwitchImportConfig(
@@ -66,52 +141,38 @@ export function resolveCcSwitchImportConfig(
   clientType: CcSwitchClientType,
   baseUrl: string
 ): CcSwitchImportConfig {
-  switch (platform || 'anthropic') {
-    case 'antigravity':
-      return {
-        app: clientType === 'gemini' ? 'gemini' : 'claude',
-        endpoint: `${baseUrl}/antigravity`
-      }
-    case 'openai':
-      return {
-        app: 'codex',
-        endpoint: baseUrl,
-        model: OPENAI_CC_SWITCH_CODEX_MODEL
-      }
-    case 'gemini':
-      return {
-        app: 'gemini',
-        endpoint: baseUrl
-      }
-    case 'grok':
-      return {
-        app: 'grokbuild',
-        endpoint: withV1Endpoint(baseUrl),
-        model: GROK_CC_SWITCH_MODEL
-      }
-    case 'cursor':
-      // Cursor 只提供 OpenAI chat/completions：/v1/messages 与 /v1/responses 都由
-      // 网关显式 404（routes/gateway.go writeUnsupportedForPlatform），所以既不能导成
-      // claude，也不能导成走 Responses API 的 codex。OpenCode 的 OpenAI 兼容 provider
-      // 打的正是 chat/completions，是唯一对得上的客户端。
-      return {
-        app: 'opencode',
-        endpoint: withV1Endpoint(baseUrl),
-        model: CURSOR_CC_SWITCH_MODEL
-      }
-    case 'kiro':
-      // Kiro 同时提供 Anthropic /v1/messages 与 OpenAI chat/completions，
-      // 因此可以复用 claude 客户端，但模型必须锁到 kiro/ 命名空间下的具体 id。
-      return {
-        app: 'claude',
-        endpoint: baseUrl,
-        model: KIRO_CC_SWITCH_MODEL
-      }
-    default:
-      return {
-        app: 'claude',
-        endpoint: baseUrl
-      }
+  const normalizedPlatform = platform || 'anthropic'
+  const rootUrl = normalizeBaseUrl(baseUrl)
+  const model = defaultModelFor(normalizedPlatform, clientType)
+
+  if (clientType === 'claude') {
+    return {
+      app: clientType,
+      endpoint: normalizedPlatform === 'antigravity' ? `${rootUrl}/antigravity` : rootUrl,
+      model
+    }
+  }
+
+  if (clientType === 'gemini') {
+    return {
+      app: clientType,
+      endpoint: normalizedPlatform === 'antigravity' ? `${rootUrl}/antigravity` : rootUrl,
+      model
+    }
+  }
+
+  if (clientType === 'codex') {
+    return {
+      app: clientType,
+      endpoint: normalizedPlatform === 'openai' ? rootUrl : withV1Endpoint(rootUrl),
+      model
+    }
+  }
+
+  return {
+    app: clientType,
+    endpoint: withV1Endpoint(rootUrl),
+    model
   }
 }
 
@@ -121,7 +182,7 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
     ['resource', 'provider'],
     ['app', config.app],
     ['name', input.providerName],
-    ['homepage', input.baseUrl],
+    ['homepage', normalizeBaseUrl(input.baseUrl)],
     ['endpoint', config.endpoint],
     ['apiKey', input.apiKey],
     ['configFormat', 'json'],
@@ -135,11 +196,9 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
     entries.splice(2, 0, ['model', model])
   }
 
-  // usageScript 里写的是 `{{baseUrl}}/v1/usage`，而 CC-Switch 的 {{baseUrl}} 在没有
-  // usageBaseUrl 时回落到 provider 的 endpoint。cursor / grok 的 endpoint 本身就带
-  // /v1，回落会拼出 /v1/v1/usage —— 网关对它是 404，表现为「查询失败」。
-  // 显式给用量查询一个不带 /v1 的基址，脚本与端点就不会再各拼一次。
-  const usageBaseUrl = withoutV1Suffix(config.endpoint)
+  // The usage script appends /v1/usage itself. Keep its base URL at the host
+  // root when the imported provider endpoint already ends in /v1.
+  const usageBaseUrl = normalizeBaseUrl(config.endpoint)
   if (usageBaseUrl !== config.endpoint) {
     entries.push(['usageBaseUrl', usageBaseUrl])
   }

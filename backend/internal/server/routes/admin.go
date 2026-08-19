@@ -33,6 +33,11 @@ func RegisterAdminRoutes(
 		// 分销管理员开号/授权分组需要只读分组目录；经营字段在 handler 内裁掉。
 		admin.GET("/groups/all", h.Admin.Group.GetAll)
 
+		registerDistributionRoutes(admin, h, panelRateLimiter)
+		// 公告管理由 handler 按角色及下放权限进一步收口：
+		// 总管理员管理全量，分销管理员仅管理自己发布给名下用户的通知。
+		registerAnnouncementRoutes(admin, h)
+
 		super := admin.Group("")
 		super.Use(middleware.RequireSuperAdmin())
 
@@ -47,9 +52,6 @@ func RegisterAdminRoutes(
 
 		// 账号管理
 		registerAccountRoutes(super, h, stepUpAuth)
-
-		// 公告管理
-		registerAnnouncementRoutes(super, h)
 
 		// OpenAI OAuth
 		registerOpenAIOAuthRoutes(super, h)
@@ -132,6 +134,41 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(super, h, stepUpAuth)
+	}
+}
+
+func registerDistributionRoutes(admin *gin.RouterGroup, h *handler.Handlers, panelRateLimiter *middleware.PanelRateLimiter) {
+	if h == nil || h.Admin == nil || h.Admin.Distribution == nil {
+		return
+	}
+	dist := admin.Group("/distribution")
+	dist.Use(middleware.RequireAffiliateAdmin())
+	dh := h.Admin.Distribution
+	heavy := panelRateLimiter.Heavy()
+	{
+		dist.GET("/dashboard/snapshot", heavy, dh.GetDashboardSnapshot)
+		dist.GET("/usage/trend", heavy, dh.GetUsageTrend)
+		dist.GET("/usage/models", dh.GetUsageModels)
+		dist.GET("/usage/errors", dh.GetUsageErrors)
+		dist.GET("/users/ranking", dh.GetUserRanking)
+		dist.GET("/users/:id/usage/summary", dh.GetUserUsageSummary)
+		dist.GET("/users/:id/usage/trend", heavy, dh.GetUserUsageTrend)
+		dist.GET("/users/:id/usage/logs", dh.GetUserUsageLogs)
+
+		dist.GET("/balance/summary", dh.GetBalanceSummary)
+		dist.GET("/balance/transfers", dh.ListBalanceTransfers)
+		dist.POST("/users/:id/balance-transfers", dh.CreateBalanceTransfer)
+
+		dist.GET("/groups", dh.ListGroups)
+		dist.PUT("/users/:id/groups", dh.UpdateUserGroups)
+
+		dist.GET("/invites/profile", dh.GetInviteProfile)
+		dist.PUT("/invites/settings", dh.UpdateInviteSettings)
+		dist.POST("/invites/rotate-code", dh.RotateInviteCode)
+		dist.GET("/invites/registrations", dh.ListInviteRegistrations)
+
+		dist.GET("/users/:id/subscriptions", dh.ListUserSubscriptions)
+		dist.GET("/permissions", dh.GetMyPermissions)
 	}
 }
 
@@ -312,6 +349,10 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	privileged := users.Group("")
 	privileged.Use(middleware.RequireSuperAdmin())
 	{
+		if h != nil && h.Admin != nil && h.Admin.Distribution != nil {
+			privileged.GET("/:id/distribution-permissions", h.Admin.Distribution.GetUserPermissions)
+			privileged.PUT("/:id/distribution-permissions", h.Admin.Distribution.UpdateUserPermissions)
+		}
 		privileged.POST("/:id/auth-identities", h.Admin.User.BindAuthIdentity)
 		privileged.POST("/:id/balance", h.Admin.User.UpdateBalance)
 		privileged.GET("/:id/api-keys", h.Admin.User.GetUserAPIKeys)

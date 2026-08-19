@@ -344,6 +344,7 @@ export interface AnnouncementConditionGroup {
 }
 
 export interface AnnouncementTargeting {
+  affiliate_admin_id?: number
   any_of?: AnnouncementConditionGroup[]
 }
 
@@ -1922,6 +1923,7 @@ export interface RedeemCode {
   notes?: string
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
+  balance_validity_days?: number // 余额类型专用，0 表示永久
   user?: User
   group?: Group // 关联的分组
 }
@@ -1932,6 +1934,7 @@ export interface GenerateRedeemCodesRequest {
   value: number
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
+  balance_validity_days?: number // 余额类型专用，0 表示永久
   expires_at?: string | null
   expires_in_days?: number
 }

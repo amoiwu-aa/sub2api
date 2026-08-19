@@ -4,12 +4,19 @@ export function resolvePanelHomePath(isAdmin: boolean, isAffiliateAdmin = false)
     return '/admin/dashboard'
   }
   if (isAffiliateAdmin) {
-    return '/admin/users'
+    return '/admin/distribution/dashboard'
   }
   return '/dashboard'
 }
 
-/** Affiliate admins may only use the user-management page. */
+/** Affiliate admins may use user management and the distribution center. */
 export function isAffiliateAdminAllowedAdminPath(path: string): boolean {
-  return path === '/admin/users' || path.startsWith('/admin/users/')
+  return (
+    path === '/admin/users' ||
+    path.startsWith('/admin/users/') ||
+    path === '/admin/distribution' ||
+    path.startsWith('/admin/distribution/') ||
+    path === '/admin/announcements' ||
+    path.startsWith('/admin/announcements/')
+  )
 }

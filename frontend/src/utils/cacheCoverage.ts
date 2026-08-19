@@ -16,6 +16,7 @@ export interface CacheCoverageSource {
 export interface CacheObservability {
   reported: number
   estimated: number
+  excluded: number
   unavailable: number
   unknown: number
   total: number
@@ -68,24 +69,36 @@ export const getCacheObservability = (source: CacheCoverageSource): CacheObserva
   const estimated = toNonNegativeNumber(source.estimated_requests)
   const unavailable = toNonNegativeNumber(source.unavailable_requests)
   const classified = reported + estimated + unavailable
-  const total = Math.max(classified, toNonNegativeNumber(source.requests))
-  const unknown = Math.max(total - classified, 0)
-  const available = total > 0 && [
+  const rawTotal = Math.max(classified, toNonNegativeNumber(source.requests))
+  const unknown = Math.max(rawTotal - classified, 0)
+  // Estimated traffic (for example Cursor/Grok bridges) cannot report real
+  // provider cache usage. Keep it visible for diagnostics, but exclude it
+  // from the observability denominator so it does not downgrade otherwise
+  // fully observable provider-reported traffic.
+  const excluded = Math.min(estimated, rawTotal)
+  const total = Math.max(rawTotal - excluded, 0)
+  const hasObservationContract = [
     source.reported_requests,
     source.estimated_requests,
     source.unavailable_requests
   ].some((value) => value !== undefined && value !== null)
+  const available = total > 0 && hasObservationContract
 
   return {
     reported,
     estimated,
+    excluded,
     unavailable,
     unknown,
     total,
     ratio: total > 0 ? (reported / total) * 100 : 0,
     available,
     partiallyObservable: available && reported > 0 && reported < total,
-    unobservable: available && reported === 0 && estimated + unavailable + unknown > 0
+    unobservable:
+      hasObservationContract &&
+      rawTotal > 0 &&
+      reported === 0 &&
+      (total === 0 || unavailable + unknown > 0)
   }
 }
 
@@ -127,7 +140,9 @@ export const getCacheCoverageMetrics = (source: CacheCoverageSource): CacheCover
     observability,
     usesReportedSubset,
     coverageAvailable:
-      !observability.unobservable && (usesReportedSubset || !observability.partiallyObservable)
+      !observability.unobservable &&
+      (usesReportedSubset ||
+        (!observability.partiallyObservable && observability.excluded === 0))
   }
 }
 

@@ -2,6 +2,12 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
+        <div
+          v-if="isAffiliateAdmin"
+          class="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-200"
+        >
+          {{ t('admin.announcements.managedAudienceNotice') }}
+        </div>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
           <div class="flex-1 sm:max-w-64">
@@ -212,6 +218,7 @@
         </div>
 
         <AnnouncementTargetingEditor
+          v-if="!isAffiliateAdmin"
           v-model="form.targeting"
           :groups="subscriptionGroups"
         />
@@ -260,6 +267,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
@@ -282,6 +290,8 @@ import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const isAffiliateAdmin = computed(() => authStore.isAffiliateAdmin)
 
 const announcements = ref<Announcement[]>([])
 const loading = ref(false)
@@ -339,6 +349,13 @@ const statusLabel = (status: string) => {
 }
 
 const targetingSummary = (targeting: AnnouncementTargeting) => {
+  if (targeting?.affiliate_admin_id) {
+    return isAffiliateAdmin.value
+      ? t('admin.announcements.targetingSummaryManagedUsers')
+      : t('admin.announcements.targetingSummaryDistributorUsers', {
+          id: targeting.affiliate_admin_id
+        })
+  }
   const anyOf = targeting?.any_of ?? []
   if (!anyOf || anyOf.length === 0) return t('admin.announcements.targetingSummaryAll')
   return t('admin.announcements.targetingSummaryCustom', { groups: anyOf.length })
@@ -440,6 +457,10 @@ const form = reactive({
 const subscriptionGroups = ref<AdminGroup[]>([])
 
 async function loadSubscriptionGroups() {
+  if (isAffiliateAdmin.value) {
+    subscriptionGroups.value = []
+    return
+  }
   try {
     const all = await adminAPI.groups.getAll()
     subscriptionGroups.value = (all || []).filter((g) => g.subscription_type === 'subscription')
@@ -498,7 +519,7 @@ function buildCreatePayload() {
     content: form.content,
     status: form.status as any,
     notify_mode: form.notify_mode as any,
-    targeting: form.targeting,
+    targeting: isAffiliateAdmin.value ? { any_of: [] } : form.targeting,
     starts_at: startsAt ?? undefined,
     ends_at: endsAt ?? undefined
   }
@@ -527,7 +548,7 @@ function buildUpdatePayload(original: Announcement) {
   }
 
   // targeting: do shallow compare by JSON
-  if (JSON.stringify(form.targeting ?? {}) !== JSON.stringify(original.targeting ?? {})) {
+  if (!isAffiliateAdmin.value && JSON.stringify(form.targeting ?? {}) !== JSON.stringify(original.targeting ?? {})) {
     payload.targeting = form.targeting
   }
 
@@ -536,7 +557,7 @@ function buildUpdatePayload(original: Announcement) {
 
 async function handleSave() {
   // Frontend validation for targeting (to avoid ANNOUNCEMENT_INVALID_TARGET)
-  const anyOf = form.targeting?.any_of ?? []
+  const anyOf = isAffiliateAdmin.value ? [] : (form.targeting?.any_of ?? [])
   if (anyOf.length > 50) {
     appStore.showError(t('admin.announcements.failedToCreate'))
     return

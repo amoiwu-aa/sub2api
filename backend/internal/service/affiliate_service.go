@@ -69,6 +69,10 @@ type AffiliateSummary struct {
 	AffHistoryQuota      float64   `json:"aff_history_quota"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+	// OwnerRole / OwnerStatus come from users when the profile is loaded by
+	// aff_code. Used to keep 分销归属 binding when rebate is off.
+	OwnerRole   string `json:"-"`
+	OwnerStatus string `json:"-"`
 }
 
 type AffiliateInvitee struct {
@@ -289,11 +293,12 @@ func (s *AffiliateService) BindInviterByCode(ctx context.Context, userID int64, 
 	if s == nil || s.repo == nil {
 		return infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
 	}
-	// 总开关关闭时，注册阶段静默忽略 aff 参数（不报错，避免阻断注册流程）
-	if !s.IsEnabled(ctx) {
-		return nil
-	}
+
+	enabled := s.IsEnabled(ctx)
 	if !isValidAffiliateCodeFormat(code) {
+		if !enabled {
+			return nil
+		}
 		return ErrAffiliateCodeInvalid
 	}
 
@@ -308,12 +313,24 @@ func (s *AffiliateService) BindInviterByCode(ctx context.Context, userID int64, 
 	inviterSummary, err := s.repo.GetAffiliateByCode(ctx, code)
 	if err != nil {
 		if errors.Is(err, ErrAffiliateProfileNotFound) {
+			if !enabled {
+				return nil
+			}
 			return ErrAffiliateCodeInvalid
 		}
 		return err
 	}
 	if inviterSummary == nil || inviterSummary.UserID <= 0 || inviterSummary.UserID == userID {
+		if !enabled {
+			return nil
+		}
 		return ErrAffiliateCodeInvalid
+	}
+
+	// Rebate stays gated by affiliate_enabled at AccrueInviteRebate.
+	// When rebate is off, only an active affiliate_admin code creates 分销归属.
+	if !shouldBindAffiliateCode(enabled, inviterSummary.OwnerRole, inviterSummary.OwnerStatus) {
+		return nil
 	}
 
 	bound, err := s.repo.BindInviter(ctx, userID, inviterSummary.UserID)
@@ -541,6 +558,16 @@ func (s *AffiliateService) AdminResetUserAffCode(ctx context.Context, userID int
 		return "", infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
 	}
 	return s.repo.ResetUserAffCode(ctx, userID)
+}
+
+// RotateOwnAffCode replaces the caller's affiliate code with a system-generated
+// random value. Custom short codes are not accepted. Affiliate admins must only
+// pass their own user ID — this method does not take a target user.
+func (s *AffiliateService) RotateOwnAffCode(ctx context.Context, userID int64) (string, error) {
+	if userID <= 0 {
+		return "", infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	return s.AdminResetUserAffCode(ctx, userID)
 }
 
 // AdminSetUserRebateRate 设置/清除用户专属返利比例。ratePercent==nil 表示清除。

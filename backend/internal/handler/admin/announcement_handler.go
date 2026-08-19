@@ -17,12 +17,17 @@ import (
 // AnnouncementHandler handles admin announcement management
 type AnnouncementHandler struct {
 	announcementService *service.AnnouncementService
+	permissionService   *service.AffiliateAdminPermissionService
 }
 
 // NewAnnouncementHandler creates a new admin announcement handler
-func NewAnnouncementHandler(announcementService *service.AnnouncementService) *AnnouncementHandler {
+func NewAnnouncementHandler(
+	announcementService *service.AnnouncementService,
+	permissionService *service.AffiliateAdminPermissionService,
+) *AnnouncementHandler {
 	return &AnnouncementHandler{
 		announcementService: announcementService,
+		permissionService:   permissionService,
 	}
 }
 
@@ -46,9 +51,70 @@ type UpdateAnnouncementRequest struct {
 	EndsAt     *int64                         `json:"ends_at"`   // Unix seconds, 0 = clear
 }
 
+func (h *AnnouncementHandler) requireAnnouncementActor(c *gin.Context) (int64, string, bool) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not found in context")
+		return 0, "", false
+	}
+	role, ok := middleware2.GetUserRoleFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User role not found in context")
+		return 0, "", false
+	}
+	switch role {
+	case service.RoleAdmin:
+		return subject.UserID, role, true
+	case service.RoleAffiliateAdmin:
+		if h.permissionService == nil {
+			response.ErrorFrom(c, service.ErrAffiliateAdminPermissionDenied)
+			return 0, "", false
+		}
+		if err := h.permissionService.RequirePublishAnnouncements(c.Request.Context(), subject.UserID); err != nil {
+			response.ErrorFrom(c, err)
+			return 0, "", false
+		}
+		return subject.UserID, role, true
+	default:
+		response.Forbidden(c, "Announcement management access required")
+		return 0, "", false
+	}
+}
+
+func affiliateOwnsAnnouncement(actorID int64, item *service.Announcement) bool {
+	return item != nil &&
+		item.CreatedBy != nil &&
+		*item.CreatedBy == actorID &&
+		item.Targeting.AffiliateAdminID != nil &&
+		*item.Targeting.AffiliateAdminID == actorID
+}
+
+func (h *AnnouncementHandler) requireAnnouncementOwnership(
+	c *gin.Context,
+	actorID int64,
+	role string,
+	announcementID int64,
+) (*service.Announcement, bool) {
+	item, err := h.announcementService.GetByID(c.Request.Context(), announcementID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return nil, false
+	}
+	if role == service.RoleAffiliateAdmin && !affiliateOwnsAnnouncement(actorID, item) {
+		// Hide global/other distributors' announcement IDs from affiliate admins.
+		response.ErrorFrom(c, service.ErrAnnouncementNotFound)
+		return nil, false
+	}
+	return item, true
+}
+
 // List handles listing announcements with filters
 // GET /api/v1/admin/announcements
 func (h *AnnouncementHandler) List(c *gin.Context) {
+	actorID, role, ok := h.requireAnnouncementActor(c)
+	if !ok {
+		return
+	}
 	page, pageSize := response.ParsePagination(c)
 	status := strings.TrimSpace(c.Query("status"))
 	search := strings.TrimSpace(c.Query("search"))
@@ -65,10 +131,15 @@ func (h *AnnouncementHandler) List(c *gin.Context) {
 		SortOrder: sortOrder,
 	}
 
+	filters := service.AnnouncementListFilters{Status: status, Search: search}
+	if role == service.RoleAffiliateAdmin {
+		filters.CreatedBy = &actorID
+		filters.AffiliateAdminID = &actorID
+	}
 	items, paginationResult, err := h.announcementService.List(
 		c.Request.Context(),
 		params,
-		service.AnnouncementListFilters{Status: status, Search: search},
+		filters,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -85,15 +156,18 @@ func (h *AnnouncementHandler) List(c *gin.Context) {
 // GetByID handles getting an announcement by ID
 // GET /api/v1/admin/announcements/:id
 func (h *AnnouncementHandler) GetByID(c *gin.Context) {
+	actorID, role, ok := h.requireAnnouncementActor(c)
+	if !ok {
+		return
+	}
 	announcementID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || announcementID <= 0 {
 		response.BadRequest(c, "Invalid announcement ID")
 		return
 	}
 
-	item, err := h.announcementService.GetByID(c.Request.Context(), announcementID)
-	if err != nil {
-		response.ErrorFrom(c, err)
+	item, ok := h.requireAnnouncementOwnership(c, actorID, role, announcementID)
+	if !ok {
 		return
 	}
 
@@ -103,16 +177,24 @@ func (h *AnnouncementHandler) GetByID(c *gin.Context) {
 // Create handles creating a new announcement
 // POST /api/v1/admin/announcements
 func (h *AnnouncementHandler) Create(c *gin.Context) {
+	actorID, role, ok := h.requireAnnouncementActor(c)
+	if !ok {
+		return
+	}
 	var req CreateAnnouncementRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
 
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
-		response.Unauthorized(c, "User not found in context")
-		return
+	targeting := req.Targeting
+	if role == service.RoleAffiliateAdmin {
+		// Affiliate announcements always target every managed user. Advanced
+		// global conditions remain a super-admin capability.
+		targeting = service.AnnouncementTargeting{AffiliateAdminID: &actorID}
+	} else {
+		// Clients cannot manufacture an affiliate scope through the global API.
+		targeting.AffiliateAdminID = nil
 	}
 
 	input := &service.CreateAnnouncementInput{
@@ -120,8 +202,8 @@ func (h *AnnouncementHandler) Create(c *gin.Context) {
 		Content:    req.Content,
 		Status:     req.Status,
 		NotifyMode: req.NotifyMode,
-		Targeting:  req.Targeting,
-		ActorID:    &subject.UserID,
+		Targeting:  targeting,
+		ActorID:    &actorID,
 	}
 
 	if req.StartsAt != nil && *req.StartsAt > 0 {
@@ -145,6 +227,10 @@ func (h *AnnouncementHandler) Create(c *gin.Context) {
 // Update handles updating an announcement
 // PUT /api/v1/admin/announcements/:id
 func (h *AnnouncementHandler) Update(c *gin.Context) {
+	actorID, role, ok := h.requireAnnouncementActor(c)
+	if !ok {
+		return
+	}
 	announcementID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || announcementID <= 0 {
 		response.BadRequest(c, "Invalid announcement ID")
@@ -156,11 +242,19 @@ func (h *AnnouncementHandler) Update(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	item, ok := h.requireAnnouncementOwnership(c, actorID, role, announcementID)
 	if !ok {
-		response.Unauthorized(c, "User not found in context")
 		return
+	}
+
+	targeting := req.Targeting
+	if role == service.RoleAffiliateAdmin {
+		scoped := service.AnnouncementTargeting{AffiliateAdminID: &actorID}
+		targeting = &scoped
+	} else if targeting != nil && item.Targeting.AffiliateAdminID == nil {
+		// A global announcement cannot be converted into a distributor-scoped
+		// record via a client-supplied internal field.
+		targeting.AffiliateAdminID = nil
 	}
 
 	input := &service.UpdateAnnouncementInput{
@@ -168,8 +262,8 @@ func (h *AnnouncementHandler) Update(c *gin.Context) {
 		Content:    req.Content,
 		Status:     req.Status,
 		NotifyMode: req.NotifyMode,
-		Targeting:  req.Targeting,
-		ActorID:    &subject.UserID,
+		Targeting:  targeting,
+		ActorID:    &actorID,
 	}
 
 	if req.StartsAt != nil {
@@ -206,9 +300,16 @@ func (h *AnnouncementHandler) Update(c *gin.Context) {
 // Delete handles deleting an announcement
 // DELETE /api/v1/admin/announcements/:id
 func (h *AnnouncementHandler) Delete(c *gin.Context) {
+	actorID, role, ok := h.requireAnnouncementActor(c)
+	if !ok {
+		return
+	}
 	announcementID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || announcementID <= 0 {
 		response.BadRequest(c, "Invalid announcement ID")
+		return
+	}
+	if _, ok := h.requireAnnouncementOwnership(c, actorID, role, announcementID); !ok {
 		return
 	}
 
@@ -223,9 +324,17 @@ func (h *AnnouncementHandler) Delete(c *gin.Context) {
 // ListReadStatus handles listing users read status for an announcement
 // GET /api/v1/admin/announcements/:id/read-status
 func (h *AnnouncementHandler) ListReadStatus(c *gin.Context) {
+	actorID, role, ok := h.requireAnnouncementActor(c)
+	if !ok {
+		return
+	}
 	announcementID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || announcementID <= 0 {
 		response.BadRequest(c, "Invalid announcement ID")
+		return
+	}
+	item, ok := h.requireAnnouncementOwnership(c, actorID, role, announcementID)
+	if !ok {
 		return
 	}
 
@@ -241,12 +350,30 @@ func (h *AnnouncementHandler) ListReadStatus(c *gin.Context) {
 		search = search[:200]
 	}
 
-	items, paginationResult, err := h.announcementService.ListUserReadStatus(
-		c.Request.Context(),
-		announcementID,
-		params,
-		search,
-	)
+	var items []service.AnnouncementUserReadStatus
+	var paginationResult *pagination.PaginationResult
+	managedByAdminID := int64(0)
+	if role == service.RoleAffiliateAdmin {
+		managedByAdminID = actorID
+	} else if item.Targeting.AffiliateAdminID != nil {
+		managedByAdminID = *item.Targeting.AffiliateAdminID
+	}
+	if managedByAdminID > 0 {
+		items, paginationResult, err = h.announcementService.ListUserReadStatusScoped(
+			c.Request.Context(),
+			announcementID,
+			params,
+			search,
+			managedByAdminID,
+		)
+	} else {
+		items, paginationResult, err = h.announcementService.ListUserReadStatus(
+			c.Request.Context(),
+			announcementID,
+			params,
+			search,
+		)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

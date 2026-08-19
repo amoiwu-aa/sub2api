@@ -87,6 +87,7 @@ type cacheWriteTask struct {
 	groupID          int64
 	apiKeyID         int64
 	balance          float64
+	balanceExpiresAt *time.Time
 	amount           float64
 	subscriptionData *subscriptionCacheData
 }
@@ -99,6 +100,15 @@ type apiKeyRateLimitLoader interface {
 type subscriptionCacheInvalidationPubSub interface {
 	PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error
 	SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error
+}
+
+type balanceTTLCache interface {
+	SetUserBalanceWithTTL(ctx context.Context, userID int64, balance float64, ttl time.Duration) error
+}
+
+type balanceDBLoad struct {
+	balance       float64
+	nextExpiresAt *time.Time
 }
 
 // BillingCacheService 计费缓存服务
@@ -219,7 +229,7 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 		ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 		switch task.kind {
 		case cacheWriteSetBalance:
-			s.setBalanceCache(ctx, task.userID, task.balance)
+			s.setBalanceCache(ctx, task.userID, task.balance, task.balanceExpiresAt)
 		case cacheWriteSetSubscription:
 			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
 		case cacheWriteUpdateSubscriptionUsage:
@@ -325,18 +335,19 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 		loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
 		defer cancel()
 
-		balance, err := s.getUserBalanceFromDB(loadCtx, userID)
+		loaded, err := s.loadUserBalanceFromDB(loadCtx, userID)
 		if err != nil {
 			return nil, err
 		}
 
 		// 异步建立缓存
 		_ = s.enqueueCacheWrite(cacheWriteTask{
-			kind:    cacheWriteSetBalance,
-			userID:  userID,
-			balance: balance,
+			kind:             cacheWriteSetBalance,
+			userID:           userID,
+			balance:          loaded.balance,
+			balanceExpiresAt: loaded.nextExpiresAt,
 		})
-		return balance, nil
+		return loaded.balance, nil
 	})
 	if err != nil {
 		return 0, err
@@ -350,17 +361,50 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 
 // getUserBalanceFromDB 从数据库获取用户余额
 func (s *BillingCacheService) getUserBalanceFromDB(ctx context.Context, userID int64) (float64, error) {
+	loaded, err := s.loadUserBalanceFromDB(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return loaded.balance, nil
+}
+
+func (s *BillingCacheService) loadUserBalanceFromDB(ctx context.Context, userID int64) (*balanceDBLoad, error) {
+	if repo, ok := s.userRepo.(ExpiringBalanceRepository); ok {
+		state, err := repo.SettleExpiredBalanceGrants(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("settle expiring balance: %w", err)
+		}
+		return &balanceDBLoad{
+			balance:       state.Balance,
+			nextExpiresAt: state.NextExpiresAt,
+		}, nil
+	}
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return 0, fmt.Errorf("get user balance: %w", err)
+		return nil, fmt.Errorf("get user balance: %w", err)
 	}
-	return user.Balance, nil
+	return &balanceDBLoad{balance: user.Balance}, nil
 }
 
 // setBalanceCache 设置余额缓存
-func (s *BillingCacheService) setBalanceCache(ctx context.Context, userID int64, balance float64) {
+func (s *BillingCacheService) setBalanceCache(ctx context.Context, userID int64, balance float64, expiresAt *time.Time) {
 	if s.cache == nil {
 		return
+	}
+	if expiresAt != nil {
+		ttl := time.Until(*expiresAt)
+		if ttl <= 0 {
+			if err := s.cache.InvalidateUserBalance(ctx, userID); err != nil {
+				logger.LegacyPrintf("service.billing_cache", "Warning: invalidate expired balance cache failed for user %d: %v", userID, err)
+			}
+			return
+		}
+		if cache, ok := s.cache.(balanceTTLCache); ok {
+			if err := cache.SetUserBalanceWithTTL(ctx, userID, balance, ttl); err != nil {
+				logger.LegacyPrintf("service.billing_cache", "Warning: set expiring balance cache failed for user %d: %v", userID, err)
+			}
+			return
+		}
 	}
 	if err := s.cache.SetUserBalance(ctx, userID, balance); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: set balance cache failed for user %d: %v", userID, err)

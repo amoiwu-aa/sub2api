@@ -49,7 +49,7 @@ export default {
       cacheCreateShort: 'Created',
       observableRequests: 'Observable requests',
       cacheObservabilityTooltip:
-        'Only provider-reported requests have observable cache usage. Estimated and unavailable requests qualify how representative the coverage is.',
+        'Only provider-reported requests have real cache usage. Estimated requests such as Cursor or Grok are explicitly excluded from the observability denominator; unavailable and unknown requests still lower observability.',
       cachePartiallyObservable: 'Cache partially observable',
       cacheUnobservable: 'Cache unobservable',
       billingAdjustmentTokens: 'Billing adjustment',
@@ -424,6 +424,102 @@ export default {
       }
     },
 
+    distribution: {
+      placeholder: '—',
+      loadFailed: 'Failed to load distribution data',
+      last7Days: 'Last 7 days',
+      last30Days: 'Last 30 days',
+      date: 'Date',
+      requests: 'Requests',
+      tokens: 'Tokens',
+      cost: 'Cost',
+      user: 'User',
+      model: 'Model',
+      count: 'Count',
+      status: 'Status',
+      notes: 'Notes',
+      amount: 'Amount',
+      time: 'Time',
+      dashboard: {
+        title: 'Distribution Overview',
+        description: 'Snapshot of your customers, usage, and quota',
+        snapshotTitle: 'Business Snapshot',
+        customers: 'Customers',
+        activeCustomers: 'Active Customers',
+        todayUsage: 'Today Usage',
+        todayRequests: 'Today Requests',
+        quotaPool: 'Available Quota',
+        invites: 'Invite Signups',
+        rankingTitle: 'Today Usage Ranking'
+      },
+      usage: {
+        title: 'Usage Monitor',
+        description: 'Trends, model mix, and errors for your customers',
+        trend: 'Usage Trend',
+        trendHint: 'Requests, tokens, and spend for your customers by day.',
+        models: 'Model Mix',
+        modelsHint: 'Models used most often by your customers.',
+        errors: 'Errors',
+        errorsHint: 'Recent failed requests from your customers.',
+        ranking: 'User Ranking',
+        rankingHint: 'Your customers ranked by usage.'
+      },
+      balance: {
+        title: 'Quota Ledger',
+        description: 'Quota summary and transfer history',
+        summary: 'Quota Summary',
+        available: 'Available Quota',
+        frozen: 'Frozen Quota',
+        transferred: 'Transferred',
+        customerTotal: 'Customer Balance Total',
+        transfers: 'Transfers'
+      },
+      invites: {
+        title: 'Invite Signups',
+        description: 'Manage your invite code and registrations',
+        profile: 'Invite Profile',
+        profileHint: 'Share your invite code or link. New signups are attached to your account.',
+        settings: 'Invite Settings',
+        settingsHint: 'Disabling invites blocks this code. Rotating the code invalidates old links.',
+        code: 'Invite Code',
+        link: 'Invite Link',
+        copyCode: 'Copy Code',
+        copyLink: 'Copy Link',
+        enabled: 'Enable invite signups',
+        defaultGroups: 'Default groups on signup',
+        noGroups: 'No assignable groups yet. Ask a super admin to grant groups.',
+        saveSettings: 'Save Settings',
+        settingsSaved: 'Invite settings saved',
+        rotate: 'Rotate Code',
+        rotateConfirm: 'Old invite links will stop working immediately. Continue?',
+        rotateSuccess: 'Invite code rotated',
+        registrationsCount: 'Signups',
+        registrations: 'Registrations'
+      },
+      transfer: {
+        title: 'Allocate Quota',
+        hint: 'Move quota from your available balance to this user. This does not create a rebate.',
+        amount: 'Transfer Amount',
+        available: 'Your available quota',
+        userBalance: 'Current user balance',
+        notes: 'Notes',
+        success: 'Quota transferred',
+        insufficient: 'Not enough available quota'
+      },
+      userUsage: {
+        title: 'User Usage',
+        period: 'Selected range',
+        today: 'Today',
+        noLogs: 'No usage logs yet'
+      },
+      userSubscriptions: {
+        title: 'User Subscriptions',
+        plan: 'Plan',
+        expires: 'Expires',
+        empty: 'This user has no subscriptions'
+      }
+    },
+
     affiliates: {
       invitesDescription: 'View site-wide inviter and invitee relationships',
       rebatesDescription: 'View recharge orders that generated affiliate rebates',
@@ -613,6 +709,11 @@ export default {
       failedToDelete: 'Failed to delete user',
       failedToToggle: 'Failed to update user status',
       failedToLoadApiKeys: 'Failed to load user API keys',
+      permissions: {
+        publishAnnouncements: 'Allow announcement publishing',
+        publishAnnouncementsHint: 'When enabled, this distributor can publish and manage announcements for their own managed users.',
+        loadFailed: 'Failed to load distribution permissions'
+      },
       emailRequired: 'Please enter email',
       concurrencyMin: 'Concurrency must be at least 1',
       soraStorageQuota: 'Sora Storage Quota',
@@ -662,6 +763,9 @@ export default {
       replaceGroupSuccess: 'Group replaced successfully, {count} key(s) migrated',
       selectNewGroup: 'Select target group',
       noOtherGroups: 'No other exclusive groups available',
+      allocateQuota: 'Allocate Quota',
+      viewUsage: 'View Usage',
+      viewSubscriptions: 'View Subscriptions',
       deposit: 'Deposit',
       withdraw: 'Withdraw',
       depositAmount: 'Deposit Amount',

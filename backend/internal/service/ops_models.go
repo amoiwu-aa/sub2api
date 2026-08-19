@@ -17,6 +17,9 @@ type OpsSystemLog struct {
 	UserID          *int64         `json:"user_id"`
 	APIKeyID        *int64         `json:"api_key_id"`
 	AccountID       *int64         `json:"account_id"`
+	AccountName     string         `json:"account_name"`
+	GroupID         *int64         `json:"group_id"`
+	GroupName       string         `json:"group_name"`
 	Platform        string         `json:"platform"`
 	Model           string         `json:"model"`
 	Extra           map[string]any `json:"extra,omitempty"`

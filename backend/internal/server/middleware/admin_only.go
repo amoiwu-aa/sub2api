@@ -41,3 +41,19 @@ func RequireSuperAdmin() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequireAffiliateAdmin 只放行分销管理员。总管理员继续走全站接口，不能误入分销专属 API。
+func RequireAffiliateAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, ok := GetUserRoleFromContext(c)
+		if !ok {
+			AbortWithError(c, 401, "UNAUTHORIZED", "User not found in context")
+			return
+		}
+		if role != service.RoleAffiliateAdmin {
+			AbortWithError(c, 403, "FORBIDDEN", "Affiliate admin access required")
+			return
+		}
+		c.Next()
+	}
+}

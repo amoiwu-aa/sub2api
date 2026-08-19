@@ -38652,28 +38652,30 @@ func (m *ProxyMutation) ResetEdge(name string) error {
 // RedeemCodeMutation represents an operation that mutates the RedeemCode nodes in the graph.
 type RedeemCodeMutation struct {
 	config
-	op               Op
-	typ              string
-	id               *int64
-	code             *string
-	_type            *string
-	value            *float64
-	addvalue         *float64
-	status           *string
-	used_at          *time.Time
-	notes            *string
-	created_at       *time.Time
-	expires_at       *time.Time
-	validity_days    *int
-	addvalidity_days *int
-	clearedFields    map[string]struct{}
-	user             *int64
-	cleareduser      bool
-	group            *int64
-	clearedgroup     bool
-	done             bool
-	oldValue         func(context.Context) (*RedeemCode, error)
-	predicates       []predicate.RedeemCode
+	op                       Op
+	typ                      string
+	id                       *int64
+	code                     *string
+	_type                    *string
+	value                    *float64
+	addvalue                 *float64
+	status                   *string
+	used_at                  *time.Time
+	notes                    *string
+	created_at               *time.Time
+	expires_at               *time.Time
+	validity_days            *int
+	addvalidity_days         *int
+	balance_validity_days    *int
+	addbalance_validity_days *int
+	clearedFields            map[string]struct{}
+	user                     *int64
+	cleareduser              bool
+	group                    *int64
+	clearedgroup             bool
+	done                     bool
+	oldValue                 func(context.Context) (*RedeemCode, error)
+	predicates               []predicate.RedeemCode
 }
 
 var _ ent.Mutation = (*RedeemCodeMutation)(nil)
@@ -39275,6 +39277,62 @@ func (m *RedeemCodeMutation) ResetValidityDays() {
 	m.addvalidity_days = nil
 }
 
+// SetBalanceValidityDays sets the "balance_validity_days" field.
+func (m *RedeemCodeMutation) SetBalanceValidityDays(i int) {
+	m.balance_validity_days = &i
+	m.addbalance_validity_days = nil
+}
+
+// BalanceValidityDays returns the value of the "balance_validity_days" field in the mutation.
+func (m *RedeemCodeMutation) BalanceValidityDays() (r int, exists bool) {
+	v := m.balance_validity_days
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBalanceValidityDays returns the old "balance_validity_days" field's value of the RedeemCode entity.
+// If the RedeemCode object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodeMutation) OldBalanceValidityDays(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBalanceValidityDays is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBalanceValidityDays requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBalanceValidityDays: %w", err)
+	}
+	return oldValue.BalanceValidityDays, nil
+}
+
+// AddBalanceValidityDays adds i to the "balance_validity_days" field.
+func (m *RedeemCodeMutation) AddBalanceValidityDays(i int) {
+	if m.addbalance_validity_days != nil {
+		*m.addbalance_validity_days += i
+	} else {
+		m.addbalance_validity_days = &i
+	}
+}
+
+// AddedBalanceValidityDays returns the value that was added to the "balance_validity_days" field in this mutation.
+func (m *RedeemCodeMutation) AddedBalanceValidityDays() (r int, exists bool) {
+	v := m.addbalance_validity_days
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetBalanceValidityDays resets all changes to the "balance_validity_days" field.
+func (m *RedeemCodeMutation) ResetBalanceValidityDays() {
+	m.balance_validity_days = nil
+	m.addbalance_validity_days = nil
+}
+
 // SetUserID sets the "user" edge to the User entity by id.
 func (m *RedeemCodeMutation) SetUserID(id int64) {
 	m.user = &id
@@ -39376,7 +39434,7 @@ func (m *RedeemCodeMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *RedeemCodeMutation) Fields() []string {
-	fields := make([]string, 0, 11)
+	fields := make([]string, 0, 12)
 	if m.code != nil {
 		fields = append(fields, redeemcode.FieldCode)
 	}
@@ -39410,6 +39468,9 @@ func (m *RedeemCodeMutation) Fields() []string {
 	if m.validity_days != nil {
 		fields = append(fields, redeemcode.FieldValidityDays)
 	}
+	if m.balance_validity_days != nil {
+		fields = append(fields, redeemcode.FieldBalanceValidityDays)
+	}
 	return fields
 }
 
@@ -39440,6 +39501,8 @@ func (m *RedeemCodeMutation) Field(name string) (ent.Value, bool) {
 		return m.GroupID()
 	case redeemcode.FieldValidityDays:
 		return m.ValidityDays()
+	case redeemcode.FieldBalanceValidityDays:
+		return m.BalanceValidityDays()
 	}
 	return nil, false
 }
@@ -39471,6 +39534,8 @@ func (m *RedeemCodeMutation) OldField(ctx context.Context, name string) (ent.Val
 		return m.OldGroupID(ctx)
 	case redeemcode.FieldValidityDays:
 		return m.OldValidityDays(ctx)
+	case redeemcode.FieldBalanceValidityDays:
+		return m.OldBalanceValidityDays(ctx)
 	}
 	return nil, fmt.Errorf("unknown RedeemCode field %s", name)
 }
@@ -39557,6 +39622,13 @@ func (m *RedeemCodeMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetValidityDays(v)
 		return nil
+	case redeemcode.FieldBalanceValidityDays:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBalanceValidityDays(v)
+		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode field %s", name)
 }
@@ -39571,6 +39643,9 @@ func (m *RedeemCodeMutation) AddedFields() []string {
 	if m.addvalidity_days != nil {
 		fields = append(fields, redeemcode.FieldValidityDays)
 	}
+	if m.addbalance_validity_days != nil {
+		fields = append(fields, redeemcode.FieldBalanceValidityDays)
+	}
 	return fields
 }
 
@@ -39583,6 +39658,8 @@ func (m *RedeemCodeMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedValue()
 	case redeemcode.FieldValidityDays:
 		return m.AddedValidityDays()
+	case redeemcode.FieldBalanceValidityDays:
+		return m.AddedBalanceValidityDays()
 	}
 	return nil, false
 }
@@ -39605,6 +39682,13 @@ func (m *RedeemCodeMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddValidityDays(v)
+		return nil
+	case redeemcode.FieldBalanceValidityDays:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddBalanceValidityDays(v)
 		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode numeric field %s", name)
@@ -39698,6 +39782,9 @@ func (m *RedeemCodeMutation) ResetField(name string) error {
 		return nil
 	case redeemcode.FieldValidityDays:
 		m.ResetValidityDays()
+		return nil
+	case redeemcode.FieldBalanceValidityDays:
+		m.ResetBalanceValidityDays()
 		return nil
 	}
 	return fmt.Errorf("unknown RedeemCode field %s", name)

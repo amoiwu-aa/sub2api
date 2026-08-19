@@ -241,62 +241,71 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 }
 
 func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {
-	var newBalance float64
-	err := tx.QueryRowContext(ctx, `
-		UPDATE users
-		SET balance = balance - $1,
-			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
-		RETURNING balance
-	`, amount, userID).Scan(&newBalance)
-	if err == nil {
-		return newBalance, true, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	current, err := lockUserBalance(ctx, tx, userID)
+	if err != nil {
 		return 0, false, err
 	}
-
+	expired, _, err := settleExpiredBalanceGrantsLocked(ctx, tx, userID)
+	if err != nil {
+		return 0, false, err
+	}
+	current -= expired
+	if _, err := consumeExpiringBalanceGrantsLocked(ctx, tx, userID, amount); err != nil {
+		return 0, false, err
+	}
+	newBalance := current - amount
 	err = tx.QueryRowContext(ctx, `
 		UPDATE users
-		SET balance = balance - $1,
+		SET balance = $1,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
 		RETURNING balance
-	`, amount, userID).Scan(&newBalance)
+	`, newBalance, userID).Scan(&newBalance)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, service.ErrUserNotFound
 	}
 	if err != nil {
 		return 0, false, err
 	}
-	return newBalance, false, nil
+	return newBalance, current >= amount, nil
 }
 
 func reserveUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
 	if cmd.HoldAmount <= 0 {
 		return &service.BatchImageBalanceHoldResult{}, nil
 	}
+	current, err := lockUserBalance(ctx, tx, cmd.UserID)
+	if err != nil {
+		return nil, err
+	}
+	expired, _, err := settleExpiredBalanceGrantsLocked(ctx, tx, cmd.UserID)
+	if err != nil {
+		return nil, err
+	}
+	current -= expired
+	if current < cmd.HoldAmount {
+		return nil, service.ErrBatchImageInsufficientBalance
+	}
+	if _, err := consumeExpiringBalanceGrantsLocked(ctx, tx, cmd.UserID, cmd.HoldAmount); err != nil {
+		return nil, err
+	}
+
 	var balance, frozen float64
-	err := tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		UPDATE users
-		SET balance = balance - $1,
-			frozen_balance = COALESCE(frozen_balance, 0) + $1,
+		SET balance = $1,
+			frozen_balance = COALESCE(frozen_balance, 0) + $2,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
+		WHERE id = $3 AND deleted_at IS NULL
 		RETURNING balance, frozen_balance
-	`, cmd.HoldAmount, cmd.UserID).Scan(&balance, &frozen)
+	`, current-cmd.HoldAmount, cmd.HoldAmount, cmd.UserID).Scan(&balance, &frozen)
 	if err == nil {
 		return &service.BatchImageBalanceHoldResult{NewBalance: &balance, FrozenBalance: &frozen}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if exists, existsErr := userExistsForBilling(ctx, tx, cmd.UserID); existsErr != nil {
-		return nil, existsErr
-	} else if !exists {
-		return nil, service.ErrUserNotFound
-	}
-	return nil, service.ErrBatchImageInsufficientBalance
+	return nil, service.ErrUserNotFound
 }
 
 func captureUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {

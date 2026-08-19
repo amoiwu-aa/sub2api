@@ -174,6 +174,11 @@ func (s *AnnouncementService) Update(ctx context.Context, id int64, input *Updat
 		if err != nil {
 			return nil, err
 		}
+		// 公告的分销受众边界在创建后不可通过普通更新请求清除或转移。
+		if a.Targeting.AffiliateAdminID != nil {
+			ownerID := *a.Targeting.AffiliateAdminID
+			targeting.AffiliateAdminID = &ownerID
+		}
 		a.Targeting = targeting
 	}
 
@@ -243,6 +248,13 @@ func (s *AnnouncementService) ListForUser(ctx context.Context, userID int64, unr
 		if !a.IsActiveAt(now) {
 			continue
 		}
+		visibleByScope, err := s.isVisibleByDistributionScope(ctx, &a, userID)
+		if err != nil {
+			return nil, fmt.Errorf("check announcement distribution scope: %w", err)
+		}
+		if !visibleByScope {
+			continue
+		}
 		if !a.Targeting.Matches(user.Balance, activeGroupIDs) {
 			continue
 		}
@@ -305,6 +317,13 @@ func (s *AnnouncementService) MarkRead(ctx context.Context, userID, announcement
 	if !a.IsActiveAt(now) {
 		return ErrAnnouncementNotFound
 	}
+	visibleByScope, err := s.isVisibleByDistributionScope(ctx, a, userID)
+	if err != nil {
+		return fmt.Errorf("check announcement distribution scope: %w", err)
+	}
+	if !visibleByScope {
+		return ErrAnnouncementNotFound
+	}
 
 	activeSubs, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
 	if err != nil {
@@ -331,13 +350,24 @@ func (s *AnnouncementService) ListUserReadStatus(
 	params pagination.PaginationParams,
 	search string,
 ) ([]AnnouncementUserReadStatus, *pagination.PaginationResult, error) {
+	return s.ListUserReadStatusScoped(ctx, announcementID, params, search, 0)
+}
+
+func (s *AnnouncementService) ListUserReadStatusScoped(
+	ctx context.Context,
+	announcementID int64,
+	params pagination.PaginationParams,
+	search string,
+	managedByAdminID int64,
+) ([]AnnouncementUserReadStatus, *pagination.PaginationResult, error) {
 	ann, err := s.announcementRepo.GetByID(ctx, announcementID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	filters := UserListFilters{
-		Search: strings.TrimSpace(search),
+		Search:           strings.TrimSpace(search),
+		ManagedByAdminID: managedByAdminID,
 	}
 
 	users, page, err := s.userRepo.ListWithFilters(ctx, params, filters)
@@ -385,6 +415,30 @@ func (s *AnnouncementService) ListUserReadStatus(
 	}
 
 	return out, page, nil
+}
+
+type announcementManagedUserChecker interface {
+	UserIsManagedBy(ctx context.Context, userID, adminID int64) (bool, error)
+}
+
+func (s *AnnouncementService) isVisibleByDistributionScope(
+	ctx context.Context,
+	announcement *Announcement,
+	userID int64,
+) (bool, error) {
+	if announcement == nil || announcement.Targeting.AffiliateAdminID == nil {
+		return true, nil
+	}
+	adminID := *announcement.Targeting.AffiliateAdminID
+	if adminID <= 0 || userID <= 0 {
+		return false, nil
+	}
+	checker, ok := s.userRepo.(announcementManagedUserChecker)
+	if !ok {
+		// Fail closed when the configured repository cannot enforce ownership.
+		return false, nil
+	}
+	return checker.UserIsManagedBy(ctx, userID, adminID)
 }
 
 func isValidAnnouncementStatus(status string) bool {

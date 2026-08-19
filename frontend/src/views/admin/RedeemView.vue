@@ -129,16 +129,28 @@
           </template>
 
           <template #cell-value="{ value, row }">
-            <span class="text-sm font-medium text-gray-900 dark:text-white">
-              <template v-if="row.type === 'balance'">${{ value.toFixed(2) }}</template>
-              <template v-else-if="row.type === 'subscription'">
-                {{ row.validity_days || 30 }} {{ t('admin.redeem.days') }}
-                <span v-if="row.group" class="ml-1 text-xs text-gray-500 dark:text-gray-400"
-                  >({{ row.group.name }})</span
-                >
-              </template>
-              <template v-else>{{ value }}</template>
-            </span>
+            <div>
+              <span class="text-sm font-medium text-gray-900 dark:text-white">
+                <template v-if="row.type === 'balance'">${{ value.toFixed(2) }}</template>
+                <template v-else-if="row.type === 'subscription'">
+                  {{ row.validity_days || 30 }} {{ t('admin.redeem.days') }}
+                  <span v-if="row.group" class="ml-1 text-xs text-gray-500 dark:text-gray-400"
+                    >({{ row.group.name }})</span
+                  >
+                </template>
+                <template v-else>{{ value }}</template>
+              </span>
+              <p
+                v-if="row.type === 'balance' && row.balance_validity_days"
+                class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+              >
+                {{
+                  t('admin.redeem.balanceValidityLabel', {
+                    days: row.balance_validity_days
+                  })
+                }}
+              </p>
+            </div>
           </template>
 
           <template #cell-status="{ value }">
@@ -274,10 +286,13 @@
 
     <!-- Generate Codes Dialog -->
     <Teleport to="body">
-      <div v-if="showGenerateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        v-if="showGenerateDialog"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4"
+      >
         <div class="fixed inset-0 bg-black/50" @click="showGenerateDialog = false"></div>
         <div
-          class="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
+          class="relative z-10 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg bg-white p-6 shadow-xl dark:bg-dark-800"
         >
           <h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
             {{ t('admin.redeem.generateCodesTitle') }}
@@ -306,6 +321,38 @@
               />
             </div>
             <!-- 邀请码类型：显示提示信息 -->
+            <div v-if="generateForm.type === 'balance'">
+              <label class="input-label">{{ t('admin.redeem.balanceValidity') }}</label>
+              <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.redeem.balanceValidityHint') }}
+              </p>
+              <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                <button
+                  v-for="option in balanceValidityOptions"
+                  :key="option.value"
+                  type="button"
+                  @click="generateForm.balance_validity_option = option.value"
+                  :class="[
+                    'rounded-lg border px-3 py-2 text-sm transition-colors',
+                    generateForm.balance_validity_option === option.value
+                      ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/20 dark:text-primary-300'
+                      : 'border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700'
+                  ]"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <input
+                v-if="generateForm.balance_validity_option === 'custom'"
+                v-model.number="generateForm.custom_balance_validity_days"
+                type="number"
+                min="1"
+                max="3650"
+                required
+                class="input mt-2"
+                :placeholder="t('admin.redeem.customBalanceValidityDays')"
+              />
+            </div>
             <div v-if="generateForm.type === 'invitation'" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
               <p class="text-sm text-blue-700 dark:text-blue-300">
                 {{ t('admin.redeem.invitationHint') }}
@@ -818,9 +865,18 @@ const batchUpdateForm = reactive({
 })
 
 type RedeemCodeExpiryOption = 'never' | '1' | '3' | '7' | 'custom'
+type BalanceValidityOption = 'permanent' | '1' | '3' | '7' | 'custom'
 
 const redeemCodeExpiryOptions = computed<{ value: RedeemCodeExpiryOption; label: string }[]>(() => [
   { value: 'never', label: t('admin.redeem.neverExpires') },
+  { value: '1', label: t('admin.redeem.expiryPresetDays', { days: 1 }) },
+  { value: '3', label: t('admin.redeem.expiryPresetDays', { days: 3 }) },
+  { value: '7', label: t('admin.redeem.expiryPresetDays', { days: 7 }) },
+  { value: 'custom', label: t('admin.redeem.customExpiry') }
+])
+
+const balanceValidityOptions = computed<{ value: BalanceValidityOption; label: string }[]>(() => [
+  { value: 'permanent', label: t('admin.redeem.permanentBalance') },
   { value: '1', label: t('admin.redeem.expiryPresetDays', { days: 1 }) },
   { value: '3', label: t('admin.redeem.expiryPresetDays', { days: 3 }) },
   { value: '7', label: t('admin.redeem.expiryPresetDays', { days: 7 }) },
@@ -834,7 +890,9 @@ const generateForm = reactive({
   group_id: null as number | null,
   validity_days: 30,
   expiry_option: 'never' as RedeemCodeExpiryOption,
-  custom_expiry_days: 7
+  custom_expiry_days: 7,
+  balance_validity_option: 'permanent' as BalanceValidityOption,
+  custom_balance_validity_days: 7
 })
 
 // 监听类型变化，邀请码类型时自动设置 value 为 0
@@ -954,6 +1012,22 @@ const getRedeemCodeExpiresInDays = () => {
   return Number(generateForm.expiry_option)
 }
 
+const getBalanceValidityDays = () => {
+  if (generateForm.type !== 'balance' || generateForm.balance_validity_option === 'permanent') {
+    return undefined
+  }
+  if (generateForm.balance_validity_option === 'custom') {
+    if (
+      !Number.isFinite(generateForm.custom_balance_validity_days) ||
+      generateForm.custom_balance_validity_days < 1
+    ) {
+      return null
+    }
+    return Math.floor(generateForm.custom_balance_validity_days)
+  }
+  return Number(generateForm.balance_validity_option)
+}
+
 const toDatetimeLocalInputValue = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
@@ -1029,6 +1103,11 @@ const handleGenerateCodes = async () => {
     appStore.showError(t('admin.redeem.expiryDaysRequired'))
     return
   }
+  const balanceValidityDays = getBalanceValidityDays()
+  if (balanceValidityDays === null) {
+    appStore.showError(t('admin.redeem.balanceValidityDaysRequired'))
+    return
+  }
 
   generating.value = true
   try {
@@ -1038,7 +1117,8 @@ const handleGenerateCodes = async () => {
       generateForm.value,
       generateForm.type === 'subscription' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined,
-      expiresInDays
+      expiresInDays,
+      balanceValidityDays
     )
     showGenerateDialog.value = false
     generatedCodes.value = result
@@ -1048,6 +1128,8 @@ const handleGenerateCodes = async () => {
     generateForm.validity_days = 30
     generateForm.expiry_option = 'never'
     generateForm.custom_expiry_days = 7
+    generateForm.balance_validity_option = 'permanent'
+    generateForm.custom_balance_validity_days = 7
     loadCodes()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.redeem.failedToGenerate'))

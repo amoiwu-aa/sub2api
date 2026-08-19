@@ -282,6 +282,11 @@ func (s *AuthService) FinalizeOAuthEmailAccount(
 		return ErrServiceUnavailable
 	}
 
+	inviterID, groupIDs, err := s.prepareDistributionInvite(ctx, affiliateCode)
+	if err != nil {
+		return err
+	}
+
 	signupSource = normalizeOAuthSignupSource(signupSource)
 	invitationRedeemCode, err := s.validateOAuthRegistrationInvitation(ctx, invitationCode)
 	if err != nil {
@@ -298,6 +303,9 @@ func (s *AuthService) FinalizeOAuthEmailAccount(
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
 	// snapshot user × platform quota（fail-open）
 	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
+	if inviterID > 0 {
+		return s.applyDistributionInvite(ctx, user.ID, inviterID, groupIDs)
+	}
 	s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 	return nil
 }

@@ -4,7 +4,9 @@ import {
   CURSOR_CC_SWITCH_MODEL_FALLBACKS,
   GROK_CC_SWITCH_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
-  buildCcSwitchImportDeeplink
+  buildCcSwitchImportDeeplink,
+  ccSwitchImportNeedsModel,
+  getCcSwitchClientTypes
 } from '@/utils/ccswitchImport'
 import type { GroupPlatform } from '@/types'
 
@@ -34,7 +36,7 @@ describe('ccswitchImport utils', () => {
       buildCcSwitchImportDeeplink({
         ...baseInput,
         platform: 'openai',
-        clientType: 'claude'
+        clientType: 'codex'
       })
     )
 
@@ -56,7 +58,7 @@ describe('ccswitchImport utils', () => {
         ...baseInput,
         baseUrl,
         platform: 'grok',
-        clientType: 'claude'
+        clientType: 'grokbuild'
       })
     )
 
@@ -68,14 +70,14 @@ describe('ccswitchImport utils', () => {
   // {{baseUrl}} 回落到 provider endpoint，而 usageScript 自己会拼 /v1/usage。
   // endpoint 带 /v1 的平台必须显式给出不带 /v1 的用量基址，否则拼成 /v1/v1/usage。
   it.each([
-    { platform: 'cursor' as GroupPlatform, app: 'opencode' },
-    { platform: 'grok' as GroupPlatform, app: 'grokbuild' }
-  ])('pins the usage base URL below /v1 for $platform imports', ({ platform, app }) => {
+    { platform: 'cursor' as GroupPlatform, clientType: 'opencode' as const, app: 'opencode' },
+    { platform: 'grok' as GroupPlatform, clientType: 'grokbuild' as const, app: 'grokbuild' }
+  ])('pins the usage base URL below /v1 for $platform imports', ({ platform, clientType, app }) => {
     const params = paramsFromDeeplink(
       buildCcSwitchImportDeeplink({
         ...baseInput,
         platform,
-        clientType: 'claude'
+        clientType
       })
     )
 
@@ -86,7 +88,7 @@ describe('ccswitchImport utils', () => {
 
   it.each([
     { platform: 'anthropic' as GroupPlatform, clientType: 'claude' as const },
-    { platform: 'openai' as GroupPlatform, clientType: 'claude' as const },
+    { platform: 'openai' as GroupPlatform, clientType: 'codex' as const },
     { platform: 'antigravity' as GroupPlatform, clientType: 'gemini' as const }
   ])(
     'leaves the usage base URL to the provider endpoint for $platform imports',
@@ -120,7 +122,7 @@ describe('ccswitchImport utils', () => {
     expect(params.has('model')).toBe(false)
   })
 
-  it('defaults Cursor imports to Auto when no model is picked', () => {
+  it('imports Cursor into Claude Code when Claude is selected', () => {
     const params = paramsFromDeeplink(
       buildCcSwitchImportDeeplink({
         ...baseInput,
@@ -129,15 +131,36 @@ describe('ccswitchImport utils', () => {
       })
     )
 
+    expect(params.get('app')).toBe('claude')
+    expect(params.get('endpoint')).toBe(baseInput.baseUrl)
+    expect(params.has('usageBaseUrl')).toBe(false)
     expect(params.get('model')).toBe(CURSOR_CC_SWITCH_MODEL)
   })
 
-  it('carries the picked model into the deeplink', () => {
+  it.each([
+    { clientType: 'codex' as const, app: 'codex' },
+    { clientType: 'opencode' as const, app: 'opencode' }
+  ])('imports Cursor into $app with the OpenAI-compatible endpoint', ({ clientType, app }) => {
     const params = paramsFromDeeplink(
       buildCcSwitchImportDeeplink({
         ...baseInput,
         platform: 'cursor',
-        clientType: 'claude',
+        clientType
+      })
+    )
+
+    expect(params.get('app')).toBe(app)
+    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('usageBaseUrl')).toBe('https://api.example.com')
+    expect(params.get('model')).toBe(CURSOR_CC_SWITCH_MODEL)
+  })
+
+  it('carries the picked Cursor model into the OpenCode deeplink', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'cursor',
+        clientType: 'opencode',
         modelOverride: 'cursor/grok-4.6-max'
       })
     )
@@ -185,5 +208,112 @@ describe('ccswitchImport utils', () => {
     expect(params.get('app')).toBe('gemini')
     expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/antigravity`)
     expect(params.has('model')).toBe(false)
+  })
+
+  it('exposes a CC Switch target list for every group platform', () => {
+    const platforms: GroupPlatform[] = [
+      'anthropic',
+      'openai',
+      'gemini',
+      'antigravity',
+      'grok',
+      'cursor',
+      'kiro',
+      'composite'
+    ]
+
+    for (const platform of platforms) {
+      expect(getCcSwitchClientTypes(platform).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('adds Claude targets to OpenAI groups only when Messages dispatch is enabled', () => {
+    expect(getCcSwitchClientTypes('openai')).toEqual([
+      'codex',
+      'opencode',
+      'openclaw',
+      'hermes'
+    ])
+    expect(getCcSwitchClientTypes('openai', true)).toEqual([
+      'codex',
+      'claude',
+      'opencode',
+      'openclaw',
+      'hermes'
+    ])
+  })
+
+  it.each(['opencode', 'openclaw', 'hermes'] as const)(
+    'imports OpenAI-compatible additive client %s with a concrete model',
+    (clientType) => {
+      const params = paramsFromDeeplink(
+        buildCcSwitchImportDeeplink({
+          ...baseInput,
+          platform: 'openai',
+          clientType
+        })
+      )
+
+      expect(params.get('app')).toBe(clientType)
+      expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+      expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
+    }
+  )
+
+  it('imports an Anthropic group into OpenClaw through the chat-compatible endpoint', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'anthropic',
+        clientType: 'openclaw',
+        modelOverride: 'claude-sonnet-5'
+      })
+    )
+
+    expect(params.get('app')).toBe('openclaw')
+    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('model')).toBe('claude-sonnet-5')
+  })
+
+  it('imports Grok into the explicitly selected client instead of forcing Grok Build', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'grok',
+        clientType: 'codex'
+      })
+    )
+
+    expect(params.get('app')).toBe('codex')
+    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('model')).toBe(GROK_CC_SWITCH_MODEL)
+  })
+
+  it('uses the Antigravity prefix only for native Claude and Gemini clients', () => {
+    const claudeParams = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'antigravity',
+        clientType: 'claude'
+      })
+    )
+    const openClawParams = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'antigravity',
+        clientType: 'openclaw'
+      })
+    )
+
+    expect(claudeParams.get('endpoint')).toBe('https://api.example.com/antigravity')
+    expect(openClawParams.get('endpoint')).toBe('https://api.example.com/v1')
+  })
+
+  it('requires model selection for namespaced, composite, and additive imports', () => {
+    expect(ccSwitchImportNeedsModel('cursor', 'claude')).toBe(true)
+    expect(ccSwitchImportNeedsModel('kiro', 'claude')).toBe(true)
+    expect(ccSwitchImportNeedsModel('composite', 'gemini')).toBe(true)
+    expect(ccSwitchImportNeedsModel('anthropic', 'openclaw')).toBe(true)
+    expect(ccSwitchImportNeedsModel('anthropic', 'claude')).toBe(false)
   })
 })

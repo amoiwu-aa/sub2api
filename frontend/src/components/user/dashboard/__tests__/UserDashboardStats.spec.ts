@@ -1,23 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
 
 import UserDashboardStats from '../UserDashboardStats.vue'
-
-const messages: Record<string, string> = {
-  'dashboard.todayCacheHitRate': '今日缓存命中率',
-  'dashboard.totalCacheHitRate': '累计缓存命中率',
-  'dashboard.cacheReadShort': '读取'
-}
-
-vi.mock('vue-i18n', async () => {
-  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
-  return {
-    ...actual,
-    useI18n: () => ({
-      t: (key: string) => messages[key] ?? key
-    })
-  }
-})
+import zh from '../../../../i18n/locales/zh'
 
 const stats = {
   total_api_keys: 0,
@@ -45,6 +31,11 @@ const stats = {
 
 describe('UserDashboardStats', () => {
   it('shows today and total cache hit rates from the user dashboard statistics', () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: 'zh',
+      messages: { zh }
+    })
     const wrapper = mount(UserDashboardStats, {
       props: {
         stats,
@@ -53,6 +44,7 @@ describe('UserDashboardStats', () => {
         platformQuotas: []
       },
       global: {
+        plugins: [i18n],
         stubs: {
           Icon: true
         }
@@ -63,5 +55,7 @@ describe('UserDashboardStats', () => {
     expect(wrapper.text()).toContain('20.0%')
     expect(wrapper.text()).toContain('累计缓存命中率')
     expect(wrapper.text()).toContain('60.0%')
+    expect(wrapper.text()).toContain('缓存读取: 200')
+    expect(wrapper.text()).not.toContain('dashboard.')
   })
 })

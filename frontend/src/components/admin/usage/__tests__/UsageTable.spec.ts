@@ -63,6 +63,9 @@ const messages: Record<string, string> = {
   'usage.upstreamResponseModel': 'Upstream response',
   'usage.modelVariant': 'Possible version variant',
   'usage.modelMismatch': 'Different model',
+  'keys.copyToClipboard': 'Copy to clipboard',
+  'keys.copied': 'Copied',
+  'admin.usage.requestIdCopied': 'Request ID copied',
 }
 
 vi.mock('vue-i18n', async () => {

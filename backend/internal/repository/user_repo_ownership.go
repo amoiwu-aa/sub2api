@@ -78,6 +78,12 @@ func (r *userRepository) createManagedUserInTx(ctx context.Context, user *servic
 	return nil
 }
 
+// ListManagedUserIDs returns panel user IDs owned by adminID via
+// created_by_admin_id or affiliate inviter_id.
+func (r *userRepository) ListManagedUserIDs(ctx context.Context, adminID int64, includeDeleted bool) ([]int64, error) {
+	return r.listManagedUserIDs(ctx, adminID, includeDeleted)
+}
+
 func (r *userRepository) listManagedUserIDs(ctx context.Context, adminID int64, includeDeleted bool) ([]int64, error) {
 	if adminID <= 0 {
 		return nil, nil

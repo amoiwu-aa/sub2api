@@ -37,6 +37,27 @@
           <option value="admin">{{ t('admin.users.roles.admin') }}</option>
         </select>
       </div>
+      <div
+        v-if="!isAffiliateAdmin && form.role === 'affiliate_admin'"
+        class="rounded-xl border border-gray-200 p-4 dark:border-dark-700"
+      >
+        <label class="flex cursor-pointer items-start gap-3">
+          <input
+            v-model="canPublishAnnouncements"
+            type="checkbox"
+            class="mt-1 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            :disabled="!distributionPermissionLoaded"
+          />
+          <span>
+            <span class="block text-sm font-medium text-gray-900 dark:text-white">
+              {{ t('admin.users.permissions.publishAnnouncements') }}
+            </span>
+            <span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">
+              {{ t('admin.users.permissions.publishAnnouncementsHint') }}
+            </span>
+          </span>
+        </label>
+      </div>
       <div>
         <label class="input-label">{{ t('admin.users.notes') }}</label>
         <textarea v-model="form.notes" rows="3" class="input"></textarea>
@@ -94,12 +115,30 @@ const authStore = useAuthStore()
 const isAffiliateAdmin = computed(() => authStore.isAffiliateAdmin)
 
 const submitting = ref(false); const passwordCopied = ref(false)
+const canPublishAnnouncements = ref(false)
+const distributionPermissionLoaded = ref(true)
 const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user', concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
 
-watch(() => props.user, (u) => {
+let permissionLoadSeq = 0
+watch(() => props.user, async (u) => {
+  const seq = ++permissionLoadSeq
   if (u) {
     Object.assign(form, { email: u.email, password: '', username: u.username || '', notes: u.notes || '', role: u.role || 'user', concurrency: u.concurrency, rpm_limit: u.rpm_limit ?? 0, customAttributes: {} })
     passwordCopied.value = false
+    canPublishAnnouncements.value = false
+    distributionPermissionLoaded.value = u.role !== 'affiliate_admin'
+    if (!isAffiliateAdmin.value && u.role === 'affiliate_admin') {
+      try {
+        const permissions = await adminAPI.users.getDistributionPermissions(u.id)
+        if (seq !== permissionLoadSeq) return
+        canPublishAnnouncements.value = permissions.can_publish_announcements === true
+        distributionPermissionLoaded.value = true
+      } catch (error: any) {
+        if (seq !== permissionLoadSeq) return
+        distributionPermissionLoaded.value = false
+        appStore.showError(error?.response?.data?.detail || t('admin.users.permissions.loadFailed'))
+      }
+    }
   }
 }, { immediate: true })
 
@@ -134,6 +173,11 @@ const handleUpdateUser = async () => {
     if (form.password.trim()) data.password = form.password.trim()
     // 提升为管理员属敏感操作：后端返回 STEP_UP_REQUIRED 时弹 TOTP 验证并重试
     await stepUp.run(() => adminAPI.users.update(userId, data))
+    if (!isAffiliateAdmin.value && form.role === 'affiliate_admin' && distributionPermissionLoaded.value) {
+      await adminAPI.users.updateDistributionPermissions(userId, {
+        can_publish_announcements: canPublishAnnouncements.value
+      })
+    }
     if (!isAffiliateAdmin.value && Object.keys(form.customAttributes).length > 0) await adminAPI.userAttributes.updateUserAttributeValues(userId, form.customAttributes)
     appStore.showSuccess(t('admin.users.userUpdated'))
     emit('success'); emit('close')

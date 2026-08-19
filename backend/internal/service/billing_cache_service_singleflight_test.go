@@ -95,6 +95,23 @@ func (s *billingCacheMissStub) BatchGetUserPlatformQuotaCache(ctx context.Contex
 	return nil, nil
 }
 
+type billingCacheTTLStub struct {
+	billingCacheMissStub
+	ttlCh           chan time.Duration
+	invalidatedCall atomic.Int64
+}
+
+func (s *billingCacheTTLStub) SetUserBalanceWithTTL(ctx context.Context, userID int64, balance float64, ttl time.Duration) error {
+	s.setBalanceCalls.Add(1)
+	s.ttlCh <- ttl
+	return nil
+}
+
+func (s *billingCacheTTLStub) InvalidateUserBalance(ctx context.Context, userID int64) error {
+	s.invalidatedCall.Add(1)
+	return nil
+}
+
 type balanceLoadUserRepoStub struct {
 	mockUserRepo
 	calls   atomic.Int64
@@ -164,4 +181,29 @@ func TestBillingCacheServiceGetUserBalance_Singleflight(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return cache.setBalanceCalls.Load() >= 1
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestBillingCacheServiceSetBalanceCache_UsesGrantExpiry(t *testing.T) {
+	cache := &billingCacheTTLStub{ttlCh: make(chan time.Duration, 1)}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	expiresAt := time.Now().Add(30 * time.Second)
+	svc.setBalanceCache(context.Background(), 99, 12.34, &expiresAt)
+
+	ttl := <-cache.ttlCh
+	require.Greater(t, ttl, 25*time.Second)
+	require.LessOrEqual(t, ttl, 30*time.Second)
+}
+
+func TestBillingCacheServiceSetBalanceCache_InvalidatesPastGrantExpiry(t *testing.T) {
+	cache := &billingCacheTTLStub{ttlCh: make(chan time.Duration, 1)}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	expiresAt := time.Now().Add(-time.Second)
+	svc.setBalanceCache(context.Background(), 99, 12.34, &expiresAt)
+
+	require.Equal(t, int64(1), cache.invalidatedCall.Load())
+	require.Equal(t, int64(0), cache.setBalanceCalls.Load())
 }

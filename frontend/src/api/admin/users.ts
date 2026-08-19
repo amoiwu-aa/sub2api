@@ -55,6 +55,10 @@ export interface BatchUpdateUserLimitsResponse {
   affected: number
 }
 
+export interface DistributionPermissions {
+  can_publish_announcements: boolean
+}
+
 /**
  * List all users with pagination
  * @param page - Page number (default: 1)
@@ -150,6 +154,24 @@ export async function create(userData: {
  */
 export async function update(id: number, updates: UpdateUserRequest): Promise<AdminUser> {
   const { data } = await apiClient.put<AdminUser>(`/admin/users/${id}`, updates)
+  return data
+}
+
+export async function getDistributionPermissions(id: number): Promise<DistributionPermissions> {
+  const { data } = await apiClient.get<DistributionPermissions>(
+    `/admin/users/${id}/distribution-permissions`
+  )
+  return data
+}
+
+export async function updateDistributionPermissions(
+  id: number,
+  permissions: DistributionPermissions
+): Promise<DistributionPermissions> {
+  const { data } = await apiClient.put<DistributionPermissions>(
+    `/admin/users/${id}/distribution-permissions`,
+    permissions
+  )
   return data
 }
 
@@ -404,6 +426,8 @@ export const usersAPI = {
   getById,
   create,
   update,
+  getDistributionPermissions,
+  updateDistributionPermissions,
   delete: deleteUser,
   updateBalance,
   updateConcurrency,

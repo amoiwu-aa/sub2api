@@ -68,8 +68,20 @@ describe('AppSidebar affiliate admin', () => {
     expect(componentSource).toContain('authStore.isAffiliateAdmin')
   })
 
-  it('only lists users for affiliate admins', () => {
+  it('lists distribution center items for affiliate admins', () => {
     expect(componentSource).toContain('if (isAffiliateAdmin.value)')
+    expect(componentSource).toContain("path: '/admin/distribution/dashboard'")
     expect(componentSource).toContain("path: '/admin/users'")
+    expect(componentSource).toContain("path: '/admin/distribution/usage'")
+    expect(componentSource).toContain("path: '/admin/distribution/balance'")
+    expect(componentSource).toContain("path: '/admin/distribution/invites'")
+    expect(componentSource).toContain('getMyPermissions')
+    expect(componentSource).toContain('affiliateCanPublishAnnouncements.value')
+    expect(componentSource).toContain("path: '/admin/announcements'")
+  })
+
+  it('shows My Account for affiliate admins outside simple mode', () => {
+    expect(componentSource).toContain('v-if="!authStore.isSimpleMode"')
+    expect(componentSource).not.toContain('v-if="!isAffiliateAdmin && !authStore.isSimpleMode"')
   })
 })

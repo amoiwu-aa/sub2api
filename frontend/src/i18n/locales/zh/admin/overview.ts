@@ -53,7 +53,7 @@ export default {
       cacheCreateShort: '创建',
       observableRequests: '可观测请求',
       cacheObservabilityTooltip:
-        '只有上游已上报的请求具备可观测缓存用量；估算和不可用请求用于说明覆盖率的代表性。',
+        '只有上游已上报的请求具备真实缓存用量。Cursor、Grok 等估算请求会明确排除在可观测率分母之外；不可用和未知请求仍会降低可观测率。',
       cachePartiallyObservable: '缓存部分可观测',
       cacheUnobservable: '缓存不可观测',
       billingAdjustmentTokens: '账务调整',
@@ -424,6 +424,102 @@ export default {
       }
     },
 
+    distribution: {
+      placeholder: '—',
+      loadFailed: '加载分销数据失败',
+      last7Days: '近 7 天',
+      last30Days: '近 30 天',
+      date: '日期',
+      requests: '请求',
+      tokens: 'Token',
+      cost: '消费',
+      user: '用户',
+      model: '模型',
+      count: '次数',
+      status: '状态',
+      notes: '备注',
+      amount: '金额',
+      time: '时间',
+      dashboard: {
+        title: '分销概览',
+        description: '查看名下用户、用量与额度快照',
+        snapshotTitle: '经营快照',
+        customers: '名下用户',
+        activeCustomers: '活跃用户',
+        todayUsage: '今日用量',
+        todayRequests: '今日请求',
+        quotaPool: '可用额度',
+        invites: '邀请注册',
+        rankingTitle: '今日用量排行'
+      },
+      usage: {
+        title: '用量监控',
+        description: '查看名下用户的用量趋势、模型分布与错误',
+        trend: '用量趋势',
+        trendHint: '按天查看名下用户的请求、Token 与消费。',
+        models: '模型分布',
+        modelsHint: '名下用户调用最多的模型。',
+        errors: '错误统计',
+        errorsHint: '名下用户近期失败请求。',
+        ranking: '用户排行',
+        rankingHint: '按用量排序的名下用户。'
+      },
+      balance: {
+        title: '额度流水',
+        description: '查看额度汇总与划转记录',
+        summary: '额度汇总',
+        available: '可用额度',
+        frozen: '冻结额度',
+        transferred: '已划转',
+        customerTotal: '用户余额合计',
+        transfers: '划转记录'
+      },
+      invites: {
+        title: '邀请注册',
+        description: '管理邀请码与注册记录',
+        profile: '邀请资料',
+        profileHint: '分享邀请码或链接，新用户注册后会归属到你的名下。',
+        settings: '邀请设置',
+        settingsHint: '关闭邀请后，该邀请码将无法再注册。轮换邀请码会使旧链接失效。',
+        code: '邀请码',
+        link: '邀请链接',
+        copyCode: '复制邀请码',
+        copyLink: '复制链接',
+        enabled: '启用邀请注册',
+        defaultGroups: '注册默认分组',
+        noGroups: '暂无可分配分组，请联系总管理员授权。',
+        saveSettings: '保存设置',
+        settingsSaved: '邀请设置已保存',
+        rotate: '轮换邀请码',
+        rotateConfirm: '轮换后旧邀请链接将立即失效，确定继续？',
+        rotateSuccess: '邀请码已轮换',
+        registrationsCount: '注册人数',
+        registrations: '注册记录'
+      },
+      transfer: {
+        title: '分配额度',
+        hint: '从你的可用额度划转到该用户，不会触发返利。',
+        amount: '划转金额',
+        available: '你的可用额度',
+        userBalance: '用户当前余额',
+        notes: '备注',
+        success: '额度已划转',
+        insufficient: '可用额度不足'
+      },
+      userUsage: {
+        title: '用户用量',
+        period: '所选区间',
+        today: '今日',
+        noLogs: '暂无用量记录'
+      },
+      userSubscriptions: {
+        title: '用户订阅',
+        plan: '套餐',
+        expires: '到期时间',
+        empty: '该用户暂无订阅'
+      }
+    },
+
     affiliates: {
       invitesDescription: '查看全站邀请关系和被邀请用户累计返利',
       rebatesDescription: '查看每一笔产生返利的充值订单',
@@ -599,6 +695,11 @@ export default {
         affiliate_admin: '分销管理员',
         user: '用户'
       },
+      permissions: {
+        publishAnnouncements: '允许发布通知',
+        publishAnnouncementsHint: '开启后，分销管理员可以向自己名下的用户发布和管理通知。',
+        loadFailed: '加载分销权限失败'
+      },
       form: {
         emailLabel: '邮箱',
         emailPlaceholder: '请输入邮箱',
@@ -667,6 +768,9 @@ export default {
       replaceGroupSuccess: '分组替换成功，已迁移 {count} 个 Key',
       selectNewGroup: '请选择目标分组',
       noOtherGroups: '没有其他可用的专属分组',
+      allocateQuota: '分配额度',
+      viewUsage: '查看用量',
+      viewSubscriptions: '查看订阅',
       deposit: '充值',
       withdraw: '退款',
       depositAmount: '充值金额',

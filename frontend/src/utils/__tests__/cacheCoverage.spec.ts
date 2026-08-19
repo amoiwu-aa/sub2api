@@ -42,6 +42,8 @@ describe('getCacheCoverageMetrics', () => {
     expect(metrics.usesReportedSubset).toBe(true)
     expect(metrics.coverageAvailable).toBe(true)
     expect(metrics.observability.partiallyObservable).toBe(true)
+    expect(metrics.observability.excluded).toBe(1)
+    expect(metrics.observability.total).toBe(2)
     expect(metrics.input).toBe(400)
     expect(metrics.creation).toBe(0)
     expect(metrics.providerRead).toBe(300)
@@ -66,7 +68,9 @@ describe('getCacheCoverageMetrics', () => {
 
     expect(metrics.usesReportedSubset).toBe(false)
     expect(metrics.coverageAvailable).toBe(false)
-    expect(metrics.observability.partiallyObservable).toBe(true)
+    expect(metrics.observability.partiallyObservable).toBe(false)
+    expect(metrics.observability.excluded).toBe(8)
+    expect(metrics.observability.total).toBe(2)
   })
 
   it('keeps full-token coverage when every request is provider-reported', () => {
@@ -100,5 +104,28 @@ describe('getCacheCoverageMetrics', () => {
 
     expect(metrics.coverageAvailable).toBe(false)
     expect(metrics.observability.unobservable).toBe(true)
+    expect(metrics.observability.available).toBe(false)
+    expect(metrics.observability.excluded).toBe(2)
+    expect(metrics.observability.total).toBe(0)
+  })
+
+  it('does not let Cursor-only estimated traffic downgrade reported traffic observability', () => {
+    const metrics = getCacheCoverageMetrics({
+      requests: 305,
+      reported_requests: 248,
+      estimated_requests: 57,
+      unavailable_requests: 0,
+      reported_input_tokens: 5_560_000,
+      reported_cache_creation_tokens: 0,
+      reported_forced_cache_read_tokens: 0,
+      provider_cache_read_tokens: 40_630_000
+    })
+
+    expect(metrics.observability.reported).toBe(248)
+    expect(metrics.observability.excluded).toBe(57)
+    expect(metrics.observability.total).toBe(248)
+    expect(metrics.observability.ratio).toBe(100)
+    expect(metrics.observability.partiallyObservable).toBe(false)
+    expect(metrics.coverageAvailable).toBe(true)
   })
 })

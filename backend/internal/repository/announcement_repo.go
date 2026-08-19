@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	entsql "entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/sqljson"
 )
 
 type announcementRepository struct {
@@ -124,6 +125,19 @@ func (r *announcementRepository) List(
 				announcement.ContentContainsFold(filters.Search),
 			),
 		)
+	}
+	if filters.CreatedBy != nil && *filters.CreatedBy > 0 {
+		q = q.Where(announcement.CreatedByEQ(*filters.CreatedBy))
+	}
+	if filters.AffiliateAdminID != nil && *filters.AffiliateAdminID > 0 {
+		affiliateAdminID := *filters.AffiliateAdminID
+		q = q.Where(func(selector *entsql.Selector) {
+			selector.Where(sqljson.ValueEQ(
+				announcement.FieldTargeting,
+				affiliateAdminID,
+				sqljson.Path("affiliate_admin_id"),
+			))
+		})
 	}
 
 	total, err := q.Count(ctx)

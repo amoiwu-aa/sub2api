@@ -418,8 +418,16 @@ func (h *GroupHandler) GetAll(c *gin.Context) {
 	platform := c.Query("platform")
 	includeInactive := c.Query("include_inactive") == "true"
 	affiliateActor := isAffiliateAdminActor(c)
+	var affiliateAllowed []int64
 	if affiliateActor {
 		includeInactive = false
+		actorID := getAdminIDFromContext(c)
+		actor, actorErr := h.adminService.GetUser(c.Request.Context(), actorID)
+		if actorID <= 0 || actorErr != nil || actor == nil {
+			response.Success(c, []dto.Group{})
+			return
+		}
+		affiliateAllowed = actor.AllowedGroups
 	}
 
 	var groups []service.Group
@@ -439,6 +447,7 @@ func (h *GroupHandler) GetAll(c *gin.Context) {
 	}
 
 	if affiliateActor {
+		groups = service.FilterActiveGroupsByAllowedIDs(groups, affiliateAllowed)
 		outGroups := make([]dto.Group, 0, len(groups))
 		for i := range groups {
 			if g := dto.GroupFromServiceShallow(&groups[i]); g != nil {

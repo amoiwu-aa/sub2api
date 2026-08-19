@@ -117,7 +117,7 @@
         </div>
 
         <!-- Personal Section for Admin (hidden in simple mode) -->
-        <div v-if="!isAffiliateAdmin && !authStore.isSimpleMode" class="sidebar-section">
+        <div v-if="!authStore.isSimpleMode" class="sidebar-section">
           <div class="sidebar-section-title" :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
             <span class="sidebar-section-title-text" :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }">
               {{ t('nav.myAccount') }}
@@ -213,6 +213,7 @@ import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import { getMyPermissions } from '@/api/admin/distribution'
 
 interface NavItem {
   path: string
@@ -267,6 +268,7 @@ const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const isAffiliateAdmin = computed(() => authStore.isAffiliateAdmin)
 const canAccessAdminPanel = computed(() => authStore.canAccessAdminPanel)
+const affiliateCanPublishAnnouncements = ref(false)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
@@ -809,7 +811,17 @@ const customMenuItemsForAdmin = computed(() => {
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   if (isAffiliateAdmin.value) {
-    return [{ path: '/admin/users', label: t('nav.users'), section: 'customers', icon: UsersIcon }]
+    const items: NavItem[] = [
+      { path: '/admin/distribution/dashboard', label: t('nav.distributionDashboard'), section: 'overview', icon: DashboardIcon },
+      { path: '/admin/users', label: t('nav.users'), section: 'customers', icon: UsersIcon },
+      { path: '/admin/distribution/usage', label: t('nav.distributionUsage'), section: 'customers', icon: ChartIcon },
+      { path: '/admin/distribution/balance', label: t('nav.distributionBalance'), section: 'customers', icon: CreditCardIcon },
+      { path: '/admin/distribution/invites', label: t('nav.distributionInvites'), section: 'growth', icon: GiftIcon },
+    ]
+    if (affiliateCanPublishAnnouncements.value) {
+      items.push({ path: '/admin/announcements', label: t('nav.announcements'), section: 'growth', icon: BellIcon })
+    }
+    return items
   }
   const baseItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), section: 'overview', icon: DashboardIcon },
@@ -987,6 +999,21 @@ watch(
   (v) => {
     if (v) {
       adminSettingsStore.fetch()
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  isAffiliateAdmin,
+  async (enabled) => {
+    affiliateCanPublishAnnouncements.value = false
+    if (!enabled) return
+    try {
+      const permissions = await getMyPermissions()
+      affiliateCanPublishAnnouncements.value = permissions.can_publish_announcements === true
+    } catch {
+      affiliateCanPublishAnnouncements.value = false
     }
   },
   { immediate: true }

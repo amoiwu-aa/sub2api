@@ -199,6 +199,22 @@ type RedeemUserAdjustmentRepository interface {
 	ApplyRedeemConcurrencyAdjustment(ctx context.Context, id int64, delta int) error
 }
 
+// ExpiringBalanceState is the settled wallet state used to cap cache lifetime
+// at the next time-limited grant expiration.
+type ExpiringBalanceState struct {
+	Balance       float64
+	ExpiredAmount float64
+	NextExpiresAt *time.Time
+}
+
+// ExpiringBalanceRepository is implemented by the production user repository.
+// Keeping it separate avoids forcing unrelated test stubs to implement the
+// optional time-limited balance feature.
+type ExpiringBalanceRepository interface {
+	CreateExpiringBalanceGrant(ctx context.Context, userID, redeemCodeID int64, amount float64, validityDays int) error
+	SettleExpiredBalanceGrants(ctx context.Context, userID int64) (*ExpiringBalanceState, error)
+}
+
 type UserAuthIdentityRecord struct {
 	ProviderType    string
 	ProviderKey     string

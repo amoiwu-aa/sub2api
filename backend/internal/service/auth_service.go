@@ -71,21 +71,22 @@ type JWTClaims struct {
 
 // AuthService 认证服务
 type AuthService struct {
-	entClient             *dbent.Client
-	userRepo              UserRepository
-	redeemRepo            RedeemCodeRepository
-	refreshTokenCache     RefreshTokenCache
-	cfg                   *config.Config
-	settingService        *SettingService
-	emailService          *EmailService
-	turnstileService      *TurnstileService
-	tencentCaptchaService *TencentCaptchaService
-	aliyunCaptchaService  *AliyunCaptchaService
-	emailQueueService     *EmailQueueService
-	promoService          *PromoService
-	affiliateService      *AffiliateService
-	defaultSubAssigner    DefaultSubscriptionAssigner
-	userPlatformQuotaRepo UserPlatformQuotaRepository
+	entClient                 *dbent.Client
+	userRepo                  UserRepository
+	redeemRepo                RedeemCodeRepository
+	refreshTokenCache         RefreshTokenCache
+	cfg                       *config.Config
+	settingService            *SettingService
+	emailService              *EmailService
+	turnstileService          *TurnstileService
+	tencentCaptchaService     *TencentCaptchaService
+	aliyunCaptchaService      *AliyunCaptchaService
+	emailQueueService         *EmailQueueService
+	promoService              *PromoService
+	affiliateService          *AffiliateService
+	distributionInviteService *DistributionInviteService
+	defaultSubAssigner        DefaultSubscriptionAssigner
+	userPlatformQuotaRepo     UserPlatformQuotaRepository
 }
 
 type CaptchaProof struct {
@@ -152,6 +153,10 @@ func (s *AuthService) SetTencentCaptchaService(tencentCaptchaService *TencentCap
 
 func (s *AuthService) SetAliyunCaptchaService(aliyunCaptchaService *AliyunCaptchaService) {
 	s.aliyunCaptchaService = aliyunCaptchaService
+}
+
+func (s *AuthService) SetDistributionInviteService(inv *DistributionInviteService) {
+	s.distributionInviteService = inv
 }
 
 // Register 用户注册，返回token和用户
@@ -234,6 +239,11 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		defaultRPMLimit = s.settingService.GetDefaultUserRPMLimit(ctx)
 	}
 
+	distInviterID, distGroupIDs, err := s.prepareDistributionInvite(ctx, affiliateCode)
+	if err != nil {
+		return "", nil, err
+	}
+
 	// 创建用户
 	user := &User{
 		Email:        email,
@@ -265,7 +275,15 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		if _, err := s.affiliateService.EnsureUserAffiliate(ctx, user.ID); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to initialize affiliate profile for user %d: %v", user.ID, err)
 		}
+	}
+	if distInviterID > 0 {
+		if err := s.applyDistributionInvite(ctx, user.ID, distInviterID, distGroupIDs); err != nil {
+			s.deleteCreatedUserBestEffort(ctx, user.ID)
+			return "", nil, err
+		}
+	} else if s.affiliateService != nil {
 		if code := strings.TrimSpace(affiliateCode); code != "" {
+			// BindInviterByCode also attaches 分销归属 for active affiliate_admin codes when rebate is off.
 			if err := s.affiliateService.BindInviterByCode(ctx, user.ID, code); err != nil {
 				// 邀请返利码绑定失败不影响注册，只记录日志
 				logger.LegacyPrintf("service.auth", "[Auth] Failed to bind affiliate inviter for user %d: %v", user.ID, err)
@@ -739,6 +757,11 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				invitationRedeemCode = redeemCode
 			}
 
+			distInviterID, distGroupIDs, err := s.prepareDistributionInvite(ctx, affiliateCode)
+			if err != nil {
+				return nil, nil, err
+			}
+
 			randomPassword, err := randomHexString(32)
 			if err != nil {
 				logger.LegacyPrintf("service.auth", "[Auth] Failed to generate random password for oauth signup: %v", err)
@@ -806,7 +829,9 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
 					// snapshot user × platform quota（fail-open）
 					_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
-					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
+					if err := s.applyOrBindNewUserAffiliate(ctx, user.ID, affiliateCode, distInviterID, distGroupIDs); err != nil {
+						return nil, nil, err
+					}
 				}
 			} else {
 				if err := s.userRepo.Create(ctx, newUser); err != nil {
@@ -827,7 +852,9 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
 					// snapshot user × platform quota（fail-open）
 					_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
-					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
+					if err := s.applyOrBindNewUserAffiliate(ctx, user.ID, affiliateCode, distInviterID, distGroupIDs); err != nil {
+						return nil, nil, err
+					}
 					if invitationRedeemCode != nil {
 						if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
 							return nil, nil, ErrInvitationCodeInvalid
@@ -975,9 +1002,26 @@ func authSourceSignupSettings(defaults *AuthSourceDefaultSettings, signupSource 
 }
 
 // bindOAuthAffiliate initializes the affiliate profile and binds the inviter
-// for an OAuth-registered user. Failures are logged but never block registration.
+// for an OAuth-registered user. Regular affiliate codes stay fail-open.
+// Distribution invites apply groups and best-effort delete the new user on failure.
 func (s *AuthService) bindOAuthAffiliate(ctx context.Context, userID int64, affiliateCode string) {
-	if s.affiliateService == nil || userID <= 0 {
+	if userID <= 0 {
+		return
+	}
+	inviterID, groupIDs, err := s.prepareDistributionInvite(ctx, affiliateCode)
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Distribution invite rejected for oauth user %d: %v", userID, err)
+		s.deleteCreatedUserBestEffort(ctx, userID)
+		return
+	}
+	if inviterID > 0 {
+		if err := s.applyDistributionInvite(ctx, userID, inviterID, groupIDs); err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to apply distribution invite for oauth user %d: %v", userID, err)
+			s.deleteCreatedUserBestEffort(ctx, userID)
+		}
+		return
+	}
+	if s.affiliateService == nil {
 		return
 	}
 	if _, err := s.affiliateService.EnsureUserAffiliate(ctx, userID); err != nil {

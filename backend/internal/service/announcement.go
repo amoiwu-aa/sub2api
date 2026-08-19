@@ -63,8 +63,10 @@ type AnnouncementCondition = domain.AnnouncementCondition
 type Announcement = domain.Announcement
 
 type AnnouncementListFilters struct {
-	Status string
-	Search string
+	Status           string
+	Search           string
+	CreatedBy        *int64
+	AffiliateAdminID *int64
 }
 
 type AnnouncementRepository interface {

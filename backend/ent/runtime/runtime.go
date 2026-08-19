@@ -1779,6 +1779,12 @@ func init() {
 	redeemcodeDescValidityDays := redeemcodeFields[10].Descriptor()
 	// redeemcode.DefaultValidityDays holds the default value on creation for the validity_days field.
 	redeemcode.DefaultValidityDays = redeemcodeDescValidityDays.Default.(int)
+	// redeemcodeDescBalanceValidityDays is the schema descriptor for balance_validity_days field.
+	redeemcodeDescBalanceValidityDays := redeemcodeFields[11].Descriptor()
+	// redeemcode.DefaultBalanceValidityDays holds the default value on creation for the balance_validity_days field.
+	redeemcode.DefaultBalanceValidityDays = redeemcodeDescBalanceValidityDays.Default.(int)
+	// redeemcode.BalanceValidityDaysValidator is a validator for the "balance_validity_days" field. It is called by the builders before save.
+	redeemcode.BalanceValidityDaysValidator = redeemcodeDescBalanceValidityDays.Validators[0].(func(int) error)
 	securitysecretMixin := schema.SecuritySecret{}.Mixin()
 	securitysecretMixinFields0 := securitysecretMixin[0].Fields()
 	_ = securitysecretMixinFields0

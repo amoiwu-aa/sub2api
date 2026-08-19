@@ -110,6 +110,11 @@ func ValidityDays(v int) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldValidityDays, v))
 }
 
+// BalanceValidityDays applies equality check predicate on the "balance_validity_days" field. It's identical to BalanceValidityDaysEQ.
+func BalanceValidityDays(v int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldBalanceValidityDays, v))
+}
+
 // CodeEQ applies the EQ predicate on the "code" field.
 func CodeEQ(v string) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldCode, v))
@@ -658,6 +663,46 @@ func ValidityDaysLT(v int) predicate.RedeemCode {
 // ValidityDaysLTE applies the LTE predicate on the "validity_days" field.
 func ValidityDaysLTE(v int) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldLTE(FieldValidityDays, v))
+}
+
+// BalanceValidityDaysEQ applies the EQ predicate on the "balance_validity_days" field.
+func BalanceValidityDaysEQ(v int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldBalanceValidityDays, v))
+}
+
+// BalanceValidityDaysNEQ applies the NEQ predicate on the "balance_validity_days" field.
+func BalanceValidityDaysNEQ(v int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldBalanceValidityDays, v))
+}
+
+// BalanceValidityDaysIn applies the In predicate on the "balance_validity_days" field.
+func BalanceValidityDaysIn(vs ...int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIn(FieldBalanceValidityDays, vs...))
+}
+
+// BalanceValidityDaysNotIn applies the NotIn predicate on the "balance_validity_days" field.
+func BalanceValidityDaysNotIn(vs ...int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotIn(FieldBalanceValidityDays, vs...))
+}
+
+// BalanceValidityDaysGT applies the GT predicate on the "balance_validity_days" field.
+func BalanceValidityDaysGT(v int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGT(FieldBalanceValidityDays, v))
+}
+
+// BalanceValidityDaysGTE applies the GTE predicate on the "balance_validity_days" field.
+func BalanceValidityDaysGTE(v int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGTE(FieldBalanceValidityDays, v))
+}
+
+// BalanceValidityDaysLT applies the LT predicate on the "balance_validity_days" field.
+func BalanceValidityDaysLT(v int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLT(FieldBalanceValidityDays, v))
+}
+
+// BalanceValidityDaysLTE applies the LTE predicate on the "balance_validity_days" field.
+func BalanceValidityDaysLTE(v int) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLTE(FieldBalanceValidityDays, v))
 }
 
 // HasUser applies the HasEdge predicate on the "user" edge.

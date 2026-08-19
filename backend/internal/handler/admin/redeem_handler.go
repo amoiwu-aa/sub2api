@@ -34,27 +34,29 @@ func NewRedeemHandler(adminService service.AdminService, redeemService *service.
 
 // GenerateRedeemCodesRequest represents generate redeem codes request
 type GenerateRedeemCodesRequest struct {
-	Count         int        `json:"count" binding:"required,min=1,max=100"`
-	Type          string     `json:"type" binding:"required,oneof=balance concurrency subscription invitation"`
-	Value         float64    `json:"value"`
-	GroupID       *int64     `json:"group_id"`      // 订阅类型必填
-	ValidityDays  int        `json:"validity_days"` // 订阅类型使用，正数增加/负数退款扣减
-	ExpiresAt     *time.Time `json:"expires_at"`
-	ExpiresInDays *int       `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
+	Count               int        `json:"count" binding:"required,min=1,max=100"`
+	Type                string     `json:"type" binding:"required,oneof=balance concurrency subscription invitation"`
+	Value               float64    `json:"value"`
+	GroupID             *int64     `json:"group_id"`      // 订阅类型必填
+	ValidityDays        int        `json:"validity_days"` // 订阅类型使用，正数增加/负数退款扣减
+	ExpiresAt           *time.Time `json:"expires_at"`
+	ExpiresInDays       *int       `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
+	BalanceValidityDays int        `json:"balance_validity_days" binding:"omitempty,min=1,max=3650"`
 }
 
 // CreateAndRedeemCodeRequest represents creating a fixed code and redeeming it for a target user.
 // Type 为 omitempty 而非 required 是为了向后兼容旧版调用方（不传 type 时默认 balance）。
 type CreateAndRedeemCodeRequest struct {
-	Code          string     `json:"code" binding:"required,min=3,max=128"`
-	Type          string     `json:"type" binding:"omitempty,oneof=balance concurrency subscription invitation"` // 不传时默认 balance（向后兼容）
-	Value         float64    `json:"value" binding:"required"`
-	UserID        int64      `json:"user_id" binding:"required,gt=0"`
-	GroupID       *int64     `json:"group_id"`      // subscription 类型必填
-	ValidityDays  int        `json:"validity_days"` // subscription 类型：正数增加，负数退款扣减
-	Notes         string     `json:"notes"`
-	ExpiresAt     *time.Time `json:"expires_at"`
-	ExpiresInDays *int       `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
+	Code                string     `json:"code" binding:"required,min=3,max=128"`
+	Type                string     `json:"type" binding:"omitempty,oneof=balance concurrency subscription invitation"` // 不传时默认 balance（向后兼容）
+	Value               float64    `json:"value" binding:"required"`
+	UserID              int64      `json:"user_id" binding:"required,gt=0"`
+	GroupID             *int64     `json:"group_id"`      // subscription 类型必填
+	ValidityDays        int        `json:"validity_days"` // subscription 类型：正数增加，负数退款扣减
+	Notes               string     `json:"notes"`
+	ExpiresAt           *time.Time `json:"expires_at"`
+	ExpiresInDays       *int       `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
+	BalanceValidityDays int        `json:"balance_validity_days" binding:"omitempty,min=1,max=3650"`
 }
 
 func resolveRedeemCodeExpiresAt(expiresAt *time.Time, expiresInDays *int) (*time.Time, error) {
@@ -144,12 +146,13 @@ func (h *RedeemHandler) Generate(c *gin.Context) {
 
 	executeAdminIdempotentJSON(c, "admin.redeem_codes.generate", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		codes, execErr := h.adminService.GenerateRedeemCodes(ctx, &service.GenerateRedeemCodesInput{
-			Count:        req.Count,
-			Type:         req.Type,
-			Value:        req.Value,
-			GroupID:      req.GroupID,
-			ValidityDays: req.ValidityDays,
-			ExpiresAt:    expiresAt,
+			Count:               req.Count,
+			Type:                req.Type,
+			Value:               req.Value,
+			GroupID:             req.GroupID,
+			ValidityDays:        req.ValidityDays,
+			BalanceValidityDays: req.BalanceValidityDays,
+			ExpiresAt:           expiresAt,
 		})
 		if execErr != nil {
 			return nil, execErr
@@ -210,14 +213,15 @@ func (h *RedeemHandler) CreateAndRedeem(c *gin.Context) {
 		}
 
 		createErr := h.redeemService.CreateCode(ctx, &service.RedeemCode{
-			Code:         req.Code,
-			Type:         req.Type,
-			Value:        req.Value,
-			Status:       service.StatusUnused,
-			Notes:        req.Notes,
-			GroupID:      req.GroupID,
-			ValidityDays: req.ValidityDays,
-			ExpiresAt:    expiresAt,
+			Code:                req.Code,
+			Type:                req.Type,
+			Value:               req.Value,
+			Status:              service.StatusUnused,
+			Notes:               req.Notes,
+			GroupID:             req.GroupID,
+			ValidityDays:        req.ValidityDays,
+			BalanceValidityDays: req.BalanceValidityDays,
+			ExpiresAt:           expiresAt,
 		})
 		if createErr != nil {
 			// Unique code race: if code now exists, use idempotent semantics by used_by.

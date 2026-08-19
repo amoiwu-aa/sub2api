@@ -36,6 +36,8 @@ const (
 	FieldGroupID = "group_id"
 	// FieldValidityDays holds the string denoting the validity_days field in the database.
 	FieldValidityDays = "validity_days"
+	// FieldBalanceValidityDays holds the string denoting the balance_validity_days field in the database.
+	FieldBalanceValidityDays = "balance_validity_days"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// EdgeGroup holds the string denoting the group edge name in mutations.
@@ -72,6 +74,7 @@ var Columns = []string{
 	FieldExpiresAt,
 	FieldGroupID,
 	FieldValidityDays,
+	FieldBalanceValidityDays,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -101,6 +104,10 @@ var (
 	DefaultCreatedAt func() time.Time
 	// DefaultValidityDays holds the default value on creation for the "validity_days" field.
 	DefaultValidityDays int
+	// DefaultBalanceValidityDays holds the default value on creation for the "balance_validity_days" field.
+	DefaultBalanceValidityDays int
+	// BalanceValidityDaysValidator is a validator for the "balance_validity_days" field. It is called by the builders before save.
+	BalanceValidityDaysValidator func(int) error
 )
 
 // OrderOption defines the ordering options for the RedeemCode queries.
@@ -164,6 +171,11 @@ func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 // ByValidityDays orders the results by the validity_days field.
 func ByValidityDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldValidityDays, opts...).ToFunc()
+}
+
+// ByBalanceValidityDays orders the results by the balance_validity_days field.
+func ByBalanceValidityDays(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBalanceValidityDays, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

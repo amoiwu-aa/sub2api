@@ -425,7 +425,17 @@
           </template>
 
           <template #cell-balance="{ value, row }">
-            <div class="flex items-center gap-2">
+            <div v-if="isAffiliateAdmin" class="flex items-center gap-2">
+              <span class="font-medium text-gray-900 dark:text-white">${{ Number(value ?? 0).toFixed(2) }}</span>
+              <button
+                data-test="affiliate-allocate-cell"
+                @click.stop="handleAllocateQuota(row)"
+                class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+              >
+                {{ t('admin.users.allocateQuota') }}
+              </button>
+            </div>
+            <div v-else class="flex items-center gap-2">
               <div class="group relative">
                 <button
                   class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
@@ -682,6 +692,32 @@
                 <Icon name="users" size="sm" class="text-gray-400" :stroke-width="2" />
                 {{ t('admin.users.groups') }}
               </button>
+              <template v-if="isAffiliateAdmin">
+                <button
+                  data-test="affiliate-allocate"
+                  @click="handleAllocateQuota(user); closeActionMenu()"
+                  class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <Icon name="plus" size="sm" class="text-emerald-500" :stroke-width="2" />
+                  {{ t('admin.users.allocateQuota') }}
+                </button>
+                <button
+                  data-test="affiliate-usage"
+                  @click="handleViewUsage(user); closeActionMenu()"
+                  class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <Icon name="chart" size="sm" class="text-gray-400" :stroke-width="2" />
+                  {{ t('admin.users.viewUsage') }}
+                </button>
+                <button
+                  data-test="affiliate-subscriptions"
+                  @click="handleViewSubscriptions(user); closeActionMenu()"
+                  class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <Icon name="users" size="sm" class="text-gray-400" :stroke-width="2" />
+                  {{ t('admin.users.viewSubscriptions') }}
+                </button>
+              </template>
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
               <template v-if="!isAffiliateAdmin">
               <!-- View API Keys -->
@@ -770,6 +806,9 @@
     <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
     <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="loadUsers" />
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
+    <BalanceTransferModal :show="showTransferModal" :user="transferUser" @close="closeTransferModal" @success="loadUsers" />
+    <UserUsageDrawer :show="showUsageDrawer" :user="usageUser" @close="closeUsageDrawer" />
+    <UserSubscriptionsModal :show="showSubscriptionsModal" :user="subscriptionsUser" @close="closeSubscriptionsModal" />
     <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="loadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
   </AppLayout>
@@ -814,6 +853,9 @@ import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
+import BalanceTransferModal from '@/components/admin/user/BalanceTransferModal.vue'
+import UserUsageDrawer from '@/components/admin/user/UserUsageDrawer.vue'
+import UserSubscriptionsModal from '@/components/admin/user/UserSubscriptionsModal.vue'
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
 const appStore = useAppStore()
@@ -822,7 +864,6 @@ const isAffiliateAdmin = computed(() => authStore.isAffiliateAdmin)
 const AFFILIATE_HIDDEN_COLUMN_KEYS = new Set([
   'role',
   'subscriptions',
-  'balance',
   'balance_platform_quota',
   'usage',
   'usage_anthropic',
@@ -1567,6 +1608,13 @@ const balanceOperation = ref<'add' | 'subtract'>('add')
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
 
+const showTransferModal = ref(false)
+const transferUser = ref<AdminUser | null>(null)
+const showUsageDrawer = ref(false)
+const usageUser = ref<AdminUser | null>(null)
+const showSubscriptionsModal = ref(false)
+const subscriptionsUser = ref<AdminUser | null>(null)
+
 // 计算剩余天数
 const getDaysRemaining = (expiresAt: string): number => {
   const now = new Date()
@@ -1814,6 +1862,36 @@ const confirmDelete = async () => {
     appStore.showError(error.response?.data?.detail || t('admin.users.failedToDelete'))
     console.error('Error deleting user:', error)
   }
+}
+
+const handleAllocateQuota = (user: AdminUser) => {
+  transferUser.value = user
+  showTransferModal.value = true
+}
+
+const closeTransferModal = () => {
+  showTransferModal.value = false
+  transferUser.value = null
+}
+
+const handleViewUsage = (user: AdminUser) => {
+  usageUser.value = user
+  showUsageDrawer.value = true
+}
+
+const closeUsageDrawer = () => {
+  showUsageDrawer.value = false
+  usageUser.value = null
+}
+
+const handleViewSubscriptions = (user: AdminUser) => {
+  subscriptionsUser.value = user
+  showSubscriptionsModal.value = true
+}
+
+const closeSubscriptionsModal = () => {
+  showSubscriptionsModal.value = false
+  subscriptionsUser.value = null
 }
 
 const handleDeposit = (user: AdminUser) => {

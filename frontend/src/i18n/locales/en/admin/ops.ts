@@ -63,6 +63,8 @@ export default {
         refreshHealth: 'Refresh health',
         empty: 'No system logs',
         time: 'Time',
+        account: 'Account',
+        group: 'Group',
         logDetails: 'Log Details',
         loadFailed: 'Failed to load system logs',
         runtimeConfigActive: 'Runtime log configuration is active',
@@ -327,6 +329,7 @@ export default {
         },
         upstreamEvent: {
           account: 'Account',
+          group: 'Group',
           status: 'Status',
           requestId: 'Request ID'
         },
@@ -405,6 +408,8 @@ export default {
           time: 'Time',
           kind: 'Kind',
           platform: 'Platform',
+          account: 'Account',
+          group: 'Group',
           model: 'Model',
           duration: 'Duration',
           status: 'Status',

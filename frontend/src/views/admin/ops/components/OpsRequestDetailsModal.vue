@@ -150,6 +150,20 @@ const kindBadgeClass = (kind: string) => {
   if (kind === 'error') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
   return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
 }
+
+function displayAccount(row: { account_name?: string; account_id?: number | null }) {
+  const name = String(row.account_name || '').trim()
+  if (name) return name
+  if (row.account_id != null) return `#${row.account_id}`
+  return '-'
+}
+
+function displayGroup(row: { group_name?: string; group_id?: number | null }) {
+  const name = String(row.group_name || '').trim()
+  if (name) return name
+  if (row.group_id != null) return `#${row.group_id}`
+  return '-'
+}
 </script>
 
 <template>
@@ -204,6 +218,10 @@ const kindBadgeClass = (kind: string) => {
                   </div>
                   <div class="break-all text-xs text-gray-600 dark:text-gray-300">{{ row.model || '-' }}</div>
                   <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+                    <span>{{ t('admin.ops.requestDetails.table.account') }}: {{ displayAccount(row) }}</span>
+                    <span>{{ t('admin.ops.requestDetails.table.group') }}: {{ displayGroup(row) }}</span>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
                     <span>{{ typeof row.duration_ms === 'number' ? `${row.duration_ms} ms` : '-' }}</span>
                     <span>{{ row.status_code ?? '-' }}</span>
                   </div>
@@ -240,6 +258,12 @@ const kindBadgeClass = (kind: string) => {
                     {{ t('admin.ops.requestDetails.table.platform') }}
                   </th>
                   <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    {{ t('admin.ops.requestDetails.table.account') }}
+                  </th>
+                  <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    {{ t('admin.ops.requestDetails.table.group') }}
+                  </th>
+                  <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     {{ t('admin.ops.requestDetails.table.model') }}
                   </th>
                   <th class="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -268,6 +292,12 @@ const kindBadgeClass = (kind: string) => {
                   </td>
                   <td class="whitespace-nowrap px-4 py-3 text-xs font-medium text-gray-700 dark:text-gray-200">
                     {{ (row.platform || 'unknown').toUpperCase() }}
+                  </td>
+                  <td class="max-w-[180px] truncate px-4 py-3 text-xs text-gray-700 dark:text-gray-200" :title="displayAccount(row)">
+                    {{ displayAccount(row) }}
+                  </td>
+                  <td class="max-w-[160px] truncate px-4 py-3 text-xs text-gray-700 dark:text-gray-200" :title="displayGroup(row)">
+                    {{ displayGroup(row) }}
                   </td>
                   <td class="max-w-[240px] truncate px-4 py-3 text-xs text-gray-600 dark:text-gray-300" :title="row.model || ''">
                     {{ row.model || '-' }}

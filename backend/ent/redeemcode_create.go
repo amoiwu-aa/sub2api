@@ -170,6 +170,20 @@ func (_c *RedeemCodeCreate) SetNillableValidityDays(v *int) *RedeemCodeCreate {
 	return _c
 }
 
+// SetBalanceValidityDays sets the "balance_validity_days" field.
+func (_c *RedeemCodeCreate) SetBalanceValidityDays(v int) *RedeemCodeCreate {
+	_c.mutation.SetBalanceValidityDays(v)
+	return _c
+}
+
+// SetNillableBalanceValidityDays sets the "balance_validity_days" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableBalanceValidityDays(v *int) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetBalanceValidityDays(*v)
+	}
+	return _c
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_c *RedeemCodeCreate) SetUserID(id int64) *RedeemCodeCreate {
 	_c.mutation.SetUserID(id)
@@ -249,6 +263,10 @@ func (_c *RedeemCodeCreate) defaults() {
 		v := redeemcode.DefaultValidityDays
 		_c.mutation.SetValidityDays(v)
 	}
+	if _, ok := _c.mutation.BalanceValidityDays(); !ok {
+		v := redeemcode.DefaultBalanceValidityDays
+		_c.mutation.SetBalanceValidityDays(v)
+	}
 }
 
 // check runs all checks and user-defined validators on the builder.
@@ -285,6 +303,14 @@ func (_c *RedeemCodeCreate) check() error {
 	}
 	if _, ok := _c.mutation.ValidityDays(); !ok {
 		return &ValidationError{Name: "validity_days", err: errors.New(`ent: missing required field "RedeemCode.validity_days"`)}
+	}
+	if _, ok := _c.mutation.BalanceValidityDays(); !ok {
+		return &ValidationError{Name: "balance_validity_days", err: errors.New(`ent: missing required field "RedeemCode.balance_validity_days"`)}
+	}
+	if v, ok := _c.mutation.BalanceValidityDays(); ok {
+		if err := redeemcode.BalanceValidityDaysValidator(v); err != nil {
+			return &ValidationError{Name: "balance_validity_days", err: fmt.Errorf(`ent: validator failed for field "RedeemCode.balance_validity_days": %w`, err)}
+		}
 	}
 	return nil
 }
@@ -348,6 +374,10 @@ func (_c *RedeemCodeCreate) createSpec() (*RedeemCode, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ValidityDays(); ok {
 		_spec.SetField(redeemcode.FieldValidityDays, field.TypeInt, value)
 		_node.ValidityDays = value
+	}
+	if value, ok := _c.mutation.BalanceValidityDays(); ok {
+		_spec.SetField(redeemcode.FieldBalanceValidityDays, field.TypeInt, value)
+		_node.BalanceValidityDays = value
 	}
 	if nodes := _c.mutation.UserIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -597,6 +627,24 @@ func (u *RedeemCodeUpsert) AddValidityDays(v int) *RedeemCodeUpsert {
 	return u
 }
 
+// SetBalanceValidityDays sets the "balance_validity_days" field.
+func (u *RedeemCodeUpsert) SetBalanceValidityDays(v int) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldBalanceValidityDays, v)
+	return u
+}
+
+// UpdateBalanceValidityDays sets the "balance_validity_days" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateBalanceValidityDays() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldBalanceValidityDays)
+	return u
+}
+
+// AddBalanceValidityDays adds v to the "balance_validity_days" field.
+func (u *RedeemCodeUpsert) AddBalanceValidityDays(v int) *RedeemCodeUpsert {
+	u.Add(redeemcode.FieldBalanceValidityDays, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -828,6 +876,27 @@ func (u *RedeemCodeUpsertOne) AddValidityDays(v int) *RedeemCodeUpsertOne {
 func (u *RedeemCodeUpsertOne) UpdateValidityDays() *RedeemCodeUpsertOne {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValidityDays()
+	})
+}
+
+// SetBalanceValidityDays sets the "balance_validity_days" field.
+func (u *RedeemCodeUpsertOne) SetBalanceValidityDays(v int) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetBalanceValidityDays(v)
+	})
+}
+
+// AddBalanceValidityDays adds v to the "balance_validity_days" field.
+func (u *RedeemCodeUpsertOne) AddBalanceValidityDays(v int) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddBalanceValidityDays(v)
+	})
+}
+
+// UpdateBalanceValidityDays sets the "balance_validity_days" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateBalanceValidityDays() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateBalanceValidityDays()
 	})
 }
 
@@ -1228,6 +1297,27 @@ func (u *RedeemCodeUpsertBulk) AddValidityDays(v int) *RedeemCodeUpsertBulk {
 func (u *RedeemCodeUpsertBulk) UpdateValidityDays() *RedeemCodeUpsertBulk {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValidityDays()
+	})
+}
+
+// SetBalanceValidityDays sets the "balance_validity_days" field.
+func (u *RedeemCodeUpsertBulk) SetBalanceValidityDays(v int) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetBalanceValidityDays(v)
+	})
+}
+
+// AddBalanceValidityDays adds v to the "balance_validity_days" field.
+func (u *RedeemCodeUpsertBulk) AddBalanceValidityDays(v int) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddBalanceValidityDays(v)
+	})
+}
+
+// UpdateBalanceValidityDays sets the "balance_validity_days" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateBalanceValidityDays() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateBalanceValidityDays()
 	})
 }
 

@@ -148,7 +148,12 @@ const formatSystemLogDetail = (row: OpsSystemLog) => {
   if (row.client_request_id) corrParts.push(`client_req=${row.client_request_id}`)
   if (row.user_id != null) corrParts.push(`user=${row.user_id}`)
   if (row.api_key_id != null) corrParts.push(`key=${row.api_key_id}`)
-  if (row.account_id != null) corrParts.push(`acc=${row.account_id}`)
+  if (row.account_name || row.account_id != null) {
+    corrParts.push(`account=${row.account_name || '#' + row.account_id}`)
+  }
+  if (row.group_name || row.group_id != null) {
+    corrParts.push(`group=${row.group_name || '#' + row.group_id}`)
+  }
   if (row.platform) corrParts.push(`platform=${row.platform}`)
   if (row.model) corrParts.push(`model=${row.model}`)
   if (corrParts.length > 0) parts.push(corrParts.join(' '))
@@ -371,6 +376,20 @@ const applyFilters = () => {
 
 const hasData = computed(() => logs.value.length > 0)
 
+function displayAccount(row: OpsSystemLog) {
+  const name = String(row.account_name || '').trim()
+  if (name) return name
+  if (row.account_id != null) return `#${row.account_id}`
+  return '-'
+}
+
+function displayGroup(row: OpsSystemLog) {
+  const name = String(row.group_name || '').trim()
+  if (name) return name
+  if (row.group_id != null) return `#${row.group_id}`
+  return '-'
+}
+
 onMounted(async () => {
   if (props.platformFilter) {
     filters.platform = props.platformFilter
@@ -526,6 +545,10 @@ onMounted(async () => {
           <div v-if="row.host" class="truncate text-xs text-gray-500 dark:text-gray-400" :title="row.host">
             {{ row.host }}
           </div>
+          <div class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+            <span>{{ t('admin.ops.systemLogs.account') }}: {{ displayAccount(row) }}</span>
+            <span>{{ t('admin.ops.systemLogs.group') }}: {{ displayGroup(row) }}</span>
+          </div>
           <div class="whitespace-normal break-all text-xs text-gray-700 dark:text-gray-300">
             {{ formatSystemLogDetail(row) }}
           </div>
@@ -538,6 +561,8 @@ onMounted(async () => {
               <th class="w-[170px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">{{ t('admin.ops.systemLogs.time') }}</th>
               <th class="w-[160px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">{{ t('admin.ops.systemLogs.host') }}</th>
               <th class="w-[80px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">{{ t('admin.ops.systemLogs.level') }}</th>
+              <th class="w-[160px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">{{ t('admin.ops.systemLogs.account') }}</th>
+              <th class="w-[140px] px-3 py-2 text-left text-[11px] font-semibold text-gray-500">{{ t('admin.ops.systemLogs.group') }}</th>
               <th class="px-3 py-2 text-left text-[11px] font-semibold text-gray-500">{{ t('admin.ops.systemLogs.logDetails') }}</th>
             </tr>
           </thead>
@@ -551,6 +576,12 @@ onMounted(async () => {
                 <span class="inline-flex rounded-full px-2 py-0.5 font-semibold" :class="levelBadgeClass(row.level)">
                   {{ row.level }}
                 </span>
+              </td>
+              <td class="px-3 py-2 text-xs text-gray-700 dark:text-gray-300">
+                <span class="block truncate" :title="displayAccount(row)">{{ displayAccount(row) }}</span>
+              </td>
+              <td class="px-3 py-2 text-xs text-gray-700 dark:text-gray-300">
+                <span class="block truncate" :title="displayGroup(row)">{{ displayGroup(row) }}</span>
               </td>
               <td class="px-3 py-2 text-xs text-gray-700 dark:text-gray-300 whitespace-normal break-all">
                 {{ formatSystemLogDetail(row) }}

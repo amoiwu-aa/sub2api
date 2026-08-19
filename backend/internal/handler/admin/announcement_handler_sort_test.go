@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -16,6 +17,7 @@ import (
 type announcementRepoCapture struct {
 	service.AnnouncementRepository
 	listParams pagination.PaginationParams
+	item       *service.Announcement
 }
 
 func (r *announcementRepoCapture) List(ctx context.Context, params pagination.PaginationParams, filters service.AnnouncementListFilters) ([]service.Announcement, *pagination.PaginationResult, error) {
@@ -29,6 +31,9 @@ func (r *announcementRepoCapture) List(ctx context.Context, params pagination.Pa
 }
 
 func (r *announcementRepoCapture) GetByID(ctx context.Context, id int64) (*service.Announcement, error) {
+	if r.item != nil {
+		return r.item, nil
+	}
 	return &service.Announcement{
 		ID:        id,
 		Title:     "announcement",
@@ -41,11 +46,13 @@ func (r *announcementRepoCapture) GetByID(ctx context.Context, id int64) (*servi
 
 type announcementUserRepoCapture struct {
 	service.UserRepository
-	listParams pagination.PaginationParams
+	listParams  pagination.PaginationParams
+	listFilters service.UserListFilters
 }
 
 func (r *announcementUserRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters service.UserListFilters) ([]service.User, *pagination.PaginationResult, error) {
 	r.listParams = params
+	r.listFilters = filters
 	return []service.User{}, &pagination.PaginationResult{
 		Total:    0,
 		Page:     params.Page,
@@ -74,8 +81,13 @@ func newAnnouncementSortTestRouter(announcementRepo *announcementRepoCapture, us
 		userRepo,
 		&announcementUserSubRepoCapture{},
 	)
-	handler := NewAnnouncementHandler(svc)
+	handler := NewAnnouncementHandler(svc, nil)
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1})
+		c.Set(string(middleware.ContextKeyUserRole), service.RoleAdmin)
+		c.Next()
+	})
 	router.GET("/admin/announcements", handler.List)
 	router.GET("/admin/announcements/:id/read-status", handler.ListReadStatus)
 	return router
@@ -135,4 +147,30 @@ func TestAdminAnnouncementReadStatusSortDefaults(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "email", userRepo.listParams.SortBy)
 	require.Equal(t, "asc", userRepo.listParams.SortOrder)
+}
+
+func TestAdminAnnouncementReadStatusScopesAffiliateAudience(t *testing.T) {
+	affiliateAdminID := int64(42)
+	announcementRepo := &announcementRepoCapture{
+		item: &service.Announcement{
+			ID:      1,
+			Title:   "affiliate announcement",
+			Content: "content",
+			Status:  service.AnnouncementStatusActive,
+			Targeting: service.AnnouncementTargeting{
+				AffiliateAdminID: &affiliateAdminID,
+			},
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+	userRepo := &announcementUserRepoCapture{}
+	router := newAnnouncementSortTestRouter(announcementRepo, userRepo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/announcements/1/read-status", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, affiliateAdminID, userRepo.listFilters.ManagedByAdminID)
 }

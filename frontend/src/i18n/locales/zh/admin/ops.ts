@@ -63,6 +63,8 @@ export default {
         refreshHealth: '刷新健康状态',
         empty: '暂无系统日志',
         time: '时间',
+        account: '账号',
+        group: '分组',
         logDetails: '日志详情',
         loadFailed: '加载系统日志失败',
         runtimeConfigActive: '运行时日志配置已生效',
@@ -327,6 +329,7 @@ export default {
         },
         upstreamEvent: {
           account: '账号',
+          group: '分组',
           status: '状态码',
           requestId: '请求ID'
         },
@@ -405,6 +408,8 @@ export default {
           time: '时间',
           kind: '类型',
           platform: '平台',
+          account: '账号',
+          group: '分组',
           model: '模型',
           duration: '耗时',
           status: '状态码',

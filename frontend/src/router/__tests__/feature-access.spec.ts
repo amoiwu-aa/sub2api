@@ -197,6 +197,21 @@ describe('feature route guard', () => {
     expect(next).toHaveBeenCalledWith()
   })
 
+  it('allows affiliate admins on distribution paths and still blocks settings', async () => {
+    authStore.isAffiliateAdmin = true
+    authStore.canAccessAdminPanel = true
+
+    const allowed = runGuard({ requiresAdmin: true }, '/admin/distribution/dashboard')
+    await allowed.navigation
+    expect(allowed.next).toHaveBeenCalledOnce()
+    expect(allowed.next).toHaveBeenCalledWith()
+
+    const blocked = runGuard({ requiresAdmin: true }, '/admin/settings')
+    await blocked.navigation
+    expect(blocked.next).toHaveBeenCalledOnce()
+    expect(blocked.next).toHaveBeenCalledWith('/admin/users')
+  })
+
   it('still requests compliance for super admins', async () => {
     authStore.isAdmin = true
     authStore.canAccessAdminPanel = true

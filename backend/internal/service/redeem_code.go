@@ -20,6 +20,9 @@ type RedeemCode struct {
 
 	GroupID      *int64
 	ValidityDays int
+	// BalanceValidityDays applies only to positive balance codes.
+	// Zero preserves permanent wallet credit.
+	BalanceValidityDays int
 
 	User  *User
 	Group *Group

@@ -237,7 +237,7 @@ describe('CacheHitRateChart', () => {
     expect(wrapper.get('[data-testid="cache-coverage-value"]').text()).toBe('缓存部分可观测')
     expect(wrapper.text()).toContain('缓存读取覆盖率')
     expect(wrapper.text()).not.toContain('缓存命中率')
-    expect(wrapper.get('[data-testid="cache-observability"]').text()).toContain('1/3 (33.3%)')
+    expect(wrapper.get('[data-testid="cache-observability"]').text()).toContain('1/2 (50.0%)')
     expect(wrapper.get('[data-testid="cache-billing-adjustment"]').text()).toContain('600')
     expect(wrapper.get('[data-testid="cache-billing-adjustment"]').attributes('title')).toContain(
       '不计入真实缓存读取覆盖率'
@@ -280,7 +280,7 @@ describe('CacheHitRateChart', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.get('[data-testid="cache-coverage-value"]').text()).toBe('42.9%')
-    expect(wrapper.get('[data-testid="cache-observability"]').text()).toContain('1/3 (33.3%)')
+    expect(wrapper.get('[data-testid="cache-observability"]').text()).toContain('1/2 (50.0%)')
     expect(wrapper.get('[data-testid="cache-billing-adjustment"]').text()).toContain('300')
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
@@ -347,7 +347,7 @@ describe('CacheHitRateChart', () => {
     const coverageValue = wrapper.get('[data-testid="cache-coverage-value"]')
     expect(coverageValue.text()).toBe('缓存不可观测')
     expect(coverageValue.text()).not.toContain('0.0%')
-    expect(wrapper.get('[data-testid="cache-observability"]').text()).toContain('0/2')
+    expect(wrapper.get('[data-testid="cache-observability"]').text()).toContain('0/1')
     expect(wrapper.get('[data-testid="cache-observability"]').text()).not.toContain('0.0%')
   })
 

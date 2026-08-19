@@ -1010,44 +1010,36 @@
       @close="closeUseKeyModal"
     />
 
-    <!-- CCS Client Selection Dialog for Antigravity -->
+    <!-- CC Switch Tool Selection Dialog -->
     <BaseDialog
       :show="showCcsClientSelect"
       :title="t('keys.ccsClientSelect.title')"
-      width="narrow"
+      width="wide"
       @close="closeCcsClientSelect"
     >
       <div class="space-y-4">
         <p class="text-sm text-gray-600 dark:text-gray-400">
           {{ t('keys.ccsClientSelect.description') }}
-	        </p>
-	        <div class="grid grid-cols-2 gap-3">
-	          <button
-	            @click="handleCcsClientSelect('claude')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
-	          >
-	            <Icon name="terminal" size="xl" class="text-gray-600 dark:text-gray-400" />
-	            <span class="font-medium text-gray-900 dark:text-white">{{
-	              t('keys.ccsClientSelect.claudeCode')
-	            }}</span>
-	            <span class="text-xs text-gray-500 dark:text-gray-400">{{
-	              t('keys.ccsClientSelect.claudeCodeDesc')
-	            }}</span>
-	          </button>
-	          <button
-	            @click="handleCcsClientSelect('gemini')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
-	          >
-	            <Icon name="sparkles" size="xl" class="text-gray-600 dark:text-gray-400" />
-	            <span class="font-medium text-gray-900 dark:text-white">{{
-	              t('keys.ccsClientSelect.geminiCli')
-	            }}</span>
-	            <span class="text-xs text-gray-500 dark:text-gray-400">{{
-	              t('keys.ccsClientSelect.geminiCliDesc')
-	            }}</span>
-	          </button>
-	        </div>
-	      </div>
+        </p>
+        <div
+          class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+          <button
+            v-for="option in ccsClientOptions"
+            :key="option.type"
+            @click="handleCcsClientSelect(option.type)"
+            class="flex min-h-32 flex-col items-center justify-center gap-2 rounded-lg border-2 border-gray-200 p-4 transition-all hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
+          >
+            <Icon :name="option.icon" size="xl" class="text-gray-600 dark:text-gray-400" />
+            <span class="font-medium text-gray-900 dark:text-white">
+              {{ t(option.labelKey) }}
+            </span>
+            <span class="text-center text-xs text-gray-500 dark:text-gray-400">
+              {{ t(option.descriptionKey) }}
+            </span>
+          </button>
+        </div>
+      </div>
       <template #footer>
         <div class="flex justify-end">
           <button @click="closeCcsClientSelect" class="btn btn-secondary">
@@ -1057,7 +1049,7 @@
       </template>
     </BaseDialog>
 
-    <!-- CCS Model Selection Dialog for Cursor -->
+    <!-- CCS Model Selection Dialog -->
     <BaseDialog
       :show="showCcsModelSelect"
       :title="t('keys.ccsModelSelect.title')"
@@ -1068,14 +1060,24 @@
         <p class="text-sm text-gray-600 dark:text-gray-400">
           {{ t('keys.ccsModelSelect.description') }}
         </p>
-        <div class="space-y-2">
+        <div class="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
           <button
             v-for="model in ccsModelOptions"
             :key="model"
             @click="handleCcsModelSelect(model)"
-            class="flex w-full items-center justify-between gap-3 rounded-xl border-2 border-gray-200 p-3 text-left transition-all hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
+            class="flex w-full items-center justify-between gap-3 rounded-lg border-2 border-gray-200 p-3 text-left transition-all hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
           >
-            <span class="font-mono text-sm text-gray-900 dark:text-white">{{ model }}</span>
+            <span class="min-w-0">
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">
+                {{ ccsModelLabel(model) }}
+              </span>
+              <span
+                v-if="ccsModelLabel(model) !== model"
+                class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400"
+              >
+                {{ model }}
+              </span>
+            </span>
             <Icon name="chevronRight" size="sm" class="text-gray-400" />
           </button>
         </div>
@@ -1084,6 +1086,63 @@
         <div class="flex justify-end">
           <button @click="closeCcsModelSelect" class="btn btn-secondary">
             {{ t('common.cancel') }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <!-- CC-Switch preflight: install before invoking the custom protocol -->
+    <BaseDialog
+      :show="showCcsDownloadPrompt"
+      :title="t('keys.ccSwitchDownload.title')"
+      width="narrow"
+      @close="closeCcsDownloadPrompt"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('keys.ccSwitchDownload.description') }}
+        </p>
+        <div class="space-y-2">
+          <button
+            v-for="option in ccsDownloadOptions"
+            :key="option.id"
+            @click="openCcSwitchDownload(option.url)"
+            class="flex w-full items-center justify-between gap-3 rounded-xl border-2 p-3 text-left transition-all hover:border-primary-500 hover:bg-primary-50 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
+            :class="option.recommended
+              ? 'border-primary-500 bg-primary-50 dark:border-primary-500 dark:bg-primary-900/20'
+              : 'border-gray-200 dark:border-dark-600'"
+          >
+            <span class="min-w-0">
+              <span class="flex items-center gap-2">
+                <span class="text-sm font-medium text-gray-900 dark:text-white">
+                  {{ t(option.labelKey) }}
+                </span>
+                <span
+                  v-if="option.recommended"
+                  class="rounded-full bg-primary-100 px-2 py-0.5 text-[11px] font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+                >
+                  {{ t('keys.ccSwitchDownload.recommended') }}
+                </span>
+              </span>
+              <span class="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                {{ t(option.descriptionKey) }}
+              </span>
+            </span>
+            <Icon :name="option.id === 'other' ? 'externalLink' : 'download'" size="sm" class="text-gray-400" />
+          </button>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('keys.ccSwitchDownload.afterInstall') }}
+        </p>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button @click="closeCcsDownloadPrompt" class="btn btn-secondary">
+            {{ t('common.cancel') }}
+          </button>
+          <button @click="continueCcsImport" class="btn btn-primary">
+            <Icon name="upload" size="sm" />
+            {{ t('keys.ccSwitchDownload.continueImport') }}
           </button>
         </div>
       </template>
@@ -1191,13 +1250,20 @@ import { formatCompactNumber, formatDateTime } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
   buildCcSwitchImportDeeplink,
+  ccSwitchImportNeedsModel,
   CURSOR_CC_SWITCH_MODEL_FALLBACKS,
+  getCcSwitchClientTypes,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
-import { kiroModels } from '@/composables/useModelWhitelist'
-
-// 模型 id 带平台命名空间前缀的平台，导入前要让用户选一个具体模型。
-const NAMESPACED_MODEL_PLATFORMS: GroupPlatform[] = ['cursor', 'kiro']
+import {
+  CC_SWITCH_FALLBACK_DOWNLOADS,
+  detectCcSwitchArch,
+  detectCcSwitchDesktopOs,
+  loadCcSwitchDownloadLinks,
+  type CcSwitchDesktopOs,
+  type CcSwitchDownloadLinks
+} from '@/utils/ccswitchDownload'
+import { allModels, getModelsByPlatform, kiroModels } from '@/composables/useModelWhitelist'
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1223,9 +1289,71 @@ interface GroupOption {
   platform: GroupPlatform
 }
 
+type CcsClientOption = {
+  type: CcSwitchClientType
+  icon: 'terminal' | 'cpu' | 'sparkles'
+  labelKey: string
+  descriptionKey: string
+}
+
+const ccsClientOptionMeta: Record<CcSwitchClientType, Omit<CcsClientOption, 'type'>> = {
+  claude: {
+    icon: 'terminal',
+    labelKey: 'keys.ccsClientSelect.claudeCode',
+    descriptionKey: 'keys.ccsClientSelect.claudeCodeDesc'
+  },
+  codex: {
+    icon: 'cpu',
+    labelKey: 'keys.ccsClientSelect.codex',
+    descriptionKey: 'keys.ccsClientSelect.codexDesc'
+  },
+  gemini: {
+    icon: 'sparkles',
+    labelKey: 'keys.ccsClientSelect.geminiCli',
+    descriptionKey: 'keys.ccsClientSelect.geminiCliDesc'
+  },
+  grokbuild: {
+    icon: 'cpu',
+    labelKey: 'keys.ccsClientSelect.grokBuild',
+    descriptionKey: 'keys.ccsClientSelect.grokBuildDesc'
+  },
+  opencode: {
+    icon: 'terminal',
+    labelKey: 'keys.ccsClientSelect.openCode',
+    descriptionKey: 'keys.ccsClientSelect.openCodeDesc'
+  },
+  openclaw: {
+    icon: 'terminal',
+    labelKey: 'keys.ccsClientSelect.openClaw',
+    descriptionKey: 'keys.ccsClientSelect.openClawDesc'
+  },
+  hermes: {
+    icon: 'terminal',
+    labelKey: 'keys.ccsClientSelect.hermes',
+    descriptionKey: 'keys.ccsClientSelect.hermesDesc'
+  }
+}
+
 const appStore = useAppStore()
 const onboardingStore = useOnboardingStore()
 const { copyToClipboard: clipboardCopy } = useClipboard()
+
+const ccsModelLabelKeys: Record<string, string> = {
+  'cursor/default': 'keys.ccsModelSelect.models.cursorDefault',
+  'cursor/grok-4.5': 'keys.ccsModelSelect.models.cursorGrok45',
+  'cursor/grok-4.5-max': 'keys.ccsModelSelect.models.cursorGrok45Max',
+  'cursor/claude-fable-5': 'keys.ccsModelSelect.models.cursorClaudeFable5',
+  'cursor/claude-sonnet-5': 'keys.ccsModelSelect.models.cursorClaudeSonnet5',
+  'cursor/gpt-5.6-sol': 'keys.ccsModelSelect.models.cursorGpt56Sol',
+  'cursor/grok-4.6': 'keys.ccsModelSelect.models.cursorGrok46',
+  'cursor/grok-4.6-max': 'keys.ccsModelSelect.models.cursorGrok46Max',
+  'cursor/composer-2.5': 'keys.ccsModelSelect.models.cursorComposer25'
+}
+
+const ccsModelLabel = (model: string) => {
+  const key = ccsModelLabelKeys[model]
+  return key ? t(key) : model
+}
 
 const allColumns = computed<Column[]>(() => [
   { key: 'name', label: t('common.name'), sortable: true },
@@ -1354,9 +1482,12 @@ const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
 const showCcsModelSelect = ref(false)
+const showCcsDownloadPrompt = ref(false)
+const ccsDownloadLinks = ref<CcSwitchDownloadLinks>({ ...CC_SWITCH_FALLBACK_DOWNLOADS })
 const ccsModelOptions = ref<string[]>([])
 const showColumnDropdown = ref(false)
 const pendingCcsRow = ref<ApiKey | null>(null)
+const pendingCcsClientType = ref<CcSwitchClientType | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
@@ -1366,6 +1497,68 @@ const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
 const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())
 let abortController: AbortController | null = null
+
+const ccsClientOptions = computed<CcsClientOption[]>(() => {
+  const row = pendingCcsRow.value
+  const platform = row?.group?.platform || 'anthropic'
+  return getCcSwitchClientTypes(platform, !!row?.group?.allow_messages_dispatch).map((type) => ({
+    type,
+    ...ccsClientOptionMeta[type]
+  }))
+})
+
+type CcsDownloadOption = {
+  id: CcSwitchDesktopOs | 'other'
+  labelKey: string
+  descriptionKey: string
+  url: string
+  recommended: boolean
+}
+
+const ccsDownloadOptions = computed<CcsDownloadOption[]>(() => {
+  const os = detectCcSwitchDesktopOs()
+  const arch = detectCcSwitchArch()
+  const links = ccsDownloadLinks.value
+  const windowsUrl = arch === 'arm64' ? links.windowsArm : links.windows
+  const linuxUrl = arch === 'arm64' ? links.linuxArm : links.linux
+  const options: CcsDownloadOption[] = [
+    {
+      id: 'windows',
+      labelKey: 'keys.ccSwitchDownload.windows',
+      descriptionKey: 'keys.ccSwitchDownload.windowsDesc',
+      url: windowsUrl,
+      recommended: os === 'windows'
+    },
+    {
+      id: 'macos',
+      labelKey: 'keys.ccSwitchDownload.macos',
+      descriptionKey: 'keys.ccSwitchDownload.macosDesc',
+      url: links.macos,
+      recommended: os === 'macos'
+    },
+    {
+      id: 'linux',
+      labelKey: 'keys.ccSwitchDownload.linux',
+      descriptionKey: 'keys.ccSwitchDownload.linuxDesc',
+      url: linuxUrl,
+      recommended: os === 'linux'
+    },
+    {
+      id: 'other',
+      labelKey: 'keys.ccSwitchDownload.other',
+      descriptionKey: 'keys.ccSwitchDownload.otherDesc',
+      url: links.releasesUrl,
+      recommended: os === 'other'
+    }
+  ]
+
+  const recommendedIndex = options.findIndex((option) => option.recommended)
+  if (recommendedIndex > 0) {
+    const [recommended] = options.splice(recommendedIndex, 1)
+    options.unshift(recommended)
+  }
+  return options
+})
 
 // Get the currently selected key for group change
 const selectedKeyForGroup = computed(() => {
@@ -1923,60 +2116,11 @@ const resetRateLimitUsage = async () => {
   }
 }
 
-/**
- * 深链是否被系统接走，浏览器里唯一可观测的信号就是本窗口失焦：协议处理程序
- * 起来了，或者浏览器弹出了「是否打开」确认框。给 2 秒是因为确认框要等用户点，
- * 桌面应用冷启动也要几百毫秒——早期用 100ms 后仍有焦点判定失败，导致导入
- * 明明成功也照样弹错误。
- */
-const CCS_HANDOFF_TIMEOUT_MS = 2000
-
-const waitForProtocolHandoff = (timeoutMs: number): Promise<boolean> => {
-  return new Promise((resolve) => {
-    let settled = false
-    let timer: ReturnType<typeof setTimeout>
-
-    const finish = (handedOff: boolean) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      window.removeEventListener('blur', onBlur)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      resolve(handedOff)
-    }
-    const onBlur = () => finish(true)
-    const onVisibilityChange = () => {
-      if (document.hidden) finish(true)
-    }
-
-    window.addEventListener('blur', onBlur)
-    document.addEventListener('visibilitychange', onVisibilityChange)
-    timer = setTimeout(() => finish(false), timeoutMs)
-  })
-}
-
 const importToCcswitch = (row: ApiKey) => {
-  const platform = row.group?.platform || 'anthropic'
-
-  // For antigravity platform, show client selection dialog
-  if (platform === 'antigravity') {
-    pendingCcsRow.value = row
-    showCcsClientSelect.value = true
-    return
-  }
-
-  // Cursor / Kiro 一个分组常开放多个模型，而且 Kiro 的可用范围还随订阅档位变，
-  // 默认导成某一个的话用户还得去 CC Switch 里手工改；先让他挑，挑完再拼 deeplink。
-  if (NAMESPACED_MODEL_PLATFORMS.includes(platform)) {
-    pendingCcsRow.value = row
-    ccsModelOptions.value = platform === 'kiro' ? kiroModels : CURSOR_CC_SWITCH_MODEL_FALLBACKS
-    showCcsModelSelect.value = true
-    void loadCcsModelOptions(row)
-    return
-  }
-
-  // For other platforms, execute directly
-  void executeCcsImport(row, platform === 'gemini' ? 'gemini' : 'claude')
+  pendingCcsRow.value = row
+  pendingCcsClientType.value = null
+  ccsModelOptions.value = []
+  promptCcSwitchDownload()
 }
 
 /**
@@ -1991,6 +2135,54 @@ const importToCcswitch = (row: ApiKey) => {
  * 免费号用户会在下拉框里看到自己点不了的企业模型。
  */
 const CCS_MODEL_REFETCH_DELAY_MS = 3000
+
+const compositeModelMatchesClient = (model: string, clientType: CcSwitchClientType): boolean => {
+  const normalized = model.toLowerCase()
+  switch (clientType) {
+    case 'claude':
+      return normalized.startsWith('claude-') || normalized.startsWith('anthropic/')
+    case 'codex':
+      return /^(gpt-|o\d|openai\/)/.test(normalized)
+    case 'gemini':
+      return /^(models\/)?gemini-|^learnlm-/.test(normalized)
+    case 'grokbuild':
+      return normalized.startsWith('grok') || normalized.startsWith('xai/')
+    default:
+      return true
+  }
+}
+
+const filterCcsModels = (
+  models: string[],
+  platform: GroupPlatform,
+  clientType: CcSwitchClientType
+): string[] => {
+  const uniqueModels = [...new Set(models.map((model) => model.trim()).filter(Boolean))]
+  if (platform !== 'composite') {
+    return uniqueModels
+  }
+  return uniqueModels.filter((model) => compositeModelMatchesClient(model, clientType))
+}
+
+const fallbackCcsModels = (
+  platform: GroupPlatform,
+  clientType: CcSwitchClientType
+): string[] => {
+  if (platform === 'cursor') {
+    return CURSOR_CC_SWITCH_MODEL_FALLBACKS
+  }
+  if (platform === 'kiro') {
+    return kiroModels
+  }
+  if (platform === 'composite') {
+    return filterCcsModels(
+      allModels.map((model) => model.value),
+      platform,
+      clientType
+    )
+  }
+  return getModelsByPlatform(platform)
+}
 
 const loadCcsModelOptions = async (row: ApiKey) => {
   const baseUrl = (publicSettings.value?.api_base_url || window.location.origin).replace(/\/+$/, '')
@@ -2011,8 +2203,13 @@ const loadCcsModelOptions = async (row: ApiKey) => {
 
   const apply = (ids: string[] | null) => {
     // 弹窗可能已经被关掉或换了一行，晚到的结果不该覆盖当前状态。
-    if (ids && pendingCcsRow.value?.id === row.id) {
-      ccsModelOptions.value = ids
+    const clientType = pendingCcsClientType.value
+    const platform = row.group?.platform || 'anthropic'
+    if (ids && clientType && pendingCcsRow.value?.id === row.id) {
+      const filtered = filterCcsModels(ids, platform, clientType)
+      if (filtered.length > 0) {
+        ccsModelOptions.value = filtered
+      }
     }
   }
 
@@ -2057,42 +2254,78 @@ const executeCcsImport = async (
     modelOverride
   })
 
-  try {
-    // 监听必须先挂上：协议处理程序可能在 window.open 返回前就把焦点抢走。
-    const handedOff = waitForProtocolHandoff(CCS_HANDOFF_TIMEOUT_MS)
-    window.open(deeplink, '_self')
-    if (!(await handedOff)) {
-      appStore.showWarning(t('keys.ccSwitchNoResponse'))
-    }
-  } catch {
-    appStore.showWarning(t('keys.ccSwitchNoResponse'))
-  }
+  window.open(deeplink, '_self')
 }
 
 const handleCcsClientSelect = (clientType: CcSwitchClientType) => {
-  if (pendingCcsRow.value) {
-    void executeCcsImport(pendingCcsRow.value, clientType)
+  const row = pendingCcsRow.value
+  if (!row) {
+    return
   }
+
+  const platform = row.group?.platform || 'anthropic'
+  if (ccSwitchImportNeedsModel(platform, clientType)) {
+    pendingCcsClientType.value = clientType
+    ccsModelOptions.value = fallbackCcsModels(platform, clientType)
+    showCcsClientSelect.value = false
+    showCcsModelSelect.value = true
+    void loadCcsModelOptions(row)
+    return
+  }
+
+  void executeCcsImport(row, clientType)
   showCcsClientSelect.value = false
   pendingCcsRow.value = null
+  pendingCcsClientType.value = null
 }
 
 const closeCcsClientSelect = () => {
   showCcsClientSelect.value = false
   pendingCcsRow.value = null
+  pendingCcsClientType.value = null
 }
 
 const handleCcsModelSelect = (model: string) => {
   if (pendingCcsRow.value) {
-    void executeCcsImport(pendingCcsRow.value, 'claude', model)
+    void executeCcsImport(pendingCcsRow.value, pendingCcsClientType.value || 'claude', model)
   }
   showCcsModelSelect.value = false
   pendingCcsRow.value = null
+  pendingCcsClientType.value = null
 }
 
 const closeCcsModelSelect = () => {
   showCcsModelSelect.value = false
   pendingCcsRow.value = null
+  pendingCcsClientType.value = null
+}
+
+const promptCcSwitchDownload = () => {
+  showCcsDownloadPrompt.value = true
+  void loadCcSwitchDownloadLinks().then((links) => {
+    ccsDownloadLinks.value = links
+  })
+}
+
+const continueCcsImport = () => {
+  if (!pendingCcsRow.value) {
+    closeCcsDownloadPrompt()
+    return
+  }
+
+  showCcsDownloadPrompt.value = false
+  showCcsClientSelect.value = true
+}
+
+const closeCcsDownloadPrompt = () => {
+  showCcsDownloadPrompt.value = false
+  pendingCcsRow.value = null
+  pendingCcsClientType.value = null
+  ccsModelOptions.value = []
+}
+
+const openCcSwitchDownload = (url: string) => {
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function formatResetTime(resetAt: string | null): string {

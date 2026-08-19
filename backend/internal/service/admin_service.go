@@ -175,7 +175,8 @@ type UpdateUserInput struct {
 	GroupRates map[int64]*float64
 	// ActorAdminID 执行本次操作的管理员ID(来自JWT)，仅用于权限敏感操作的审计日志。
 	ActorAdminID int64
-	// ActorRole 操作者角色；分销管理员更新时忽略角色/余额/分组等特权字段。
+	// ActorRole 操作者角色；分销管理员更新时忽略角色/余额/并发/RPM/专属倍率，
+	// AllowedGroups 必须是其当前目录的子集。
 	ActorRole string
 }
 
@@ -521,12 +522,13 @@ type UpdateProxyInput struct {
 }
 
 type GenerateRedeemCodesInput struct {
-	Count        int
-	Type         string
-	Value        float64
-	GroupID      *int64 // 订阅类型专用：关联的分组ID
-	ValidityDays int    // 订阅类型专用：有效天数
-	ExpiresAt    *time.Time
+	Count               int
+	Type                string
+	Value               float64
+	GroupID             *int64 // 订阅类型专用：关联的分组ID
+	ValidityDays        int    // 订阅类型专用：有效天数
+	BalanceValidityDays int    // 余额类型专用：兑换后有效天数，0 表示永久
+	ExpiresAt           *time.Time
 }
 
 type ProxyBatchDeleteResult struct {
@@ -704,6 +706,18 @@ type adminServiceImpl struct {
 	compositeResolver    *CompositeRouteResolver
 	// 分组平台变更后用来失效渠道缓存；可为 nil（缓存会在 TTL 到期后自然重建）
 	channelCacheInvalidator ChannelCacheInvalidator
+	inviteDefaults          inviteDefaultGroupRevoker
+}
+
+type inviteDefaultGroupRevoker interface {
+	RemoveDefaultGroupID(ctx context.Context, adminID, groupID int64) error
+}
+
+func (s *adminServiceImpl) setInviteDefaultGroupRevoker(r inviteDefaultGroupRevoker) {
+	if s == nil {
+		return
+	}
+	s.inviteDefaults = r
 }
 
 // ChannelCacheInvalidator 失效渠道缓存。
@@ -718,6 +732,9 @@ type adminRechargeAffiliateAccruer interface {
 
 type userOwnershipStore interface {
 	UserIsManagedBy(ctx context.Context, userID, adminID int64) (bool, error)
+	// ListManagedUserIDs returns panel users owned by adminID
+	// (created_by_admin_id or affiliate inviter_id).
+	ListManagedUserIDs(ctx context.Context, adminID int64, includeDeleted bool) ([]int64, error)
 }
 
 // managedUserCreator atomically creates a panel-managed user and binds its
@@ -785,4 +802,63 @@ func NewAdminService(
 
 		channelCacheInvalidator: channelCacheInvalidator,
 	}
+}
+
+// ProvideAdminService wires NewAdminService and attaches invite-default cleanup
+// without changing the public constructor used by tests.
+func ProvideAdminService(
+	userRepo UserRepository,
+	groupRepo AdminGroupRepository,
+	accountRepo AdminAccountRepository,
+	proxyRepo ProxyRepository,
+	apiKeyRepo APIKeyRepository,
+	redeemCodeRepo RedeemCodeRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	userRPMCache UserRPMCache,
+	billingCacheService *BillingCacheService,
+	proxyProber ProxyExitInfoProber,
+	proxyLatencyCache ProxyLatencyCache,
+	ipReputationChecker IPReputationChecker,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	entClient *dbent.Client,
+	settingService *SettingService,
+	defaultSubAssigner DefaultSubscriptionAssigner,
+	userSubRepo UserSubscriptionRepository,
+	privacyClientFactory PrivacyClientFactory,
+	runtimeBlocker AccountRuntimeBlocker,
+	affiliateService *AffiliateService,
+	compositeRouteRepo CompositeModelRouteRepository,
+	compositeResolver *CompositeRouteResolver,
+	channelCacheInvalidator ChannelCacheInvalidator,
+	inviteDefaults *DistributionInviteService,
+) AdminService {
+	svc := NewAdminService(
+		userRepo,
+		groupRepo,
+		accountRepo,
+		proxyRepo,
+		apiKeyRepo,
+		redeemCodeRepo,
+		userGroupRateRepo,
+		userRPMCache,
+		billingCacheService,
+		proxyProber,
+		proxyLatencyCache,
+		ipReputationChecker,
+		authCacheInvalidator,
+		entClient,
+		settingService,
+		defaultSubAssigner,
+		userSubRepo,
+		privacyClientFactory,
+		runtimeBlocker,
+		affiliateService,
+		compositeRouteRepo,
+		compositeResolver,
+		channelCacheInvalidator,
+	)
+	if impl, ok := svc.(*adminServiceImpl); ok {
+		impl.setInviteDefaultGroupRevoker(inviteDefaults)
+	}
+	return svc
 }

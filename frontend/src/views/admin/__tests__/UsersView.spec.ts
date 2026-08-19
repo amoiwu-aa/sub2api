@@ -108,6 +108,8 @@ const DataTableStub = {
       </template>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <slot name="cell-balance" :value="row.balance" :row="row" />
+        <slot name="cell-actions" :row="row" />
       </div>
     </div>
   `
@@ -184,6 +186,9 @@ describe('admin UsersView', () => {
           UserAllowedGroupsModal: true,
           UserBalanceModal: true,
           UserBalanceHistoryModal: true,
+          BalanceTransferModal: true,
+          UserUsageDrawer: true,
+          UserSubscriptionsModal: true,
           GroupReplaceModal: true,
           Icon: true,
           Teleport: true
@@ -270,6 +275,9 @@ describe('admin UsersView', () => {
           UserAllowedGroupsModal: true,
           UserBalanceModal: true,
           UserBalanceHistoryModal: true,
+          BalanceTransferModal: true,
+          UserUsageDrawer: true,
+          UserSubscriptionsModal: true,
           GroupReplaceModal: true,
           Icon: true,
           Teleport: true
@@ -348,6 +356,9 @@ describe('admin UsersView', () => {
           UserAllowedGroupsModal: true,
           UserBalanceModal: true,
           UserBalanceHistoryModal: true,
+          BalanceTransferModal: true,
+          UserUsageDrawer: true,
+          UserSubscriptionsModal: true,
           GroupReplaceModal: true,
           Icon: true,
           Teleport: true
@@ -411,6 +422,9 @@ describe('admin UsersView', () => {
           UserAllowedGroupsModal: true,
           UserBalanceModal: true,
           UserBalanceHistoryModal: true,
+          BalanceTransferModal: true,
+          UserUsageDrawer: true,
+          UserSubscriptionsModal: true,
           GroupReplaceModal: true,
           Icon: true,
           Teleport: true
@@ -421,7 +435,7 @@ describe('admin UsersView', () => {
     await flushPromises()
 
     const columns = wrapper.get('[data-test="columns"]').text()
-    expect(columns).not.toContain('balance')
+    expect(columns).toContain('balance')
     expect(columns).not.toContain('concurrency')
     expect(columns).not.toContain('usage')
     expect(columns).not.toContain('role')
@@ -429,5 +443,13 @@ describe('admin UsersView', () => {
     expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
     expect(listEnabledDefinitions).not.toHaveBeenCalled()
     expect(getAllGroups).toHaveBeenCalled()
+
+    await wrapper.get('.action-menu-trigger').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="affiliate-allocate-cell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="affiliate-allocate"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="affiliate-usage"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="affiliate-subscriptions"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('admin.users.deposit')
   })
 })

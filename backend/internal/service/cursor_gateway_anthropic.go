@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -55,7 +56,20 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	if err := conversation.ValidationError(); err != nil {
 		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
-	nativeBridge, mcpTools, err := resolveCursorNativeToolBridge(body, conversation.Tools, s.nativeBridgeMode)
+	if depth, limit, exceeded := s.toolLoopExceeded(conversation); exceeded {
+		slog.Warn("cursor.tool_loop_blocked",
+			"protocol", "anthropic_messages",
+			"continuations", depth,
+			"limit", limit,
+		)
+		return nil, s.writeAnthropicError(c, http.StatusConflict, "invalid_request_error",
+			cursorToolLoopMessage(depth, limit))
+	}
+	nativeBridge, mcpTools, err := s.resolveNativeToolBridgeWithRecovery(
+		body,
+		conversation,
+		"anthropic_messages",
+	)
 	if err != nil {
 		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}

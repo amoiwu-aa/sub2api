@@ -199,7 +199,7 @@ describe('admin DashboardView', () => {
       'admin.dashboard.cachePartiallyObservable'
     )
     expect(wrapper.get('[data-testid="today-cache-observability"]').text()).toContain(
-      '1/3 (33.3%)'
+      '1/2 (50.0%)'
     )
     expect(wrapper.get('[data-testid="today-cache-billing-adjustment"]').text()).toContain('600')
   })
@@ -256,7 +256,7 @@ describe('admin DashboardView', () => {
 
     expect(wrapper.get('[data-testid="today-cache-coverage-value"]').text()).toBe('42.9%')
     expect(wrapper.get('[data-testid="today-cache-observability"]').text()).toContain(
-      '1/3 (33.3%)'
+      '1/2 (50.0%)'
     )
     expect(wrapper.get('[data-testid="total-cache-coverage-value"]').text()).toBe('40.0%')
     expect(wrapper.get('[data-testid="today-cache-billing-adjustment"]').text()).toContain('300')
@@ -331,7 +331,7 @@ describe('admin DashboardView', () => {
     expect(coverageValue.text()).toBe('admin.dashboard.cacheUnobservable')
     expect(coverageValue.text()).not.toContain('0.0%')
     const observability = wrapper.get('[data-testid="today-cache-observability"]')
-    expect(observability.text()).toContain('0/3')
+    expect(observability.text()).toContain('0/1')
     expect(observability.text()).not.toContain('0.0%')
   })
 

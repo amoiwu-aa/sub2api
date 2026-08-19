@@ -214,6 +214,27 @@ func (_u *RedeemCodeUpdate) AddValidityDays(v int) *RedeemCodeUpdate {
 	return _u
 }
 
+// SetBalanceValidityDays sets the "balance_validity_days" field.
+func (_u *RedeemCodeUpdate) SetBalanceValidityDays(v int) *RedeemCodeUpdate {
+	_u.mutation.ResetBalanceValidityDays()
+	_u.mutation.SetBalanceValidityDays(v)
+	return _u
+}
+
+// SetNillableBalanceValidityDays sets the "balance_validity_days" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableBalanceValidityDays(v *int) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetBalanceValidityDays(*v)
+	}
+	return _u
+}
+
+// AddBalanceValidityDays adds value to the "balance_validity_days" field.
+func (_u *RedeemCodeUpdate) AddBalanceValidityDays(v int) *RedeemCodeUpdate {
+	_u.mutation.AddBalanceValidityDays(v)
+	return _u
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_u *RedeemCodeUpdate) SetUserID(id int64) *RedeemCodeUpdate {
 	_u.mutation.SetUserID(id)
@@ -299,6 +320,11 @@ func (_u *RedeemCodeUpdate) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "RedeemCode.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.BalanceValidityDays(); ok {
+		if err := redeemcode.BalanceValidityDaysValidator(v); err != nil {
+			return &ValidationError{Name: "balance_validity_days", err: fmt.Errorf(`ent: validator failed for field "RedeemCode.balance_validity_days": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -352,6 +378,12 @@ func (_u *RedeemCodeUpdate) sqlSave(ctx context.Context) (_node int, err error) 
 	}
 	if value, ok := _u.mutation.AddedValidityDays(); ok {
 		_spec.AddField(redeemcode.FieldValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.BalanceValidityDays(); ok {
+		_spec.SetField(redeemcode.FieldBalanceValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedBalanceValidityDays(); ok {
+		_spec.AddField(redeemcode.FieldBalanceValidityDays, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -615,6 +647,27 @@ func (_u *RedeemCodeUpdateOne) AddValidityDays(v int) *RedeemCodeUpdateOne {
 	return _u
 }
 
+// SetBalanceValidityDays sets the "balance_validity_days" field.
+func (_u *RedeemCodeUpdateOne) SetBalanceValidityDays(v int) *RedeemCodeUpdateOne {
+	_u.mutation.ResetBalanceValidityDays()
+	_u.mutation.SetBalanceValidityDays(v)
+	return _u
+}
+
+// SetNillableBalanceValidityDays sets the "balance_validity_days" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableBalanceValidityDays(v *int) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetBalanceValidityDays(*v)
+	}
+	return _u
+}
+
+// AddBalanceValidityDays adds value to the "balance_validity_days" field.
+func (_u *RedeemCodeUpdateOne) AddBalanceValidityDays(v int) *RedeemCodeUpdateOne {
+	_u.mutation.AddBalanceValidityDays(v)
+	return _u
+}
+
 // SetUserID sets the "user" edge to the User entity by ID.
 func (_u *RedeemCodeUpdateOne) SetUserID(id int64) *RedeemCodeUpdateOne {
 	_u.mutation.SetUserID(id)
@@ -713,6 +766,11 @@ func (_u *RedeemCodeUpdateOne) check() error {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "RedeemCode.status": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.BalanceValidityDays(); ok {
+		if err := redeemcode.BalanceValidityDaysValidator(v); err != nil {
+			return &ValidationError{Name: "balance_validity_days", err: fmt.Errorf(`ent: validator failed for field "RedeemCode.balance_validity_days": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -783,6 +841,12 @@ func (_u *RedeemCodeUpdateOne) sqlSave(ctx context.Context) (_node *RedeemCode, 
 	}
 	if value, ok := _u.mutation.AddedValidityDays(); ok {
 		_spec.AddField(redeemcode.FieldValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.BalanceValidityDays(); ok {
+		_spec.SetField(redeemcode.FieldBalanceValidityDays, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedBalanceValidityDays(); ok {
+		_spec.AddField(redeemcode.FieldBalanceValidityDays, field.TypeInt, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

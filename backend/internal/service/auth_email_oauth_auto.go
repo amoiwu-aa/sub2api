@@ -166,6 +166,11 @@ func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username,
 		return nil, err
 	}
 
+	distInviterID, distGroupIDs, err := s.prepareDistributionInvite(ctx, affiliateCode)
+	if err != nil {
+		return nil, err
+	}
+
 	randomPassword, err := randomHexString(32)
 	if err != nil {
 		return nil, ErrServiceUnavailable
@@ -204,7 +209,9 @@ func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username,
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
 	// snapshot user × platform quota（fail-open）
 	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
-	s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
+	if err := s.applyOrBindNewUserAffiliate(ctx, user.ID, affiliateCode, distInviterID, distGroupIDs); err != nil {
+		return nil, err
+	}
 	if invitationRedeemCode != nil {
 		if err := s.useOAuthRegistrationInvitation(ctx, invitationRedeemCode.ID, user.ID); err != nil {
 			_ = s.RollbackOAuthEmailAccountCreation(ctx, user.ID, invitationCode)
