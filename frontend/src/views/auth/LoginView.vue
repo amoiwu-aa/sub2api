@@ -956,3 +956,45 @@ function handle2FACancel(): void {
   }
 }
 </style>
+
+<style>
+/* Unscoped so html:not(.dark) descendants survive this project's scoped-CSS compiler. */
+html:not(.dark) .login-input {
+  border-radius: 1.25rem;
+  box-shadow: 0 4px 16px rgba(126, 200, 227, 0.12);
+  backdrop-filter: none;
+}
+
+html:not(.dark) .login-submit {
+  border-radius: 9999px;
+  border-color: transparent;
+  background: linear-gradient(135deg, #7ec8e3 0%, #5bb8d6 55%, #f2c07a 140%);
+  color: #143447;
+  box-shadow:
+    0 10px 28px rgba(91, 184, 214, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+html:not(.dark) .login-submit:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f5c16c 0%, #e8a85a 70%, #7ec8e3 160%);
+  color: #3a2a10;
+  filter: none;
+  box-shadow: 0 14px 32px rgba(232, 168, 90, 0.35);
+}
+
+html:not(.dark) .login-input:focus {
+  border-color: rgba(91, 184, 214, 0.7);
+  box-shadow:
+    0 0 0 4px rgba(126, 200, 227, 0.2),
+    0 8px 20px rgba(126, 200, 227, 0.16);
+}
+
+html:not(.dark) .login-input:-webkit-autofill,
+html:not(.dark) .login-input:-webkit-autofill:hover,
+html:not(.dark) .login-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #2c4a5e;
+  caret-color: #2c4a5e;
+  border-color: rgba(126, 200, 227, 0.45);
+  box-shadow: 0 0 0 1000px #ffffff inset;
+}
+</style>

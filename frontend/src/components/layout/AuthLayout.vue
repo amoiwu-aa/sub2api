@@ -3,7 +3,7 @@
     class="auth-shell relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10"
     :class="isDark ? 'auth-shell--dark' : 'auth-shell--light'"
   >
-    <GalaxyBackground variant="auth" />
+    <GalaxyBackground v-if="isDark" variant="auth" />
 
     <!-- Upper-right controls -->
     <div class="auth-topbar absolute right-4 top-4 z-30 flex items-center gap-1.5 sm:right-6 sm:top-6">
@@ -22,20 +22,17 @@
     </div>
 
     <div class="auth-stage relative z-10 w-full max-w-[420px]">
+      <div v-if="settingsLoaded" class="auth-reveal mb-5 text-center" style="--reveal-delay: 60ms">
+        <div class="brand-logo mx-auto">
+          <img :src="siteLogo || '/ringstar-logo.jpg?v=4'" alt="Logo" class="h-full w-full object-contain" />
+        </div>
+      </div>
+
       <div class="glass-card">
         <div class="glass-card__glow" aria-hidden="true"></div>
         <div class="glass-card__sheen" aria-hidden="true"></div>
 
         <div class="relative z-10">
-          <!-- Brand -->
-          <div v-if="settingsLoaded" class="auth-reveal mb-6 text-center" style="--reveal-delay: 60ms">
-            <div class="brand-logo mx-auto mb-3">
-              <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
-            </div>
-            <p class="brand-name">{{ siteName }}</p>
-            <p class="brand-subtitle mt-1">{{ siteSubtitle }}</p>
-          </div>
-
           <div class="auth-reveal" style="--reveal-delay: 140ms">
             <slot />
           </div>
@@ -69,9 +66,6 @@ const siteName = computed(() => appStore.siteName || 'RingStar')
 const siteLogo = computed(() =>
   sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true })
 )
-const siteSubtitle = computed(
-  () => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway'
-)
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 const currentYear = computed(() => new Date().getFullYear())
 
@@ -89,9 +83,9 @@ function toggleTheme() {
 
 function initTheme() {
   const savedTheme = localStorage.getItem('theme')
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  const shouldUseDark = savedTheme === 'dark' || (!savedTheme && prefersDark)
-  applyTheme(shouldUseDark)
+  const dark = savedTheme === 'dark'
+  isDark.value = dark
+  document.documentElement.classList.toggle('dark', dark)
 }
 
 onMounted(() => {
@@ -110,9 +104,12 @@ onMounted(() => {
  * 结果是登录表单的浅色样式从来没生效过——无论切到哪个主题，输入框都渲染
  * 深色底，压在浅色卡片上就是几块灰疙瘩。
  * 自定义属性的继承不受作用域约束，父组件定义、子组件消费，天然可靠。 */
-.auth-shell--dark,
-.auth-shell--light {
+.auth-shell--dark {
   background: #040914;
+}
+
+.auth-shell--light {
+  background: #ffffff;
 }
 
 .auth-shell--dark {
@@ -132,20 +129,22 @@ onMounted(() => {
 }
 
 .auth-shell--light {
-  --auth-title: #0d1b2a;
-  --auth-label: #33475a;
-  --auth-muted: #64748b;
+  --auth-title: #2c4a5e;
+  --auth-label: #2c4a5e;
+  --auth-muted: #6b8796;
   --auth-field-bg: #ffffff;
-  --auth-field-border: rgba(15, 23, 42, 0.14);
-  --auth-field-border-hover: rgba(13, 148, 136, 0.45);
-  --auth-field-text: #0d1b2a;
-  /* #94a3b8 压在白底上只有 2.56:1，达不到 WCAG AA 的 4.5:1；#64748b 约 4.8:1。 */
-  --auth-field-placeholder: #64748b;
+  --auth-field-border: rgba(126, 200, 227, 0.45);
+  --auth-field-border-hover: rgba(91, 184, 214, 0.7);
+  --auth-field-text: #2c4a5e;
+  --auth-field-placeholder: #9bb0be;
   --auth-field-bg-focus: #ffffff;
-  --auth-icon: #7c8b9c;
-  --auth-link: #0d8a80;
-  --auth-link-hover: #0b6c66;
-  --auth-divider: rgba(15, 23, 42, 0.1);
+  --auth-icon: #7ec8e3;
+  --auth-link: #4ba3c7;
+  --auth-link-hover: #d4a017;
+  --auth-divider: rgba(126, 200, 227, 0.28);
+  --auth-submit-bg: #5bb8d6;
+  --auth-submit-color: #143447;
+  --auth-submit-border: transparent;
 }
 
 /* 进场：整块面板先浮起，内部元素再依次跟进。
@@ -200,9 +199,10 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-control {
-  border-color: rgba(14, 116, 144, 0.18);
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  border-radius: 9999px;
+  border-color: rgba(126, 200, 227, 0.35);
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(126, 200, 227, 0.16);
 }
 
 .auth-control :deep(button) {
@@ -210,7 +210,8 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-control :deep(button) {
-  color: #334155;
+  border-radius: 9999px;
+  color: #3d6a80;
 }
 
 .auth-control :deep(button:hover) {
@@ -219,8 +220,8 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-control :deep(button:hover) {
-  background: rgba(14, 116, 144, 0.08);
-  color: #0f172a;
+  background: #e8f6fc;
+  color: #2c4a5e;
 }
 
 .auth-control :deep(.absolute) {
@@ -230,8 +231,10 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-control :deep(.absolute) {
-  border-color: rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.96);
+  border-radius: 1rem;
+  border-color: rgba(126, 200, 227, 0.32);
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(126, 200, 227, 0.18);
 }
 
 .auth-control-btn {
@@ -248,9 +251,11 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-control-btn {
-  border-color: rgba(14, 116, 144, 0.18);
-  background: rgba(255, 255, 255, 0.72);
-  color: #334155;
+  border-radius: 9999px;
+  border-color: rgba(126, 200, 227, 0.35);
+  background: #ffffff;
+  color: #3d6a80;
+  box-shadow: 0 6px 16px rgba(126, 200, 227, 0.16);
 }
 
 .auth-control-btn:hover {
@@ -259,8 +264,8 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-control-btn:hover {
-  background: rgba(14, 116, 144, 0.08);
-  color: #0f172a;
+  background: #e8f6fc;
+  color: #2c4a5e;
 }
 
 /* 卡片必须自带足够深的底色。
@@ -293,15 +298,14 @@ onMounted(() => {
 /* 浅色主题下 shell 背景仍是深空色，所以卡片要做成一张「明确的浅色卡」，
  * 而不是半透明——半透明在深底上只会变成灰蒙蒙的一团。 */
 .auth-shell--light .glass-card {
-  border-color: rgba(255, 255, 255, 0.5);
-  background:
-    linear-gradient(160deg, rgba(253, 254, 255, 0.95) 0%, rgba(241, 247, 252, 0.93) 100%);
+  border-radius: 1.75rem;
+  border-color: rgba(126, 200, 227, 0.32);
+  background: #ffffff;
   box-shadow:
-    0 40px 90px -20px rgba(0, 4, 12, 0.55),
-    0 12px 32px -12px rgba(2, 12, 28, 0.35),
-    0 1px 0 rgba(255, 255, 255, 0.9) inset;
-  backdrop-filter: blur(24px) saturate(105%);
-  -webkit-backdrop-filter: blur(24px) saturate(105%);
+    0 18px 44px rgba(126, 200, 227, 0.22),
+    0 4px 12px rgba(242, 192, 122, 0.08);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* 描边：一条静止的细发丝线，左上最亮、向右下衰减——像镜筒的斜切边被
@@ -333,9 +337,9 @@ onMounted(() => {
 .auth-shell--light .glass-card__glow {
   background: linear-gradient(
     145deg,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(186, 230, 253, 0.5) 35%,
-    rgba(148, 163, 184, 0.12) 100%
+    rgba(126, 200, 227, 0.55) 0%,
+    rgba(242, 192, 122, 0.28) 45%,
+    rgba(248, 212, 216, 0.22) 100%
   );
 }
 
@@ -352,15 +356,13 @@ onMounted(() => {
 }
 
 .auth-shell--light .glass-card__sheen {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, transparent 3px),
-    radial-gradient(140% 46% at 50% 0%, rgba(224, 242, 254, 0.5), transparent 62%);
+  background: none;
 }
 
 .brand-logo {
   display: inline-flex;
-  height: 3.25rem;
-  width: 3.25rem;
+  height: 9rem;
+  width: 9rem;
   align-items: center;
   justify-content: center;
   overflow: hidden;
@@ -373,9 +375,11 @@ onMounted(() => {
 }
 
 .auth-shell--light .brand-logo {
-  border-color: rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 10px 24px -10px rgba(15, 23, 42, 0.25);
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  overflow: visible;
 }
 
 /* 品牌名降级成 eyebrow：真正的标题是下面的「登录」。
@@ -389,7 +393,7 @@ onMounted(() => {
 }
 
 .auth-shell--light .brand-name {
-  color: #64748b;
+  color: #5a8ba3;
 }
 
 .brand-subtitle {
@@ -399,7 +403,7 @@ onMounted(() => {
 }
 
 .auth-shell--light .brand-subtitle {
-  color: #94a3b8;
+  color: #8aa4b3;
 }
 
 /* 页脚在卡片之外，压的是深空背景——不管卡片是浅是深，这里永远需要浅色字。
@@ -412,7 +416,9 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-footer {
-  color: #b9cad4;
+  color: #6b8796;
+  --auth-link: #4ba3c7;
+  --auth-link-hover: #d4a017;
 }
 
 .auth-copy {
@@ -420,7 +426,7 @@ onMounted(() => {
 }
 
 .auth-shell--light .auth-copy {
-  color: #64748b;
+  color: #8aa4b3;
 }
 
 </style>

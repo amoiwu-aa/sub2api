@@ -23,11 +23,10 @@ function initIOSViewportZoomFix() {
 }
 
 function initThemeClass() {
+  // First visit / no saved preference: always light (Apple-white default).
+  // Dark is opt-in via the theme toggle and then persisted in localStorage.
   const savedTheme = localStorage.getItem('theme')
-  const shouldUseDark =
-    savedTheme === 'dark' ||
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  document.documentElement.classList.toggle('dark', shouldUseDark)
+  document.documentElement.classList.toggle('dark', savedTheme === 'dark')
 }
 
 async function bootstrap() {

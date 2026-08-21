@@ -22,7 +22,7 @@
       <nav class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 sm:gap-4">
         <div class="flex min-w-0 flex-1 items-center gap-3">
           <img
-            :src="siteLogo || '/logo.svg'"
+            :src="siteLogo || '/ringstar-logo.jpg?v=3'"
             alt="Logo"
             class="h-9 w-9 shrink-0 rounded-lg object-contain"
           />
@@ -61,7 +61,7 @@
     <main class="flex min-w-0 flex-1 items-center justify-center px-4 py-16 sm:px-6">
       <div class="min-w-0 max-w-2xl text-center">
         <img
-          :src="siteLogo || '/logo.svg'"
+          :src="siteLogo || '/ringstar-logo.jpg?v=3'"
           alt="Logo"
           class="mx-auto mb-6 h-20 w-20 rounded-2xl object-contain"
         />
@@ -82,16 +82,23 @@
   </div>
 
   <!-- Default Home Page -->
-  <div v-else class="home-cosmos relative flex min-h-screen flex-col overflow-hidden bg-[#071525]">
-    <GalaxyBackground />
+  <div
+    v-else
+    class="home-cosmos relative flex min-h-screen flex-col overflow-hidden"
+    :class="isDark ? 'home-cosmos--dark bg-[#071525]' : 'home-cosmos--light bg-white'"
+  >
+    <GalaxyBackground v-if="isDark" />
 
     <!-- Header -->
     <header class="relative z-20 px-6 py-4">
       <nav class="mx-auto flex max-w-6xl items-center justify-between">
         <!-- Logo -->
         <div class="flex items-center">
-          <div class="logo-orbit h-10 w-10 overflow-hidden rounded-xl shadow-md shadow-cyan-500/20">
-            <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
+          <div
+            class="logo-mark h-36 w-36 sm:h-44 sm:w-44"
+            :class="isDark ? 'logo-mark--dark' : 'logo-mark--light'"
+          >
+            <img :src="siteLogo || '/ringstar-logo.jpg?v=3'" alt="Logo" class="h-full w-full object-contain" />
           </div>
         </div>
 
@@ -104,7 +111,8 @@
             :href="docUrl"
             target="_blank"
             rel="noopener noreferrer"
-            class="rounded-lg p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            class="rounded-full p-2 transition-colors"
+            :class="isDark ? 'text-slate-300 hover:bg-white/10 hover:text-white' : 'home-ctrl-light'"
             :title="t('home.viewDocs')"
           >
             <Icon name="book" size="md" class="icon-twinkle" />
@@ -112,7 +120,8 @@
 
           <button
             @click="toggleTheme"
-            class="rounded-lg p-2 text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            class="rounded-full p-2 transition-colors"
+            :class="isDark ? 'text-slate-300 hover:bg-white/10 hover:text-white' : 'home-ctrl-light'"
             :title="isDark ? t('home.switchToLight') : t('home.switchToDark')"
           >
             <Icon v-if="isDark" name="sun" size="md" class="icon-twinkle" />
@@ -122,7 +131,8 @@
           <router-link
             v-if="isAuthenticated"
             :to="dashboardPath"
-            class="inline-flex items-center gap-1.5 rounded-full bg-white/10 py-1 pl-1 pr-2.5 ring-1 ring-white/15 transition-colors hover:bg-white/15"
+            class="inline-flex items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5 transition-colors"
+            :class="isDark ? 'bg-white/10 ring-1 ring-white/15 hover:bg-white/15' : 'home-login-chip'"
           >
             <span
               class="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-cyan-400 to-teal-500 text-[10px] font-semibold text-white"
@@ -147,7 +157,8 @@
           <router-link
             v-else
             to="/login"
-            class="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white ring-1 ring-white/15 transition-colors hover:bg-white/15"
+            class="inline-flex items-center rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors"
+            :class="isDark ? 'bg-white/10 ring-1 ring-white/15 hover:bg-white/15 text-white' : 'home-login-chip'"
           >
             {{ t('home.login') }}
           </router-link>
@@ -159,68 +170,44 @@
     <main class="relative z-10 flex-1 px-6 py-16">
       <div class="mx-auto max-w-6xl">
         <!-- Hero Section -->
-        <div class="mb-12 flex flex-col items-center justify-between gap-12 lg:flex-row lg:gap-16">
-          <div class="flex-1 text-center lg:text-left">
-            <h1 class="hero-title mb-4 text-4xl font-bold text-white md:text-5xl lg:text-6xl">
-              {{ siteName }}
-            </h1>
-            <p class="mb-8 text-lg text-slate-300 md:text-xl">
-              {{ siteSubtitle }}
-            </p>
-
-            <div>
-              <router-link
-                :to="isAuthenticated ? dashboardPath : '/login'"
-                class="btn btn-primary px-8 py-3 text-base shadow-lg shadow-cyan-500/30"
-              >
-                {{ isAuthenticated ? t('home.goToDashboard') : t('home.getStarted') }}
-                <Icon name="arrowRight" size="md" class="ml-2 icon-nudge" :stroke-width="2" />
-              </router-link>
-            </div>
-          </div>
-
-          <div class="flex flex-1 justify-center lg:justify-end">
-            <div class="terminal-container">
-              <div class="terminal-window">
-                <div class="terminal-header">
-                  <div class="terminal-buttons">
-                    <span class="btn-close"></span>
-                    <span class="btn-minimize"></span>
-                    <span class="btn-maximize"></span>
-                  </div>
-                  <span class="terminal-title">terminal</span>
-                </div>
-                <div class="terminal-body">
-                  <div class="code-line line-1">
-                    <span class="code-prompt">$</span>
-                    <span class="code-cmd">curl</span>
-                    <span class="code-flag">-X POST</span>
-                    <span class="code-url">/v1/messages</span>
-                  </div>
-                  <div class="code-line line-2">
-                    <span class="code-comment"># Routing to upstream...</span>
-                  </div>
-                  <div class="code-line line-3">
-                    <span class="code-success">200 OK</span>
-                    <span class="code-response">{ "content": "Hello!" }</span>
-                  </div>
-                  <div class="code-line line-4">
-                    <span class="code-prompt">$</span>
-                    <span class="cursor"></span>
-                  </div>
-                </div>
-              </div>
-            </div>
+        <div class="mb-16 flex flex-col items-center text-center">
+          <h1
+            class="hero-title mb-4 max-w-3xl text-4xl font-bold md:text-5xl lg:text-6xl"
+            :class="isDark ? 'text-white' : 'text-[#2C4A5E]'"
+          >
+            {{ siteName }}
+          </h1>
+          <p
+            class="mb-8 max-w-2xl text-lg md:text-xl"
+            :class="isDark ? 'text-slate-300' : 'text-[#6B8796]'"
+          >
+            {{ siteSubtitle }}
+          </p>
+          <div>
+            <router-link
+              :to="isAuthenticated ? dashboardPath : '/login'"
+              class="btn px-8 py-3 text-base"
+              :class="isDark ? 'btn-primary shadow-lg shadow-cyan-500/30' : 'home-cta-light'"
+            >
+              {{ isAuthenticated ? t('home.goToDashboard') : t('home.getStarted') }}
+              <Icon name="arrowRight" size="md" class="ml-2 icon-nudge" :stroke-width="2" />
+            </router-link>
           </div>
         </div>
 
         <!-- Connect: API endpoints with one-click copy -->
         <section class="connect-panel mb-12" :aria-label="t('home.connect.title')">
           <div class="mb-6 text-center">
-            <h2 class="text-xl font-bold text-white md:text-2xl">
+            <h2
+              class="text-xl font-bold md:text-2xl"
+              :class="isDark ? 'text-white' : 'text-[#2C4A5E]'"
+            >
               {{ t('home.connect.title') }}
             </h2>
-            <p class="mt-1.5 text-sm text-slate-300">
+            <p
+              class="mt-1.5 text-sm"
+              :class="isDark ? 'text-slate-300' : 'text-[#6B8796]'"
+            >
               {{ t('home.connect.subtitle') }}
             </p>
           </div>
@@ -271,10 +258,16 @@
           <div class="grid gap-3 md:grid-cols-2">
             <div v-for="item in clientEndpoints" :key="item.key" class="connect-client-row">
               <div class="min-w-0 flex-1">
-                <div class="text-sm font-semibold text-white">
+                <div
+                  class="text-sm font-semibold"
+                  :class="isDark ? 'text-white' : 'text-[#2C4A5E]'"
+                >
                   {{ t(`home.connect.clients.${item.key}.name`) }}
                 </div>
-                <div class="mt-0.5 text-xs text-slate-400">
+                <div
+                  class="mt-0.5 text-xs"
+                  :class="isDark ? 'text-slate-400' : 'text-[#6B8796]'"
+                >
                   {{ t(`home.connect.clients.${item.key}.hint`) }}
                 </div>
                 <code
@@ -393,10 +386,16 @@
 
         <!-- Supported Providers -->
         <div class="mb-8 text-center">
-          <h2 class="mb-3 text-2xl font-bold text-white">
+          <h2
+            class="mb-3 text-2xl font-bold"
+            :class="isDark ? 'text-white' : 'text-[#2C4A5E]'"
+          >
             {{ t('home.providers.title') }}
           </h2>
-          <p class="text-sm text-slate-300">
+          <p
+            class="text-sm"
+            :class="isDark ? 'text-slate-300' : 'text-[#6B8796]'"
+          >
             {{ t('home.providers.description') }}
           </p>
         </div>
@@ -462,11 +461,17 @@
       </div>
     </main>
 
-    <footer class="relative z-10 border-t border-white/10 px-6 py-8">
+    <footer
+      class="relative z-10 border-t px-6 py-8"
+      :class="isDark ? 'border-white/10' : 'border-[#D5EAF3]'"
+    >
       <div
         class="mx-auto flex max-w-6xl flex-col items-center justify-center gap-4 text-center sm:flex-row sm:text-left"
       >
-        <p class="text-sm text-slate-400">
+        <p
+          class="text-sm"
+          :class="isDark ? 'text-slate-400' : 'text-[#6B8796]'"
+        >
           &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
         </p>
         <div class="flex items-center gap-4">
@@ -475,7 +480,8 @@
             :href="docUrl"
             target="_blank"
             rel="noopener noreferrer"
-            class="text-sm text-slate-400 transition-colors hover:text-white"
+            class="text-sm transition-colors"
+            :class="isDark ? 'text-slate-400 hover:text-white' : 'text-[#6B8796] hover:text-[#2C4A5E]'"
           >
             {{ t('home.docs') }}
           </a>
@@ -483,7 +489,8 @@
             :href="githubUrl"
             target="_blank"
             rel="noopener noreferrer"
-            class="text-sm text-slate-400 transition-colors hover:text-white"
+            class="text-sm transition-colors"
+            :class="isDark ? 'text-slate-400 hover:text-white' : 'text-[#6B8796] hover:text-[#2C4A5E]'"
           >
             GitHub
           </a>
@@ -590,13 +597,8 @@ function toggleTheme() {
 
 function initTheme() {
   const savedTheme = localStorage.getItem('theme')
-  if (
-    savedTheme === 'dark' ||
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  ) {
-    isDark.value = true
-    document.documentElement.classList.add('dark')
-  }
+  isDark.value = savedTheme === 'dark'
+  document.documentElement.classList.toggle('dark', isDark.value)
 }
 
 onMounted(() => {
@@ -613,8 +615,65 @@ onMounted(() => {
   text-shadow: 0 0 28px rgba(34, 211, 238, 0.25);
 }
 
-.logo-orbit {
-  animation: logo-pulse 4.5s ease-in-out infinite;
+.home-cosmos--light .hero-title {
+  text-shadow: none;
+  letter-spacing: -0.028em;
+  font-weight: 600;
+}
+
+.home-cta-light {
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #7ec8e3 0%, #5bb8d6 52%, #f2c07a 145%);
+  color: #143447;
+  box-shadow:
+    0 10px 28px rgba(91, 184, 214, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.home-cta-light:hover {
+  background: linear-gradient(135deg, #f5c16c 0%, #e8a85a 68%, #7ec8e3 160%);
+  color: #3a2a10;
+  box-shadow: 0 12px 32px rgba(232, 168, 90, 0.32);
+}
+
+.home-ctrl-light {
+  color: #6b8796;
+}
+
+.home-ctrl-light:hover {
+  background: #e8f6fc;
+  color: #2c4a5e;
+}
+
+.home-login-chip {
+  background: linear-gradient(135deg, #7ec8e3, #5bb8d6);
+  color: #143447;
+  box-shadow: 0 6px 16px rgba(91, 184, 214, 0.3);
+}
+
+.home-login-chip:hover {
+  background: linear-gradient(135deg, #f5c16c, #e8a85a);
+  color: #3a2a10;
+}
+
+.home-login-chip :deep(span),
+.home-login-chip :deep(svg) {
+  color: #143447;
+}
+
+.logo-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-mark--light {
+  background: transparent;
+  box-shadow: none;
+}
+
+.logo-mark--dark {
+  filter: drop-shadow(0 0 12px rgba(34, 211, 238, 0.28));
 }
 
 .cosmos-chip {
@@ -944,171 +1003,254 @@ onMounted(() => {
   /* delay values applied in unscoped block */
 }
 
-@keyframes logo-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.15);
-    transform: scale(1);
-  }
-  50% {
-    box-shadow: 0 0 18px 2px rgba(34, 211, 238, 0.35);
-    transform: scale(1.04);
-  }
+/* Light / kawaii landing — fox-mascot palette, white page, no logo plate */
+.home-cosmos--light {
+  background-color: #ffffff;
+  background-image:
+    radial-gradient(circle at 8% 22%, rgba(242, 192, 122, 0.55) 0 1.15px, transparent 1.6px),
+    radial-gradient(circle at 93% 14%, rgba(126, 200, 227, 0.55) 0 1.15px, transparent 1.6px),
+    radial-gradient(circle at 86% 40%, rgba(248, 180, 190, 0.42) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 16% 74%, rgba(126, 200, 227, 0.28) 0 1.1px, transparent 1.55px),
+    radial-gradient(circle at 72% 82%, rgba(242, 192, 122, 0.28) 0 1px, transparent 1.4px);
 }
 
-/* Terminal */
-.terminal-container {
-  position: relative;
-  display: inline-block;
+.home-cosmos--light .logo-mark {
+  background: transparent;
+  box-shadow: none;
 }
 
-.terminal-window {
-  width: 420px;
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.95) 0%, rgba(2, 8, 18, 0.95) 100%);
-  border-radius: 14px;
+.home-cosmos--light header :deep(button) {
+  border-radius: 9999px;
+}
+
+.home-cosmos--light header :deep(button:hover) {
+  background-color: #e8f6fc;
+}
+
+.home-cosmos--light header :deep(.absolute) {
+  border-radius: 1rem;
+  border-color: rgba(126, 200, 227, 0.32);
+  box-shadow: 0 12px 28px rgba(126, 200, 227, 0.18);
+}
+
+.home-cosmos--light .cosmos-chip {
+  border: 1.5px solid rgba(126, 200, 227, 0.38);
+  background: #ffffff;
   box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(125, 211, 252, 0.18),
-    0 0 40px rgba(34, 211, 238, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-  transform: perspective(1000px) rotateX(2deg) rotateY(-2deg);
-  transition: transform 0.3s ease;
+    0 8px 20px rgba(126, 200, 227, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: none;
+  color: #2c4a5e;
 }
 
-.terminal-window:hover {
-  transform: perspective(1000px) rotateX(0deg) rotateY(0deg) translateY(-4px);
+.home-cosmos--light .cosmos-chip .text-cyan-300 {
+  color: #5bb8d6;
 }
 
-.terminal-header {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  background: rgba(15, 23, 42, 0.85);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+.home-cosmos--light .cosmos-chip span {
+  color: #2c4a5e;
 }
 
-.terminal-buttons {
-  display: flex;
-  gap: 8px;
+.home-cosmos--light .provider-chip > span.text-sm,
+.home-cosmos--light .provider-chip > span.text-slate-100,
+.home-cosmos--light .provider-chip > span.text-slate-200 {
+  color: #2c4a5e;
 }
 
-.terminal-buttons span {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+.home-cosmos--light .cosmos-card {
+  position: relative;
+  border-radius: 1.5rem;
+  border: 1.5px solid rgba(126, 200, 227, 0.28);
+  background: #ffffff;
+  backdrop-filter: none;
+  box-shadow:
+    0 14px 36px rgba(126, 200, 227, 0.18),
+    0 2px 8px rgba(242, 192, 122, 0.06);
 }
 
-.btn-close {
-  background: #ef4444;
-}
-.btn-minimize {
-  background: #eab308;
-}
-.btn-maximize {
-  background: #22c55e;
-}
-
-.terminal-title {
-  flex: 1;
-  text-align: center;
-  font-size: 12px;
-  font-family: ui-monospace, monospace;
-  color: #64748b;
-  margin-right: 52px;
+.home-cosmos--light .cosmos-card::after {
+  content: '✦';
+  position: absolute;
+  top: 0.85rem;
+  right: 1rem;
+  font-size: 0.72rem;
+  color: #f2c07a;
+  opacity: 0.72;
+  pointer-events: none;
 }
 
-.terminal-body {
-  padding: 20px 24px;
-  font-family: ui-monospace, 'Fira Code', monospace;
-  font-size: 14px;
-  line-height: 2;
+.home-cosmos--light .cosmos-card h3 {
+  color: #2c4a5e;
 }
 
-.code-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  opacity: 0;
-  animation: line-appear 0.5s ease forwards;
+.home-cosmos--light .cosmos-card p {
+  color: #6b8796;
 }
 
-.line-1 {
-  animation-delay: 0.3s;
-}
-.line-2 {
-  animation-delay: 1s;
-}
-.line-3 {
-  animation-delay: 1.8s;
-}
-.line-4 {
-  animation-delay: 2.5s;
+.home-cosmos--light .cosmos-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(91, 184, 214, 0.45);
+  box-shadow: 0 18px 40px rgba(126, 200, 227, 0.26);
 }
 
-@keyframes line-appear {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.home-cosmos--light .connect-panel {
+  border-radius: 1.5rem;
+  border: 1.5px solid rgba(126, 200, 227, 0.28);
+  background: #ffffff;
+  backdrop-filter: none;
+  box-shadow:
+    0 16px 40px rgba(126, 200, 227, 0.16),
+    0 2px 8px rgba(242, 192, 122, 0.05);
 }
 
-.code-prompt {
-  color: #22c55e;
-  font-weight: bold;
-}
-.code-cmd {
-  color: #38bdf8;
-}
-.code-flag {
-  color: #7dd3fc;
-}
-.code-url {
-  color: #2dd4bf;
-}
-.code-comment {
-  color: #64748b;
-  font-style: italic;
-}
-.code-success {
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.15);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-.code-response {
-  color: #fbbf24;
+.home-cosmos--light .connect-primary {
+  border-radius: 1.25rem;
+  border: 1.5px solid rgba(126, 200, 227, 0.35);
+  background: #f3fafe;
+  box-shadow: 0 6px 16px rgba(126, 200, 227, 0.1);
 }
 
-.cursor {
-  display: inline-block;
-  width: 8px;
-  height: 16px;
-  background: #22c55e;
-  animation: blink 1s step-end infinite;
+.home-cosmos--light .connect-primary-label {
+  border-radius: 9999px;
+  background: rgba(126, 200, 227, 0.22);
+  color: #3d6a80;
 }
 
-@keyframes blink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-  51%,
-  100% {
-    opacity: 0;
-  }
+.home-cosmos--light .connect-primary-url {
+  color: #2c4a5e;
+}
+
+.home-cosmos--light .connect-primary-url:hover,
+.home-cosmos--light .connect-primary-url:focus-visible {
+  text-decoration-color: rgba(91, 184, 214, 0.55);
+}
+
+.home-cosmos--light .connect-copy-btn {
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, #7ec8e3, #5bb8d6);
+  color: #143447;
+}
+
+.home-cosmos--light .connect-copy-btn:hover {
+  background: linear-gradient(135deg, #f5c16c, #e8a85a);
+  border-color: transparent;
+  color: #3a2a10;
+}
+
+.home-cosmos--light .connect-copy-btn.is-copied {
+  border-color: transparent;
+  background: linear-gradient(135deg, #8fd4b8, #6bbf9a);
+  color: #143447;
+}
+
+.home-cosmos--light .connect-alt-chip {
+  border-radius: 9999px;
+  border: 1.5px solid rgba(126, 200, 227, 0.28);
+  background: #ffffff;
+  color: #6b8796;
+  box-shadow: 0 4px 12px rgba(126, 200, 227, 0.12);
+}
+
+.home-cosmos--light .connect-alt-chip:hover {
+  border-color: rgba(91, 184, 214, 0.5);
+  color: #2c4a5e;
+}
+
+.home-cosmos--light .connect-alt-chip.is-copied {
+  border-color: rgba(107, 191, 154, 0.55);
+  color: #2c4a5e;
+}
+
+.home-cosmos--light .connect-alt-name {
+  color: #2c4a5e;
+}
+
+.home-cosmos--light .connect-clients-title {
+  color: #6b8796;
+}
+
+.home-cosmos--light .connect-client-row {
+  border-radius: 1.15rem;
+  border: 1.5px solid rgba(126, 200, 227, 0.22);
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(126, 200, 227, 0.1);
+}
+
+.home-cosmos--light .connect-client-row:hover {
+  border-color: rgba(91, 184, 214, 0.42);
+  background: #f7fbfe;
+}
+
+.home-cosmos--light .connect-client-url {
+  color: #4ba3c7;
+}
+
+.home-cosmos--light .connect-copy-icon {
+  border-radius: 9999px;
+  color: #8aa4b3;
+}
+
+.home-cosmos--light .connect-copy-icon:hover {
+  border-color: rgba(126, 200, 227, 0.4);
+  background: #e8f6fc;
+  color: #2c4a5e;
+}
+
+.home-cosmos--light .connect-copy-icon.is-copied {
+  color: #3d8f6e;
+}
+
+.home-cosmos--light .feature-icon {
+  border-radius: 1rem;
+  box-shadow: 0 8px 18px rgba(126, 200, 227, 0.28);
+}
+
+.home-cosmos--light .feature-icon--blue {
+  background: linear-gradient(135deg, #8fd4ec, #5bb8d6);
+}
+
+.home-cosmos--light .feature-icon--teal {
+  background: linear-gradient(135deg, #f5c16c, #e8a85a);
+}
+
+.home-cosmos--light .feature-icon--sky {
+  background: linear-gradient(135deg, #f3c4cb, #7ec8e3);
+}
+
+.home-cosmos--light .provider-chip {
+  border-radius: 1.15rem;
+  border: 1.5px solid rgba(126, 200, 227, 0.3);
+  background: #ffffff;
+  backdrop-filter: none;
+  box-shadow: 0 8px 18px rgba(126, 200, 227, 0.14);
+  color: #2c4a5e;
+}
+
+.home-cosmos--light .provider-chip--muted {
+  border-color: rgba(126, 200, 227, 0.2);
+  opacity: 0.78;
+}
+
+.home-cosmos--light .provider-mark {
+  border-radius: 0.7rem;
+}
+
+.home-cosmos--light .provider-tag {
+  border-radius: 9999px;
+  background: rgba(126, 200, 227, 0.2);
+  color: #3d6a80;
+}
+
+.home-cosmos--light .provider-tag--muted {
+  background: rgba(242, 192, 122, 0.22);
+  color: #9a7040;
 }
 
 @media (prefers-reduced-motion: reduce) {
   /* Keep light icon motion for brand presence; only calm large atmosphere layers. */
-  .logo-orbit {
-    animation: none !important;
+  .logo-mark--dark {
+    filter: none;
   }
 }
 </style>
@@ -1206,5 +1348,17 @@ onMounted(() => {
   50% {
     transform: translateX(7px);
   }
+}
+
+/* Light landing: keep motion calm; a tiny twinkle keeps the kawaii sparkle. */
+.home-cosmos--light .icon-float,
+.home-cosmos--light .icon-bob,
+.home-cosmos--light .icon-orbit,
+.home-cosmos--light .icon-spin-soft,
+.home-cosmos--light .icon-nudge {
+  animation: none;
+}
+.home-cosmos--light .icon-twinkle {
+  animation: home-icon-twinkle 2.4s ease-in-out infinite;
 }
 </style>
