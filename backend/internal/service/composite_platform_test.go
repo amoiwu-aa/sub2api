@@ -64,7 +64,18 @@ func TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets(t *testing.T) {
 		platforms = append(platforms, platform)
 	}
 	require.ElementsMatch(t,
-		[]string{PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformAntigravity, PlatformGrok, PlatformCursor, PlatformKiro},
+		[]string{
+			PlatformAnthropic,
+			PlatformGemini,
+			PlatformOpenAI,
+			PlatformAntigravity,
+			PlatformGrok,
+			PlatformCursor,
+			PlatformKiro,
+			PlatformKimi,
+			PlatformZhipu,
+			PlatformDeepseek,
+		},
 		platforms,
 	)
 }
@@ -75,5 +86,5 @@ func TestSchedulerSnapshotPlatformsCoverConcretePlatforms(t *testing.T) {
 	for _, platform := range schedulerSnapshotPlatforms() {
 		require.True(t, isConcreteRequestPlatform(platform), "platform %s must be a concrete request platform", platform)
 	}
-	require.Len(t, schedulerSnapshotPlatforms(), 7)
+	require.Len(t, schedulerSnapshotPlatforms(), 10)
 }

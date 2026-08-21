@@ -21,6 +21,7 @@ type AdminHandlers struct {
 	GrokOAuth              *admin.GrokOAuthHandler
 	Kiro                   *admin.KiroHandler
 	Cursor                 *admin.CursorHandler
+	CNProvider             *admin.CNProviderHandler
 	Proxy                  *admin.ProxyHandler
 	Redeem                 *admin.RedeemHandler
 	Promo                  *admin.PromoHandler

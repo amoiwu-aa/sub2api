@@ -831,6 +831,53 @@ type ProxyFallbackConfig struct {
 
 type ProxyProbeConfig struct {
 	InsecureSkipVerify bool `mapstructure:"insecure_skip_verify"` // 已禁用：禁止跳过 TLS 证书验证
+	// URLs 按优先级排列的自定义探测 URL 列表。
+	// 留空时使用内置默认列表（ip-api → ipify）。
+	// 某些 AI API 专用代理只允许访问特定域名，配置多个备选可提高探测成功率。
+	URLs []ProbeURLConfig `mapstructure:"urls"`
+}
+
+// ProbeURLConfig 描述一个探测端点及其响应解析方式。
+type ProbeURLConfig struct {
+	URL    string `mapstructure:"url"`
+	Parser string `mapstructure:"parser"` // "ip-api" / "ipify" / "chatgpt-trace"
+}
+
+func normalizeProxyProbeURLs(targets []ProbeURLConfig) ([]ProbeURLConfig, error) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]ProbeURLConfig, 0, len(targets))
+	for i, target := range targets {
+		rawURL := strings.TrimSpace(target.URL)
+		parser := strings.ToLower(strings.TrimSpace(target.Parser))
+		if rawURL == "" {
+			return nil, fmt.Errorf("entry %d: url is required", i)
+		}
+		if parser == "" {
+			return nil, fmt.Errorf("entry %d: parser is required", i)
+		}
+		switch parser {
+		case "ip-api", "ipify", "chatgpt-trace":
+		default:
+			return nil, fmt.Errorf("entry %d: unsupported parser %q", i, target.Parser)
+		}
+
+		parsed, err := url.Parse(rawURL)
+		if err != nil || parsed.Host == "" {
+			return nil, fmt.Errorf("entry %d: invalid url %q", i, target.URL)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return nil, fmt.Errorf("entry %d: url scheme must be http or https", i)
+		}
+
+		normalized = append(normalized, ProbeURLConfig{
+			URL:    rawURL,
+			Parser: parser,
+		})
+	}
+	return normalized, nil
 }
 
 // IPReputationConfig 控制代理出口 IP 的信誉查询（机房/住宅、VPN/Tor、滥用历史、风险分）。
@@ -938,12 +985,15 @@ type GatewayConfig struct {
 	// tool, Cursor's native exec is translated instead of stubbed. shadow is
 	// still available as an observation-only rollback.
 	CursorNativeToolBridgeMode string `mapstructure:"cursor_native_tool_bridge_mode"`
-	// CursorMaxToolContinuations caps tool-only client continuations after the
-	// latest user instruction. Zero disables the loop guard.
+	// CursorMaxToolContinuations caps non-mutating tool continuations after the
+	// latest user instruction or workspace action. Zero disables the loop guard.
 	CursorMaxToolContinuations int `mapstructure:"cursor_max_tool_continuations"`
 	// CursorRepeatedReadRecoveryThreshold suppresses Read for one turn after
 	// identical arguments and output repeat this many times. Zero disables it.
 	CursorRepeatedReadRecoveryThreshold int `mapstructure:"cursor_repeated_read_recovery_threshold"`
+	// CursorReadOnlyRecoveryThreshold suppresses workspace observation tools
+	// after this many non-mutating tool turns. Zero disables it.
+	CursorReadOnlyRecoveryThreshold int `mapstructure:"cursor_read_only_recovery_threshold"`
 	// 等待上游响应头的超时时间（秒），0表示无超时
 	// 注意：这不影响流式数据传输，只控制等待响应头的时间
 	ResponseHeaderTimeout int `mapstructure:"response_header_timeout"`
@@ -1088,6 +1138,9 @@ type GatewayConfig struct {
 
 	// Grok: Grok/xAI gateway scheduling and free-tier soft-gate settings.
 	Grok GatewayGrokConfig `mapstructure:"grok"`
+
+	// CNProviders controls periodic balance checks for domestic providers.
+	CNProviders GatewayCNProvidersConfig `mapstructure:"cn_providers"`
 }
 
 // GatewayGrokConfig holds Grok-specific gateway scheduling knobs.
@@ -1118,6 +1171,14 @@ type GatewayGrokConfig struct {
 	// FreeQuotaStatsCacheSeconds is the soft-gate stats cache TTL. Hot path never
 	// waits on usage_logs; misses fail open and refresh asynchronously.
 	FreeQuotaStatsCacheSeconds int `mapstructure:"free_quota_stats_cache_seconds"`
+}
+
+// GatewayCNProvidersConfig controls balance-based scheduling for domestic
+// OpenAI-compatible providers. It currently applies to pay-as-you-go accounts.
+type GatewayCNProvidersConfig struct {
+	BalanceCheckEnabled         bool    `mapstructure:"balance_check_enabled"`
+	BalanceThreshold            float64 `mapstructure:"balance_threshold"`
+	BalanceCheckIntervalMinutes int     `mapstructure:"balance_check_interval_minutes"`
 }
 
 type GatewayLiveConfig struct {
@@ -2342,6 +2403,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.cursor_native_tool_bridge_mode", "infer_all")
 	viper.SetDefault("gateway.cursor_max_tool_continuations", 24)
 	viper.SetDefault("gateway.cursor_repeated_read_recovery_threshold", 2)
+	viper.SetDefault("gateway.cursor_read_only_recovery_threshold", 6)
 	viper.SetDefault("gateway.openai_response_header_timeout", 0)
 	viper.SetDefault("gateway.openai_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.openai_high_effort_first_output_timeout_seconds", 0)
@@ -2434,6 +2496,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.grok.free_quota_soft_gate_percent", 95)
 	viper.SetDefault("gateway.grok.free_quota_window_hours", 24)
 	viper.SetDefault("gateway.grok.free_quota_stats_cache_seconds", 60)
+	viper.SetDefault("gateway.cn_providers.balance_check_enabled", true)
+	viper.SetDefault("gateway.cn_providers.balance_threshold", 0.5)
+	viper.SetDefault("gateway.cn_providers.balance_check_interval_minutes", 10)
 	viper.SetDefault("gateway.image_concurrency.enabled", false)
 	viper.SetDefault("gateway.image_concurrency.max_concurrent_requests", 0)
 	viper.SetDefault("gateway.image_concurrency.overflow_mode", ImageConcurrencyOverflowModeReject)
@@ -2628,6 +2693,11 @@ func (c *Config) Validate() error {
 	}
 	c.Security.ForwardedClientIPHeaders = forwardedClientIPHeaders
 	c.SetForwardedClientIPSettings(c.Security.TrustForwardedIPForAPIKeyACL, forwardedClientIPHeaders)
+	proxyProbeURLs, err := normalizeProxyProbeURLs(c.Security.ProxyProbe.URLs)
+	if err != nil {
+		return fmt.Errorf("security.proxy_probe.urls: %w", err)
+	}
+	c.Security.ProxyProbe.URLs = proxyProbeURLs
 	if c.Server.ReadHeaderTimeout < 1 || c.Server.ReadHeaderTimeout > 60 {
 		return fmt.Errorf("server.read_header_timeout must be between 1 and 60 seconds")
 	}
@@ -3253,6 +3323,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.CursorRepeatedReadRecoveryThreshold < 0 {
 		return fmt.Errorf("gateway.cursor_repeated_read_recovery_threshold must be non-negative")
+	}
+	if c.Gateway.CursorReadOnlyRecoveryThreshold < 0 {
+		return fmt.Errorf("gateway.cursor_read_only_recovery_threshold must be non-negative")
 	}
 	if c.Gateway.OpenAIResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")

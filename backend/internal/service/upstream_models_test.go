@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/stretchr/testify/require"
 )
 
@@ -393,6 +394,45 @@ func TestFetchUpstreamSupportedModelsParsesGrokOAuthResponse(t *testing.T) {
 	require.Equal(t, "interactive", upstream.lastReq.Header.Get("X-Grok-Client-Mode"))
 	require.Equal(t, "grok-user-id", upstream.lastReq.Header.Get("X-UserID"))
 	require.Equal(t, "grok-user@example.com", upstream.lastReq.Header.Get("X-Email"))
+}
+
+func TestFetchUpstreamSupportedModelsParsesCursorSandCatalog(t *testing.T) {
+	t.Parallel()
+
+	modelBody := append(
+		cursor.EncodeStringField(1, "cursor-grok-4.6-high-fast"),
+		cursor.EncodeStringField(3, "grok-4.6")...,
+	)
+	responseBody := cursor.EncodeBytesField(1, modelBody)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/proto"}},
+		Body:       io.NopCloser(strings.NewReader(string(responseBody))),
+	}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID:       15,
+		Platform: PlatformCursor,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			CursorAgentProfileCredentialKey:  "sand",
+			CursorMachineIDCredentialKey:     "sand-machine",
+			CursorClientVersionCredentialKey: cursor.SandClientVersion,
+			CursorSandNamespaceCredentialKey: "prod",
+			"access_token":                   "sand-access-token",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"cursor/grok-4.6", "cursor/grok-4.6-max"}, models)
+	require.Equal(t, "https://api2.cursor.sh/agent.v1.AgentService/GetUsableModels", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer sand-access-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "sand", upstream.lastReq.Header.Get("X-Cursor-Client-Type"))
+	require.Equal(t, cursor.SandClientVersion, upstream.lastReq.Header.Get("X-Cursor-Client-Version"))
+	require.Equal(t, "prod", upstream.lastReq.Header.Get("X-Sand-Box-Namespace"))
 }
 
 func TestBuildUpstreamModelsRequestGrokOAuthDoesNotSendIdentityToCustomBase(t *testing.T) {

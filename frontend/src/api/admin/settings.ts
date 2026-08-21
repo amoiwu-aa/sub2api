@@ -51,13 +51,19 @@ export type SchedulingThresholdPlatformType =
   | "openai"
   | "anthropic"
   | "grok"
+  | "kimi"
+  | "zhipu"
 
 export type AccountSchedulingThresholdsMap = Record<SchedulingThresholdPlatformType, number>
 
+// 与后端 AllowedSchedulingThresholdPlatforms 保持一致（deepseek 为余额型，
+// 走余额检测而非用量阈值）。
 export const SCHEDULING_THRESHOLD_PLATFORMS: SchedulingThresholdPlatformType[] = [
   "openai",
   "anthropic",
   "grok",
+  "kimi",
+  "zhipu",
 ]
 
 export function normalizeAccountSchedulingThresholdsMap(
@@ -486,6 +492,12 @@ export interface SystemSettings {
   site_subtitle: string;
   api_base_url: string;
   contact_info: string;
+  customer_service_enabled: boolean;
+  customer_service_button_text: string;
+  customer_service_title: string;
+  customer_service_description: string;
+  customer_service_wechat_id: string;
+  customer_service_qr_image: string;
   doc_url: string;
   home_content: string;
   compact_home_enabled: boolean;
@@ -730,6 +742,7 @@ export interface SystemSettings {
   channel_monitor_mode?: 'v1' | 'v2';
   channel_monitor_default_interval_seconds: number;
   channel_monitor_hide_throughput?: boolean;
+  channel_monitor_show_quota?: boolean;
 
   // Available Channels feature switch
   available_channels_enabled: boolean;
@@ -832,6 +845,12 @@ export interface UpdateSettingsRequest {
   site_subtitle?: string;
   api_base_url?: string;
   contact_info?: string;
+  customer_service_enabled?: boolean;
+  customer_service_button_text?: string;
+  customer_service_title?: string;
+  customer_service_description?: string;
+  customer_service_wechat_id?: string;
+  customer_service_qr_image?: string;
   doc_url?: string;
   home_content?: string;
   compact_home_enabled?: boolean;
@@ -1037,6 +1056,7 @@ export interface UpdateSettingsRequest {
   channel_monitor_mode?: 'v1' | 'v2';
   channel_monitor_default_interval_seconds?: number;
   channel_monitor_hide_throughput?: boolean;
+  channel_monitor_show_quota?: boolean;
 
   // Available Channels feature switch
   available_channels_enabled?: boolean;

@@ -46,6 +46,12 @@ func (r *CursorTokenRefresher) NeedsRefresh(account *Account, refreshWindow time
 	if cursor.IsWebToken(accessToken) {
 		return true
 	}
+	if account.CursorAgentProfile() == cursor.AgentProfileSand &&
+		cursorTokenUsableForAccount(account, accessToken) &&
+		cursor.TokenExpiry(accessToken).IsZero() &&
+		account.GetCredentialAsTime("expires_at") == nil {
+		return false
+	}
 
 	expiresAt := account.GetCredentialAsTime("expires_at")
 	if expiresAt == nil {

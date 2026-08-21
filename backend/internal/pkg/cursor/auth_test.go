@@ -115,6 +115,15 @@ func TestGeneratePKCEProducesVerifiableChallenge(t *testing.T) {
 	require.NotEqual(t, pkce.Verifier, other.Verifier)
 }
 
+func TestGeneratePKCEForSandUsesSandRedirectTarget(t *testing.T) {
+	pkce, err := GeneratePKCEForProfile(AgentProfileSand)
+	require.NoError(t, err)
+
+	parsed, err := url.Parse(pkce.LoginURL)
+	require.NoError(t, err)
+	require.Equal(t, "sand", parsed.Query().Get("redirectTarget"))
+}
+
 func TestParseSessionInputAcceptsAllPastedForms(t *testing.T) {
 	jwt := sessionJWT(t)
 	cases := map[string]string{
@@ -172,6 +181,22 @@ func TestPollOnceTreats404AsPending(t *testing.T) {
 	require.Equal(t, "ide", req.Header.Get("x-cursor-client-type"))
 	require.Equal(t, ClientVersion, req.Header.Get("x-cursor-client-version"))
 	require.Equal(t, "false", req.Header.Get("x-ghost-mode"))
+}
+
+func TestPollOnceSandUsesSandHeaders(t *testing.T) {
+	client := &stubHTTPClient{responses: []*http.Response{jsonResponse(http.StatusNotFound, "")}}
+
+	_, err := PollOnce(context.Background(), &Options{
+		HTTPClient: client,
+		Profile:    AgentProfileSand,
+	}, "uuid-1", "verifier-1")
+	require.ErrorIs(t, err, ErrPollPending)
+
+	req := client.requests[0]
+	require.Equal(t, "sand", req.Header.Get("x-cursor-client-type"))
+	require.Equal(t, SandClientVersion, req.Header.Get("x-cursor-client-version"))
+	require.Equal(t, "prod", req.Header.Get("x-sand-box-namespace"))
+	require.Empty(t, req.Header.Get("x-new-onboarding-completed"))
 }
 
 func TestPollOnceReturnsTokens(t *testing.T) {

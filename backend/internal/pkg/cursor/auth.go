@@ -94,6 +94,7 @@ type HTTPClient interface {
 // Options 是所有出网调用的公共依赖。
 type Options struct {
 	HTTPClient HTTPClient
+	Profile    AgentProfile
 	// Sleep 可在测试中替换，避免轮询真的等待。
 	Sleep func(context.Context, time.Duration) error
 }
@@ -134,6 +135,10 @@ type PKCE struct {
 
 // GeneratePKCE 生成 verifier/challenge/uuid 与浏览器登录 URL。
 func GeneratePKCE() (*PKCE, error) {
+	return GeneratePKCEForProfile(AgentProfileIDE)
+}
+
+func GeneratePKCEForProfile(profile AgentProfile) (*PKCE, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, fmt.Errorf("generate cursor pkce verifier: %w", err)
@@ -147,7 +152,11 @@ func GeneratePKCE() (*PKCE, error) {
 	query.Set("challenge", challenge)
 	query.Set("uuid", loginUUID)
 	query.Set("mode", "login")
-	query.Set("redirectTarget", "cli")
+	redirectTarget := "cli"
+	if ParseAgentProfile(string(profile)) == AgentProfileSand {
+		redirectTarget = "sand"
+	}
+	query.Set("redirectTarget", redirectTarget)
 
 	return &PKCE{
 		Verifier:  verifier,
@@ -199,9 +208,15 @@ func PollOnce(ctx context.Context, opts *Options, loginUUID, verifier string) (*
 		return nil, err
 	}
 	req.Header.Set("x-ghost-mode", "false")
-	req.Header.Set("x-new-onboarding-completed", "false")
-	req.Header.Set("x-cursor-client-type", "ide")
-	req.Header.Set("x-cursor-client-version", ClientVersion)
+	if ParseAgentProfile(string(opts.Profile)) == AgentProfileSand {
+		req.Header.Set("x-cursor-client-type", "sand")
+		req.Header.Set("x-cursor-client-version", SandClientVersion)
+		req.Header.Set("x-sand-box-namespace", "prod")
+	} else {
+		req.Header.Set("x-new-onboarding-completed", "false")
+		req.Header.Set("x-cursor-client-type", "ide")
+		req.Header.Set("x-cursor-client-version", ClientVersion)
+	}
 
 	status, body, err := do(client, req)
 	if err != nil {
@@ -409,7 +424,11 @@ func ExchangeWebTokenToSession(ctx context.Context, opts *Options, input, select
 	if err != nil {
 		return nil, err
 	}
-	pkce, err := GeneratePKCE()
+	profile := AgentProfileIDE
+	if opts != nil {
+		profile = opts.Profile
+	}
+	pkce, err := GeneratePKCEForProfile(profile)
 	if err != nil {
 		return nil, err
 	}
@@ -430,10 +449,14 @@ func ExchangeWebTokenToSession(ctx context.Context, opts *Options, input, select
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Cookie", "WorkosCursorSessionToken="+url.QueryEscape(parsed.CookieValue()))
 	req.Header.Set("Origin", LoginHost)
+	redirectTarget := "cli"
+	if ParseAgentProfile(string(profile)) == AgentProfileSand {
+		redirectTarget = "sand"
+	}
 	req.Header.Set("Referer", LoginHost+loginDeepControlPath+
 		"?challenge="+url.QueryEscape(pkce.Challenge)+
 		"&uuid="+url.QueryEscape(pkce.UUID)+
-		"&mode=login&supportsSelectedTeamLogin=true")
+		"&mode=login&redirectTarget="+redirectTarget+"&supportsSelectedTeamLogin=true")
 
 	status, respBody, err := do(client, req)
 	if err != nil {

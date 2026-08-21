@@ -626,7 +626,7 @@ func extractAnthropicSSEDataLine(line string) (string, bool) {
 	return line[start:], true
 }
 
-func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
+func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	if usage == nil || data == "" || data == "[DONE]" {
 		return
 	}
@@ -699,6 +699,10 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 		}
 	}
 	applyClaudeUsageCacheAliases(usageNode, usage)
+}
+
+func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
+	parseSSEUsagePassthrough(data, usage)
 }
 
 func parseClaudeUsageFromResponseBody(body []byte) *ClaudeUsage {
@@ -862,8 +866,9 @@ func claudeUsageMapHasCacheFields(usage map[string]any) bool {
 	return false
 }
 
-func (s *GatewayService) invalidNonStreamingJSONFailoverError(
+func invalidNonStreamingJSONFailoverError(
 	ctx context.Context,
+	rateLimitService *RateLimitService,
 	resp *http.Response,
 	account *Account,
 	body []byte,
@@ -891,11 +896,11 @@ func (s *GatewayService) invalidNonStreamingJSONFailoverError(
 		parseErr,
 	)
 
-	if s.rateLimitService != nil && account != nil {
+	if rateLimitService != nil && account != nil {
 		if len(requestedModel) > 0 {
-			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body, requestedModel[0])
+			rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body, requestedModel[0])
 		} else {
-			s.rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
+			rateLimitService.HandleUpstreamError(ctx, account, statusCode, resp.Header, body)
 		}
 	}
 
@@ -905,6 +910,25 @@ func (s *GatewayService) invalidNonStreamingJSONFailoverError(
 		ResponseHeaders:        resp.Header,
 		RetryableOnSameAccount: retryableOnSameAccount,
 	}
+}
+
+func (s *GatewayService) invalidNonStreamingJSONFailoverError(
+	ctx context.Context,
+	resp *http.Response,
+	account *Account,
+	body []byte,
+	parseErr error,
+	requestedModel ...string,
+) error {
+	return invalidNonStreamingJSONFailoverError(
+		ctx,
+		s.rateLimitService,
+		resp,
+		account,
+		body,
+		parseErr,
+		requestedModel...,
+	)
 }
 
 func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	httppool "github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	openaipkg "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -252,24 +253,28 @@ type UsageInfo struct {
 	//
 	// Cursor 按自然计费周期结算，没有 5h / 7d 滚动窗口：周期内分 Auto 用量和
 	// 包含的 API 用量两个独立维度，打满后的溢出走 on-demand 按量计费。
-	CursorPlan               string         `json:"cursor_plan,omitempty"`                // pro / free / business
-	CursorSubscriptionStatus string         `json:"cursor_subscription_status,omitempty"` // active / past_due / canceled
-	CursorPaymentFailed      bool           `json:"cursor_payment_failed,omitempty"`      // 最近一次扣款失败
-	CursorPaymentAction      string         `json:"cursor_payment_action,omitempty"`      // 上游建议的补救动作
-	CursorAutoUsage          *UsageProgress `json:"cursor_auto_usage,omitempty"`          // Auto 模型用量百分比
-	CursorAPIUsage           *UsageProgress `json:"cursor_api_usage,omitempty"`           // 包含的 API 额度用量百分比
-	CursorIncludedUsed       float64        `json:"cursor_included_used,omitempty"`       // 已用的订阅内额度（美元）
-	CursorIncludedLimit      float64        `json:"cursor_included_limit,omitempty"`      // 订阅内额度上限（美元）
-	CursorOnDemandEnabled    bool           `json:"cursor_on_demand_enabled,omitempty"`   // 是否允许超额按量
-	CursorOnDemandUsed       float64        `json:"cursor_on_demand_used,omitempty"`      // 按量额外消费（美元）
-	CursorOnDemandLimit      float64        `json:"cursor_on_demand_limit,omitempty"`     // 按量上限（美元），0 表示未设
-	CursorPeriodTotal        float64        `json:"cursor_period_total,omitempty"`        // 本周期总消耗（美元）
-	CursorPeriodBonus        float64        `json:"cursor_period_bonus,omitempty"`        // 其中来自赠送额度（美元）
-	CursorBillingCycleStart  *time.Time     `json:"cursor_billing_cycle_start,omitempty"`
-	CursorBillingCycleEnd    *time.Time     `json:"cursor_billing_cycle_end,omitempty"`
-	CursorIsUnlimited        bool           `json:"cursor_is_unlimited,omitempty"`
-	CursorAutoMessage        string         `json:"cursor_auto_message,omitempty"` // 上游渲染好的 Auto 用量说明
-	CursorAPIMessage         string         `json:"cursor_api_message,omitempty"`  // 上游渲染好的 API 额度说明
+	CursorPlan                      string         `json:"cursor_plan,omitempty"`                // pro / free / business
+	CursorSubscriptionStatus        string         `json:"cursor_subscription_status,omitempty"` // active / past_due / canceled
+	CursorPaymentFailed             bool           `json:"cursor_payment_failed,omitempty"`      // 最近一次扣款失败
+	CursorPaymentAction             string         `json:"cursor_payment_action,omitempty"`      // 上游建议的补救动作
+	CursorSandUsage                 *UsageProgress `json:"cursor_sand_usage,omitempty"`          // Grok Bot native weekly usage
+	CursorSandHasAvailableUsage     *bool          `json:"cursor_sand_has_available_usage,omitempty"`
+	CursorSandAvailableBankedResets int64          `json:"cursor_sand_available_banked_resets,omitempty"`
+	CursorSandUsesPooledAllowance   bool           `json:"cursor_sand_uses_pooled_allowance,omitempty"`
+	CursorAutoUsage                 *UsageProgress `json:"cursor_auto_usage,omitempty"`        // Auto 模型用量百分比
+	CursorAPIUsage                  *UsageProgress `json:"cursor_api_usage,omitempty"`         // 包含的 API 额度用量百分比
+	CursorIncludedUsed              float64        `json:"cursor_included_used,omitempty"`     // 已用的订阅内额度（美元）
+	CursorIncludedLimit             float64        `json:"cursor_included_limit,omitempty"`    // 订阅内额度上限（美元）
+	CursorOnDemandEnabled           bool           `json:"cursor_on_demand_enabled,omitempty"` // 是否允许超额按量
+	CursorOnDemandUsed              float64        `json:"cursor_on_demand_used,omitempty"`    // 按量额外消费（美元）
+	CursorOnDemandLimit             float64        `json:"cursor_on_demand_limit,omitempty"`   // 按量上限（美元），0 表示未设
+	CursorPeriodTotal               float64        `json:"cursor_period_total,omitempty"`      // 本周期总消耗（美元）
+	CursorPeriodBonus               float64        `json:"cursor_period_bonus,omitempty"`      // 其中来自赠送额度（美元）
+	CursorBillingCycleStart         *time.Time     `json:"cursor_billing_cycle_start,omitempty"`
+	CursorBillingCycleEnd           *time.Time     `json:"cursor_billing_cycle_end,omitempty"`
+	CursorIsUnlimited               bool           `json:"cursor_is_unlimited,omitempty"`
+	CursorAutoMessage               string         `json:"cursor_auto_message,omitempty"` // 上游渲染好的 Auto 用量说明
+	CursorAPIMessage                string         `json:"cursor_api_message,omitempty"`  // 上游渲染好的 API 额度说明
 
 	// Antigravity 账号级信息
 	SubscriptionTier    string `json:"subscription_tier,omitempty"`     // 归一化订阅等级: FREE/PRO/ULTRA/UNKNOWN
@@ -580,6 +585,13 @@ func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, for
 		return nil, fmt.Errorf("get account failed: %w", err)
 	}
 
+	return s.getUsageForAccount(ctx, account, forceProbe)
+}
+
+// GetUsageForAccount 已加载账号的使用量直通入口（配额监控 fetcher 复用，
+// 避免缓存未命中时账号被加载两次——每次 GetByID 含 proxies/groups 联查）。
+func (s *AccountUsageService) GetUsageForAccount(ctx context.Context, account *Account, force ...bool) (*UsageInfo, error) {
+	forceProbe := len(force) > 0 && force[0]
 	return s.getUsageForAccount(ctx, account, forceProbe)
 }
 
@@ -1286,7 +1298,11 @@ func recalcCursorRemainingSeconds(usage *UsageInfo) {
 		return
 	}
 	now := time.Now()
-	for _, progress := range []*UsageProgress{usage.CursorAutoUsage, usage.CursorAPIUsage} {
+	for _, progress := range []*UsageProgress{
+		usage.CursorSandUsage,
+		usage.CursorAutoUsage,
+		usage.CursorAPIUsage,
+	} {
 		if progress == nil || progress.ResetsAt == nil {
 			continue
 		}
@@ -1475,29 +1491,49 @@ const cursorExhaustedFallbackPark = 6 * time.Hour
 //
 // 返回是否真的停了号，供巡检统计本轮动作数。
 func (s *AccountUsageService) parkExhaustedCursorAccount(account *Account, usage *UsageInfo) bool {
-	if account == nil || usage == nil || usage.CursorIsUnlimited {
+	if account == nil || usage == nil {
 		return false
 	}
 	if s.accountRepo == nil {
 		return false
 	}
 
-	autoFull := usage.CursorAutoUsage != nil && usage.CursorAutoUsage.Utilization >= cursorUsageParkWatermark
-	apiFull := usage.CursorAPIUsage != nil && usage.CursorAPIUsage.Utilization >= cursorUsageParkWatermark
-	if !autoFull || !apiFull {
-		return false
-	}
-	hit := []string{
-		fmt.Sprintf("auto %.1f%%", usage.CursorAutoUsage.Utilization),
-		fmt.Sprintf("api %.1f%%", usage.CursorAPIUsage.Utilization),
+	isSand := account.CursorAgentProfile() == cursor.AgentProfileSand
+	sandExhausted := isSand &&
+		usage.CursorSandHasAvailableUsage != nil &&
+		!*usage.CursorSandHasAvailableUsage
+	hit := make([]string, 0, 2)
+	if isSand {
+		if !sandExhausted {
+			return false
+		}
+		hit = append(hit, "grok bot weekly unavailable")
+	} else {
+		if usage.CursorIsUnlimited {
+			return false
+		}
+		autoFull := usage.CursorAutoUsage != nil && usage.CursorAutoUsage.Utilization >= cursorUsageParkWatermark
+		apiFull := usage.CursorAPIUsage != nil && usage.CursorAPIUsage.Utilization >= cursorUsageParkWatermark
+		if !autoFull || !apiFull {
+			return false
+		}
+		hit = append(hit,
+			fmt.Sprintf("auto %.1f%%", usage.CursorAutoUsage.Utilization),
+			fmt.Sprintf("api %.1f%%", usage.CursorAPIUsage.Utilization),
+		)
 	}
 
 	until := time.Now().Add(cursorExhaustedFallbackPark)
-	if usage.CursorBillingCycleEnd != nil && usage.CursorBillingCycleEnd.After(time.Now()) {
+	if sandExhausted &&
+		usage.CursorSandUsage != nil &&
+		usage.CursorSandUsage.ResetsAt != nil &&
+		usage.CursorSandUsage.ResetsAt.After(time.Now()) {
+		until = *usage.CursorSandUsage.ResetsAt
+	} else if usage.CursorBillingCycleEnd != nil && usage.CursorBillingCycleEnd.After(time.Now()) {
 		until = *usage.CursorBillingCycleEnd
 	}
 
-	reason := fmt.Sprintf("%s (%s), on-demand used $%.2f, parked until billing cycle end",
+	reason := fmt.Sprintf("%s (%s), on-demand used $%.2f, parked until quota reset",
 		CursorQuotaParkReasonPrefix,
 		strings.Join(hit, ", "), usage.CursorOnDemandUsed)
 

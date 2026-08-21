@@ -1,9 +1,16 @@
 package cursor
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"strings"
+
+	_ "golang.org/x/image/webp"
 )
 
 const attachedImageMarker = "[Attached image]"
@@ -18,6 +25,8 @@ type AttachedImage struct {
 	ID       string
 	Data     []byte
 	MIMEType string
+	Width    int
+	Height   int
 }
 
 func parseImageDataURI(raw string) (AttachedImage, error) {
@@ -65,5 +74,20 @@ func parseImageDataURI(raw string) (AttachedImage, error) {
 	if MaxImageBytes > 0 && len(data) > MaxImageBytes {
 		return AttachedImage{}, fmt.Errorf("image exceeds the %d byte limit", MaxImageBytes)
 	}
-	return AttachedImage{Data: data, MIMEType: mimeType}, nil
+	attached := AttachedImage{Data: data, MIMEType: mimeType}
+	if config, format, decodeErr := image.DecodeConfig(bytes.NewReader(data)); decodeErr == nil {
+		attached.Width = config.Width
+		attached.Height = config.Height
+		switch strings.ToLower(format) {
+		case "jpeg":
+			attached.MIMEType = "image/jpeg"
+		case "png":
+			attached.MIMEType = "image/png"
+		case "gif":
+			attached.MIMEType = "image/gif"
+		case "webp":
+			attached.MIMEType = "image/webp"
+		}
+	}
+	return attached, nil
 }

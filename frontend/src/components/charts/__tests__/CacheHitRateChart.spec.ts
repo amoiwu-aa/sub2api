@@ -351,6 +351,20 @@ describe('CacheHitRateChart', () => {
     expect(wrapper.get('[data-testid="cache-observability"]').text()).not.toContain('0.0%')
   })
 
+  it('hides the admin user search on the personal dashboard', () => {
+    const wrapper = mount(CacheHitRateChart, {
+      props: {
+        stats,
+        hideUserFilter: true
+      }
+    })
+
+    expect(wrapper.find('[data-testid="cache-user-search"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="cache-hit-rate-chart"]').exists()).toBe(true)
+    expect(wrapper.find('[data-period="today"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('20.0%')
+  })
+
   it('includes legacy unknown requests in the observability denominator', async () => {
     const wrapper = mount(CacheHitRateChart, {
       props: {

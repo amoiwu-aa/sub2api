@@ -148,6 +148,29 @@ export default {
     confirmDontShow: "Are you sure you don't want to see the onboarding guide again?\n\nYou can restart it anytime from the user menu in the top right corner.",
     confirmExit: 'Are you sure you want to exit the onboarding guide? You can restart it anytime from the top right menu.',
     interactiveHint: 'Press Enter or Click to continue',
+    prompt: {
+      title: 'Welcome to RingStar',
+      badge: 'First-time setup',
+      description: 'Your account is ready. Enter guide mode to create and start using your first API key with step-by-step help.',
+      timeHint: 'It takes about one minute, and every setting can be changed later.',
+      replayHint: 'You can skip for now and restart the onboarding guide anytime from the user menu in the top right.',
+      skip: 'Skip for now',
+      start: 'Enter guide mode',
+      items: {
+        key: {
+          title: 'Create an API key',
+          description: 'Choose an available group and generate your access key.'
+        },
+        client: {
+          title: 'Connect a client',
+          description: 'Learn how to copy configuration or import it into supported clients.'
+        },
+        usage: {
+          title: 'Review usage',
+          description: 'Find your balance, request history, and token usage.'
+        }
+      }
+    },
     navigation: {
       flipPage: 'Flip Page',
       exit: 'Exit'

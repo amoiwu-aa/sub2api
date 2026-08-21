@@ -45,6 +45,28 @@ func buildOpenAIResponsesURL(base string) string {
 	return buildOpenAIEndpointURL(base, "/v1/responses")
 }
 
+func buildOpenAIResponsesURLForPlatform(platform string, base string) string {
+	if platform == PlatformDeepseek {
+		return buildOpenAIEndpointURL(base, "/responses")
+	}
+	return buildOpenAIResponsesURL(base)
+}
+
+func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte {
+	if account == nil || account.Platform != PlatformDeepseek ||
+		(account.GetAPIProtocol() != APIProtocolResponses && !account.IsAdaptiveAPIProtocol()) {
+		return body
+	}
+	normalized, err := sjson.SetBytes(body, "store", false)
+	if err != nil {
+		return body
+	}
+	if stripped, err := sjson.DeleteBytes(normalized, "previous_response_id"); err == nil {
+		normalized = stripped
+	}
+	return normalized
+}
+
 func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	if len(reqBody) == 0 {
 		return false
@@ -391,6 +413,10 @@ func openAIResponsesRequestPathSuffix(c *gin.Context) string {
 func IsForwardableOpenAIResponsesRequestPath(c *gin.Context) bool {
 	_, ok := sanitizedUpstreamPathSuffix(rawOpenAIResponsesRequestPathSuffix(c))
 	return ok
+}
+
+func IsOpenAIResponsesInputTokensRequestPath(c *gin.Context) bool {
+	return openAIResponsesRequestPathSuffix(c) == "/input_tokens"
 }
 
 // rawOpenAIResponsesRequestPathSuffix 仅做提取，不做任何安全判断。
@@ -1464,7 +1490,7 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 		return ""
 	case "low", "medium", "high":
 		return value
-	case "xhigh", "extrahigh", "max":
+	case "xhigh", "extrahigh", "max", "ultra":
 		return "xhigh"
 	default:
 		// Only store known effort levels for now to keep UI consistent.
@@ -1473,8 +1499,74 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 }
 
 func normalizeOpenAIReasoningEffortForModel(raw, model string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "max") && isOpenAIGPT56Model(model) {
-		return "max"
+	value := strings.ToLower(strings.TrimSpace(raw))
+	value = strings.NewReplacer("-", "", "_", "", " ", "").Replace(value)
+	switch value {
+	case "ultra":
+		return "ultra"
+	case "max":
+		if openAIModelSupportsMaxReasoningEffort(model) {
+			return "max"
+		}
+		return "xhigh"
 	}
 	return normalizeOpenAIReasoningEffort(raw)
+}
+
+func normalizeOpenAIReasoningEffortForUpstream(raw, model string) string {
+	normalized := normalizeOpenAIReasoningEffortForModel(raw, model)
+	if normalized == "ultra" {
+		if openAIModelSupportsMaxReasoningEffort(model) {
+			return "max"
+		}
+		return "xhigh"
+	}
+	return normalized
+}
+
+func openAIModelSupportsMaxReasoningEffort(model string) bool {
+	return isOpenAIGPT56FamilyModel(model)
+}
+
+func isOpenAIGPT56FamilyModel(model string) bool {
+	if isOpenAIGPT56Model(model) {
+		return true
+	}
+	normalized := canonicalizeOpenAIModelAliasSpelling(model)
+	if normalized == "" {
+		normalized = strings.ToLower(lastOpenAIModelSegment(model))
+	}
+	return normalized == "gpt-5.6" || strings.HasPrefix(normalized, "gpt-5.6-")
+}
+
+func rewriteOpenAIUpstreamReasoningEffort(body []byte, model string) ([]byte, bool, error) {
+	if len(body) == 0 {
+		return body, false, nil
+	}
+	changed := false
+	result := body
+	for _, path := range []string{"reasoning.effort", "reasoning_effort"} {
+		field := gjson.GetBytes(result, path)
+		if !field.Exists() || field.Type != gjson.String {
+			continue
+		}
+		original := strings.TrimSpace(field.String())
+		if original == "" {
+			continue
+		}
+		normalized := normalizeOpenAIReasoningEffortForUpstream(original, model)
+		if normalized == "" || strings.EqualFold(normalized, original) {
+			continue
+		}
+		updated, err := sjson.SetBytes(result, path, normalized)
+		if err != nil {
+			return body, false, fmt.Errorf("rewrite upstream reasoning effort %s: %w", path, err)
+		}
+		result = updated
+		changed = true
+	}
+	if !changed {
+		return body, false, nil
+	}
+	return result, true, nil
 }

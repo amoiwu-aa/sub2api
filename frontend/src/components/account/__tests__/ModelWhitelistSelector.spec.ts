@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
-const copyToClipboard = vi.fn().mockResolvedValue(true)
+const { copyToClipboard, syncUpstreamModelsMock } = vi.hoisted(() => ({
+  copyToClipboard: vi.fn().mockResolvedValue(true),
+  syncUpstreamModelsMock: vi.fn()
+}))
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -27,13 +30,21 @@ vi.mock('@/composables/useClipboard', () => ({
   })
 }))
 
+vi.mock('@/api/admin/accounts', () => ({
+  accountsAPI: {
+    syncUpstreamModels: syncUpstreamModelsMock,
+    syncUpstreamModelsPreview: vi.fn()
+  }
+}))
+
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 
-function mountSelector() {
+function mountSelector(props: Record<string, unknown> = {}) {
   return mount(ModelWhitelistSelector, {
     props: {
       modelValue: [],
-      platform: 'openai'
+      platform: 'openai',
+      ...props
     },
     global: {
       stubs: {
@@ -58,6 +69,7 @@ function findModelRow(wrapper: ReturnType<typeof mountSelector>, modelId: string
 describe('ModelWhitelistSelector', () => {
   beforeEach(() => {
     copyToClipboard.mockClear()
+    syncUpstreamModelsMock.mockReset()
   })
 
   it('copies a model ID without selecting the model', async () => {
@@ -85,5 +97,25 @@ describe('ModelWhitelistSelector', () => {
 
     expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-5.6-sol']]])
     expect(copyToClipboard).not.toHaveBeenCalled()
+  })
+
+  it('syncs the live Grok Bot model list for a Cursor account', async () => {
+    syncUpstreamModelsMock.mockResolvedValue({
+      models: ['cursor/grok-4.6', 'cursor/grok-4.6-max']
+    })
+    const wrapper = mountSelector({
+      platform: 'cursor',
+      accountId: 15,
+      allowCustom: false
+    })
+
+    expect(wrapper.find('input[placeholder="admin.accounts.enterCustomModelName"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="sync-upstream-models"]').trigger('click')
+    await flushPromises()
+
+    expect(syncUpstreamModelsMock).toHaveBeenCalledWith(15)
+    expect(wrapper.emitted('update:modelValue')).toEqual([
+      [['cursor/grok-4.6', 'cursor/grok-4.6-max']]
+    ])
   })
 })

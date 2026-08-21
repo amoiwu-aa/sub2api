@@ -1278,6 +1278,8 @@ func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 		"gpt 5.3 codex":             "gpt-5.3-codex",
 		"gpt-5.6-sol-wm":            "gpt-5.6-sol-wm",
 		"gpt-5.6-sol-wm-high":       "gpt-5.6-sol-wm",
+		"gpt-5.6-sol-max":           "gpt-5.6-sol",
+		"gpt-5.6-sol-ultra":         "gpt-5.6-sol",
 	}
 
 	for input, expected := range cases {

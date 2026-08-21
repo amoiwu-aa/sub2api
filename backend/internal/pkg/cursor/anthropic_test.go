@@ -18,11 +18,15 @@ func TestAnthropicRequestParsesOutputEffort(t *testing.T) {
 	req := parseAnthropicRequest(t, `{
 		"model":"cursor/grok-4.6",
 		"output_config":{"effort":"max"},
+		"thinking":{"type":"adaptive"},
+		"speed":"fast",
 		"messages":[]
 	}`)
 	require.NotNil(t, req.OutputConfig)
 	require.NotNil(t, req.OutputConfig.Effort)
 	require.Equal(t, "max", *req.OutputConfig.Effort)
+	require.JSONEq(t, `{"type":"adaptive"}`, string(req.Thinking))
+	require.Equal(t, "fast", req.Speed)
 }
 
 func TestAnthropicRequestSystemBecomesSystemTurn(t *testing.T) {

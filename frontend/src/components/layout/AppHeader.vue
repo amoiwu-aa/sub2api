@@ -36,6 +36,18 @@
           <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
         </router-link>
 
+        <button
+          v-if="customerServiceEnabled"
+          type="button"
+          class="flex h-9 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:px-2.5"
+          :title="customerServiceButtonText"
+          :aria-label="customerServiceButtonText"
+          @click="customerServiceOpen = true"
+        >
+          <Icon name="chat" size="sm" />
+          <span class="hidden xl:inline">{{ customerServiceButtonText }}</span>
+        </button>
+
         <!-- Language Switcher -->
         <LocaleSwitcher />
 
@@ -109,8 +121,8 @@
               <div class="text-sm font-medium text-gray-900 dark:text-white">
                 {{ displayName }}
               </div>
-              <div class="text-xs capitalize text-gray-500 dark:text-dark-400">
-                {{ user.role }}
+              <div class="text-xs text-gray-500 dark:text-dark-400">
+                {{ t('admin.users.roles.' + user.role) }}
               </div>
             </div>
             <Icon name="chevronDown" size="sm" class="hidden text-gray-400 md:block" />
@@ -258,6 +270,16 @@
       </div>
     </div>
   </header>
+
+  <CustomerServiceDialog
+    :show="customerServiceOpen"
+    :title="customerServiceTitle"
+    :description="customerServiceDescription"
+    :wechat-id="customerServiceWeChatID"
+    :qr-image="customerServiceQRImage"
+    :contact-info="contactInfo"
+    @close="customerServiceOpen = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -270,6 +292,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CustomerServiceDialog from './CustomerServiceDialog.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 
@@ -284,9 +307,31 @@ const onboardingStore = useOnboardingStore()
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
+const customerServiceOpen = ref(false)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
 const modelPlazaEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.modelPlaza))
+const customerServiceEnabled = computed(
+  () => Boolean(user.value && appStore.cachedPublicSettings?.customer_service_enabled)
+)
+const customerServiceButtonText = computed(
+  () => appStore.cachedPublicSettings?.customer_service_button_text?.trim()
+    || t('common.customerService.button')
+)
+const customerServiceTitle = computed(
+  () => appStore.cachedPublicSettings?.customer_service_title?.trim()
+    || t('common.customerService.title')
+)
+const customerServiceDescription = computed(
+  () => appStore.cachedPublicSettings?.customer_service_description?.trim()
+    || t('common.customerService.description')
+)
+const customerServiceWeChatID = computed(
+  () => appStore.cachedPublicSettings?.customer_service_wechat_id?.trim() || ''
+)
+const customerServiceQRImage = computed(
+  () => appStore.cachedPublicSettings?.customer_service_qr_image?.trim() || ''
+)
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))
 const frozenBalance = computed(() => Number(user.value?.frozen_balance || 0))
@@ -296,9 +341,12 @@ const balanceFrozenText = computed(() => t('common.frozenBalance') === 'common.f
 const balanceTotalText = computed(() => t('common.totalBalance') === 'common.totalBalance' ? '总余额' : t('common.totalBalance'))
 const balanceFrozenLabel = computed(() => `${balanceFrozenText.value} ${formatHeaderMoney(frozenBalance.value)}`)
 
-// 只在标准模式的管理员下显示新手引导按钮
+// 管理员和普通用户都可以从头像菜单重新打开各自的新手引导。
 const showOnboardingButton = computed(() => {
-  return !authStore.isSimpleMode && user.value?.role === 'admin'
+  return (
+    !authStore.isSimpleMode &&
+    (user.value?.role === 'admin' || user.value?.role === 'user')
+  )
 })
 
 const userInitials = computed(() => {

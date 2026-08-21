@@ -29,6 +29,9 @@ const (
 	// defaultCursorRepeatedReadRecoveryThreshold allows one retry before
 	// temporarily suppressing a no-progress Read tool.
 	defaultCursorRepeatedReadRecoveryThreshold = 2
+	// defaultCursorReadOnlyRecoveryThreshold gives the model enough room to
+	// inspect a project, then forces it to execute, mutate, or finish.
+	defaultCursorReadOnlyRecoveryThreshold = 6
 )
 
 // CursorGatewayService 把 OpenAI Chat Completions 桥接到 Cursor Agent。
@@ -43,6 +46,9 @@ type CursorGatewayService struct {
 	maxToolContinuations int
 	// repeatedReadRecoveryThreshold suppresses a repeated Read for one turn.
 	repeatedReadRecoveryThreshold int
+	// readOnlyRecoveryThreshold suppresses observation tools after a
+	// non-mutating exploration chain.
+	readOnlyRecoveryThreshold int
 	// quotaReader 用于按模型判定 Auto / API 两档额度是否还有余量。
 	quotaReader cursorQuotaSnapshotReader
 	// streamKeepaliveInterval 是 Cursor 流式等待期间给下游的 SSE 心跳间隔。
@@ -60,6 +66,7 @@ func NewCursorGatewayService(
 	keepalive := defaultCursorStreamKeepalive
 	maxToolContinuations := defaultCursorMaxToolContinuations
 	repeatedReadRecoveryThreshold := defaultCursorRepeatedReadRecoveryThreshold
+	readOnlyRecoveryThreshold := defaultCursorReadOnlyRecoveryThreshold
 	if cfg != nil {
 		mode = normalizeCursorNativeToolBridgeMode(cfg.Gateway.CursorNativeToolBridgeMode)
 		if cfg.Gateway.StreamKeepaliveInterval > 0 {
@@ -67,6 +74,7 @@ func NewCursorGatewayService(
 		}
 		maxToolContinuations = cfg.Gateway.CursorMaxToolContinuations
 		repeatedReadRecoveryThreshold = cfg.Gateway.CursorRepeatedReadRecoveryThreshold
+		readOnlyRecoveryThreshold = cfg.Gateway.CursorReadOnlyRecoveryThreshold
 	}
 	return &CursorGatewayService{
 		tokenProvider:                 tokenProvider,
@@ -74,6 +82,7 @@ func NewCursorGatewayService(
 		nativeBridgeMode:              mode,
 		maxToolContinuations:          maxToolContinuations,
 		repeatedReadRecoveryThreshold: repeatedReadRecoveryThreshold,
+		readOnlyRecoveryThreshold:     readOnlyRecoveryThreshold,
 		quotaReader:                   quotaReader,
 		streamKeepaliveInterval:       keepalive,
 	}
@@ -110,6 +119,10 @@ func cursorToolLoopMessage(depth, limit int) string {
 type cursorRepeatedReadRecovery struct {
 	ToolName         string
 	Repeats          int
+	Reason           string
+	Path             string
+	MutationTools    []string
+	ResultNormalized bool
 	NativeSuppressed bool
 	MCPSuppressed    bool
 }
@@ -134,10 +147,18 @@ func (s *CursorGatewayService) resolveNativeToolBridgeWithRecovery(
 		mcpTools,
 	)
 	if recovery != nil {
-		slog.Warn("cursor.repeated_read_recovered",
+		eventName := "cursor.repeated_read_recovered"
+		if recovery.Reason == "read_only_exploration" {
+			eventName = "cursor.tool_loop_recovered"
+		}
+		slog.Warn(eventName,
 			"protocol", protocol,
 			"tool_name", recovery.ToolName,
 			"repeats", recovery.Repeats,
+			"reason", recovery.Reason,
+			"path", recovery.Path,
+			"mutation_tools", recovery.MutationTools,
+			"result_normalized", recovery.ResultNormalized,
 			"native_suppressed", recovery.NativeSuppressed,
 			"mcp_suppressed", recovery.MCPSuppressed,
 		)
@@ -154,32 +175,80 @@ func (s *CursorGatewayService) applyRepeatedReadRecovery(
 	if s != nil {
 		threshold = s.repeatedReadRecoveryThreshold
 	}
+	if threshold <= 0 {
+		return nativeBridge, mcpTools, nil
+	}
+
+	// A missing target is a normal preflight before creating a file. Recover on
+	// the first result: hide Read for this turn, keep the mutation tools visible,
+	// and replace the client error with a completed preflight instruction.
+	if observation, missing := conversation.LatestMissingFileRead(); missing {
+		mutationTools := cursorFileMutationToolNames(nativeBridge, mcpTools)
+		if len(mutationTools) > 0 {
+			updatedBridge, updatedTools, nativeSuppressed, mcpSuppressed :=
+				suppressCursorClientTool(nativeBridge, mcpTools, observation.ToolName)
+			if nativeSuppressed || mcpSuppressed {
+				normalized := conversation.ReplaceToolResult(
+					observation.ToolCallID,
+					cursorMissingReadPreflightMessage(mutationTools),
+				)
+				return updatedBridge, updatedTools, &cursorRepeatedReadRecovery{
+					ToolName:         observation.ToolName,
+					Repeats:          1,
+					Reason:           "missing_file_preflight",
+					Path:             observation.Path,
+					MutationTools:    mutationTools,
+					ResultNormalized: normalized,
+					NativeSuppressed: nativeSuppressed,
+					MCPSuppressed:    mcpSuppressed,
+				}
+			}
+		}
+	}
+
+	readOnlyThreshold := defaultCursorReadOnlyRecoveryThreshold
+	if s != nil {
+		readOnlyThreshold = s.readOnlyRecoveryThreshold
+	}
+	if depth := conversation.ToolContinuationDepth(); readOnlyThreshold > 0 && depth >= readOnlyThreshold {
+		updatedBridge, updatedTools, suppressedTools, nativeSuppressed, mcpSuppressed :=
+			suppressCursorObservationTools(nativeBridge, mcpTools)
+		if nativeSuppressed || mcpSuppressed {
+			conversation.Turns = append(conversation.Turns, cursor.Turn{
+				Role: cursor.RoleSystem,
+				Text: fmt.Sprintf(
+					"Gateway progress recovery: %d consecutive tool rounds only inspected the workspace. "+
+						"Read, Grep, and Glob are unavailable for this turn. Execute the requested action "+
+						"with an available shell or mutation tool, or finish the response. Do not continue planning.",
+					depth,
+				),
+			})
+			return updatedBridge, updatedTools, &cursorRepeatedReadRecovery{
+				ToolName:         strings.Join(suppressedTools, ","),
+				Repeats:          depth,
+				Reason:           "read_only_exploration",
+				NativeSuppressed: nativeSuppressed,
+				MCPSuppressed:    mcpSuppressed,
+			}
+		}
+	}
+
 	observation, repeated := conversation.RepeatedRead(threshold)
 	if !repeated {
 		return nativeBridge, mcpTools, nil
 	}
 
-	recovery := &cursorRepeatedReadRecovery{
-		ToolName: observation.ToolName,
-		Repeats:  observation.Repeats,
-	}
-	for key, target := range nativeBridge {
-		if strings.EqualFold(strings.TrimSpace(target.Name), observation.ToolName) {
-			delete(nativeBridge, key)
-			recovery.NativeSuppressed = true
-		}
-	}
-
-	filteredTools := make([]cursor.McpTool, 0, len(mcpTools))
-	for _, tool := range mcpTools {
-		if strings.EqualFold(strings.TrimSpace(tool.Name), observation.ToolName) {
-			recovery.MCPSuppressed = true
-			continue
-		}
-		filteredTools = append(filteredTools, tool)
-	}
-	if !recovery.NativeSuppressed && !recovery.MCPSuppressed {
+	updatedBridge, filteredTools, nativeSuppressed, mcpSuppressed :=
+		suppressCursorClientTool(nativeBridge, mcpTools, observation.ToolName)
+	if !nativeSuppressed && !mcpSuppressed {
 		return nativeBridge, mcpTools, nil
+	}
+	recovery := &cursorRepeatedReadRecovery{
+		ToolName:         observation.ToolName,
+		Repeats:          observation.Repeats,
+		Reason:           "repeated_identical_result",
+		NativeSuppressed: nativeSuppressed,
+		MCPSuppressed:    mcpSuppressed,
 	}
 
 	conversation.Turns = append(conversation.Turns, cursor.Turn{
@@ -193,7 +262,161 @@ func (s *CursorGatewayService) applyRepeatedReadRecovery(
 			observation.Repeats,
 		),
 	})
-	return nativeBridge, filteredTools, recovery
+	return updatedBridge, filteredTools, recovery
+}
+
+func suppressCursorObservationTools(
+	nativeBridge cursor.NativeToolBridge,
+	mcpTools []cursor.McpTool,
+) (cursor.NativeToolBridge, []cursor.McpTool, []string, bool, bool) {
+	suppressed := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	record := func(name string) {
+		trimmed := strings.TrimSpace(name)
+		key := strings.ToLower(trimmed)
+		if trimmed == "" {
+			return
+		}
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		suppressed = append(suppressed, trimmed)
+	}
+
+	nativeSuppressed := false
+	for _, key := range []string{"read", "grep", "glob", "ls"} {
+		target, exists := nativeBridge[key]
+		if !exists {
+			continue
+		}
+		delete(nativeBridge, key)
+		nativeSuppressed = true
+		record(target.Name)
+	}
+
+	mcpSuppressed := false
+	filteredTools := make([]cursor.McpTool, 0, len(mcpTools))
+	for _, tool := range mcpTools {
+		if isCursorObservationToolName(tool.Name) {
+			mcpSuppressed = true
+			record(tool.Name)
+			continue
+		}
+		filteredTools = append(filteredTools, tool)
+	}
+	if !mcpSuppressed {
+		filteredTools = mcpTools
+	}
+	return nativeBridge, filteredTools, suppressed, nativeSuppressed, mcpSuppressed
+}
+
+func isCursorObservationToolName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if index := strings.LastIndex(normalized, "__"); index >= 0 {
+		normalized = normalized[index+2:]
+	}
+	normalized = strings.NewReplacer("_", "", "-", "", ".", "").Replace(normalized)
+	switch normalized {
+	case "read",
+		"readfile",
+		"viewfile",
+		"openfile",
+		"grep",
+		"glob",
+		"ls",
+		"listfiles":
+		return true
+	default:
+		return false
+	}
+}
+
+func suppressCursorClientTool(
+	nativeBridge cursor.NativeToolBridge,
+	mcpTools []cursor.McpTool,
+	clientToolName string,
+) (cursor.NativeToolBridge, []cursor.McpTool, bool, bool) {
+	nativeSuppressed := false
+	for key, target := range nativeBridge {
+		if strings.EqualFold(strings.TrimSpace(target.Name), clientToolName) {
+			delete(nativeBridge, key)
+			nativeSuppressed = true
+		}
+	}
+
+	mcpSuppressed := false
+	filteredTools := make([]cursor.McpTool, 0, len(mcpTools))
+	for _, tool := range mcpTools {
+		if strings.EqualFold(strings.TrimSpace(tool.Name), clientToolName) {
+			mcpSuppressed = true
+			continue
+		}
+		filteredTools = append(filteredTools, tool)
+	}
+	if !mcpSuppressed {
+		filteredTools = mcpTools
+	}
+	return nativeBridge, filteredTools, nativeSuppressed, mcpSuppressed
+}
+
+func cursorFileMutationToolNames(
+	nativeBridge cursor.NativeToolBridge,
+	mcpTools []cursor.McpTool,
+) []string {
+	names := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	appendName := func(name string) {
+		trimmed := strings.TrimSpace(name)
+		key := strings.ToLower(trimmed)
+		if trimmed == "" {
+			return
+		}
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		names = append(names, trimmed)
+	}
+
+	if strings.TrimSpace(nativeBridge.ClientName("write")) != "" {
+		appendName("write")
+	}
+	for _, tool := range mcpTools {
+		if isCursorFileMutationToolName(tool.Name) {
+			appendName(cursor.McpToolNamespacePrefix + strings.TrimSpace(tool.Name))
+		}
+	}
+	return names
+}
+
+func isCursorFileMutationToolName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	normalized = strings.NewReplacer("_", "", "-", "", ".", "").Replace(normalized)
+	switch normalized {
+	case "write",
+		"writefile",
+		"createfile",
+		"savefile",
+		"edit",
+		"editfile",
+		"multiedit",
+		"strreplace",
+		"applypatch",
+		"notebookedit":
+		return true
+	default:
+		return false
+	}
+}
+
+func cursorMissingReadPreflightMessage(mutationTools []string) string {
+	return fmt.Sprintf(
+		"Read preflight completed. Available file mutation tools: %s. "+
+			"If this task requires creating or changing the path, call one of those tools directly. "+
+			"Do not repeat the same Read in this turn.",
+		strings.Join(mutationTools, ", "),
+	)
 }
 
 // reportUpstreamError 把上游故障喂给账号健康度体系。
@@ -272,7 +495,16 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	}
 
 	publicModel := req.Model
-	selection, err := resolveCursorModelSelection(body, publicModel, req.ReasoningEffort)
+	standardFast, err := cursorFastFromServiceTier(req.ServiceTier)
+	if err != nil {
+		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	selection, err := resolveCursorAccountModelSelectionWithStandardOptions(
+		account,
+		body,
+		publicModel,
+		&cursor.ModelOptions{Effort: req.ReasoningEffort, Fast: standardFast},
+	)
 	if err != nil {
 		return nil, s.writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -297,7 +529,7 @@ func (s *CursorGatewayService) forwardChatCompletionsOnce(ctx context.Context, c
 	input := cursor.AgentTurnInput{
 		Text:                     prompt,
 		ConversationID:           conversationID,
-		Images:                   conversation.Images(),
+		Images:                   conversation.CurrentInputImages(),
 		ModelID:                  selection.ModelID,
 		ModelParams:              selection.Params,
 		MaxMode:                  selection.MaxMode,
@@ -375,12 +607,24 @@ func (s *CursorGatewayService) agentOptions(ctx context.Context, account *Accoun
 		}
 	}
 
+	profile := account.CursorAgentProfile()
+	telemetrySeed := accessToken
+	if profile == cursor.AgentProfileSand {
+		// Keep a stable account-scoped fallback for Sand. The actual Grok Bot
+		// machine id can be supplied when it is available; otherwise the
+		// deterministic fallback avoids changing identity on token rotation.
+		telemetrySeed = fmt.Sprintf("cursor-account:%d", account.ID)
+	}
+
 	return &cursor.AgentOptions{
-		HTTPClient:  client,
-		AccessToken: accessToken,
-		// 设备指纹以 access token 为种子：同一账号在 token 轮换前保持同一台"设备"。
-		Telemetry: cursor.DeriveTelemetryIDs(accessToken),
-		SessionID: cursorSessionID(account),
+		HTTPClient:    client,
+		AccessToken:   accessToken,
+		Profile:       profile,
+		MachineID:     account.CursorMachineID(),
+		ClientVersion: account.CursorClientVersion(),
+		SandNamespace: account.CursorSandNamespace(),
+		Telemetry:     cursor.DeriveTelemetryIDs(telemetrySeed),
+		SessionID:     cursorSessionID(account),
 	}, nil
 }
 

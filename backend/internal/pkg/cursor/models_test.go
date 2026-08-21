@@ -102,20 +102,21 @@ func TestResolveModelWithOptionsPrecedence(t *testing.T) {
 }
 
 func TestResolveModelWithOptionsRejectsUnsupportedCombinations(t *testing.T) {
-	fast := false
+	fast := true
 	xhigh := ModelEffortXHigh
 
-	_, err := ResolveModelWithOptions("cursor/grok-4.5", &xhigh, nil)
-	require.ErrorContains(t, err, `effort "xhigh" is not supported`)
+	selection, err := ResolveModelWithOptions("cursor/grok-4.5", &xhigh, nil)
+	require.NoError(t, err)
+	require.Equal(t, ModelEffortHigh, modelParamValue(selection.Params, "effort"))
 
 	low := ModelEffortLow
 	_, err = ResolveModelWithOptions("cursor/default", &low, nil)
 	require.ErrorContains(t, err, "require a named model")
 
 	_, err = ResolveModelWithOptions("cursor/claude-sonnet-5", nil, &ModelOptions{Fast: &fast})
-	require.ErrorContains(t, err, "not verified")
+	require.ErrorContains(t, err, "fast mode is not supported")
 
-	selection, err := ResolveModelWithOptions("cursor/claude-sonnet-5", nil, nil)
+	selection, err = ResolveModelWithOptions("cursor/claude-sonnet-5", nil, nil)
 	require.NoError(t, err, "old model-only requests must remain compatible")
 	require.Equal(t, "claude-sonnet-5", selection.ModelID)
 }
@@ -135,7 +136,7 @@ func TestResolveModelWithOptionsComposerFastToggle(t *testing.T) {
 }
 
 func TestResolveModelWithOptionsRejectsBlankAndUndocumentedEfforts(t *testing.T) {
-	for _, effort := range []string{"", "   ", "extra-high", "extra_high", "max"} {
+	for _, effort := range []string{"", "   ", "turbo", "thinking"} {
 		effort := effort
 		t.Run(fmt.Sprintf("%q", effort), func(t *testing.T) {
 			_, err := ResolveModelWithOptions(
@@ -144,6 +145,28 @@ func TestResolveModelWithOptionsRejectsBlankAndUndocumentedEfforts(t *testing.T)
 				&ModelOptions{Effort: &effort},
 			)
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestResolveModelWithOptionsNormalizesClientEffortAliases(t *testing.T) {
+	tests := []struct {
+		model  string
+		effort string
+		want   string
+	}{
+		{model: "cursor/gpt-5.6-sol", effort: "minimal", want: ModelEffortNone},
+		{model: "cursor/gpt-5.6-sol", effort: "ultra", want: ModelEffortMax},
+		{model: "cursor/claude-opus-4-8", effort: "max", want: ModelEffortMax},
+		{model: "cursor/grok-4.6", effort: "max", want: ModelEffortXHigh},
+		{model: "cursor/grok-4.6", effort: "extra-high", want: ModelEffortXHigh},
+		{model: "cursor/grok-4.5", effort: "xhigh", want: ModelEffortHigh},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model+"/"+tt.effort, func(t *testing.T) {
+			selection, err := ResolveModelWithOptions(tt.model, &tt.effort, nil)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, modelParamValue(selection.Params, "effort"))
 		})
 	}
 }
@@ -170,6 +193,10 @@ func TestResolveModelStrictRejectsUnknownInsteadOfFallingBack(t *testing.T) {
 	require.Equal(t, "grok-4.6", selection.ModelID)
 	require.NotNil(t, selection.MaxMode)
 	require.True(t, *selection.MaxMode)
+
+	_, err = ResolveModelStrict("cursor/gpt-5.6-sol-max")
+	require.ErrorContains(t, err, "unknown cursor model",
+		"GPT effort=max must not be parsed as Cursor MAX mode")
 }
 
 func TestDefaultBridgeCapabilitiesAreVersionedAndDeterministic(t *testing.T) {
@@ -191,21 +218,39 @@ func TestDefaultBridgeCapabilitiesAreVersionedAndDeterministic(t *testing.T) {
 func TestDefaultModelsIncludeVerifiedCursorCapabilities(t *testing.T) {
 	models := DefaultModels()
 	require.NotEmpty(t, models)
+	byID := make(map[string]Model, len(models))
 	for _, model := range models {
 		require.NotNil(t, model.CursorCapabilities)
 		require.Equal(t, BridgeProtocolVersion, model.CursorCapabilities.BridgeVersion)
+		byID[model.ID] = model
 	}
-	for _, model := range models {
-		if model.ID == "cursor/grok-4.6" {
-			require.Equal(t,
-				[]string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh},
-				model.CursorCapabilities.Efforts)
-			require.True(t, model.CursorCapabilities.Fast)
-			require.True(t, model.CursorCapabilities.MaxMode)
-			return
-		}
-	}
-	t.Fatal("cursor/grok-4.6 missing from default catalog")
+
+	grok := byID["cursor/grok-4.6"].CursorCapabilities
+	require.Equal(t,
+		[]string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh},
+		grok.Efforts)
+	require.Equal(t, ModelEffortHigh, grok.DefaultEffort)
+	require.True(t, grok.Fast)
+	require.True(t, grok.DefaultFast)
+	require.True(t, grok.MaxMode)
+
+	opus := byID["cursor/claude-opus-4-8"].CursorCapabilities
+	require.Equal(t,
+		[]string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh, ModelEffortMax},
+		opus.Efforts)
+	require.True(t, opus.Fast)
+	require.True(t, opus.Thinking)
+	require.False(t, opus.MaxMode)
+
+	sonnet := byID["cursor/claude-sonnet-5"].CursorCapabilities
+	require.True(t, sonnet.Thinking)
+	require.False(t, sonnet.Fast)
+
+	gpt := byID["cursor/gpt-5.6-sol"].CursorCapabilities
+	require.Equal(t, ModelEffortMedium, gpt.DefaultEffort)
+	require.Equal(t, ModelEffortNone, gpt.Efforts[0])
+	require.True(t, gpt.Fast)
+	require.False(t, gpt.DefaultFast)
 }
 
 // TestMaxVariantsAreNotUpstreamModelIDs 是这次改动最容易回归的地方：
@@ -242,15 +287,28 @@ func TestDefaultModelsAreResolvable(t *testing.T) {
 	}
 }
 
+func TestSandDefaultModelsStayInsideVerifiedCatalog(t *testing.T) {
+	models := SandDefaultModels()
+	require.NotEmpty(t, models)
+	require.Equal(t, len(DefaultModels()), len(models))
+
+	for _, model := range models {
+		require.True(t, IsSandModelSupported(model.ID), model.ID)
+		require.Equal(t, "grok-bot", model.OwnedBy)
+		require.Contains(t, model.DisplayName, "Grok Bot")
+	}
+	require.False(t, IsSandModelSupported("cursor/not-a-sand-model"))
+}
+
 func TestResolveModelWithOptionsValidatesOverriddenStandardEffort(t *testing.T) {
 	customHigh := ModelEffortHigh
 	for _, tc := range []struct {
 		model          string
 		standardEffort string
 	}{
-		{model: "cursor/grok-4.6", standardEffort: "max"},
-		{model: "cursor/grok-4.6", standardEffort: "extra-high"},
-		{model: "cursor/grok-4.5", standardEffort: ModelEffortXHigh},
+		{model: "cursor/grok-4.6", standardEffort: "none"},
+		{model: "cursor/grok-4.6", standardEffort: "turbo"},
+		{model: "cursor/claude-sonnet-5", standardEffort: "minimal"},
 	} {
 		tc := tc
 		t.Run(tc.model+"/"+tc.standardEffort, func(t *testing.T) {
@@ -262,6 +320,40 @@ func TestResolveModelWithOptionsValidatesOverriddenStandardEffort(t *testing.T) 
 			require.ErrorContains(t, err, fmt.Sprintf(`effort %q is not supported`, tc.standardEffort))
 		})
 	}
+}
+
+func TestResolveModelWithStandardOptionsMapsThinkingAndFast(t *testing.T) {
+	effort := ModelEffortMax
+	fast := true
+	thinking := false
+	selection, err := ResolveModelWithStandardOptionsStrict(
+		"cursor/claude-opus-4-8",
+		&ModelOptions{Effort: &effort, Fast: &fast, Thinking: &thinking},
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, ModelEffortMax, modelParamValue(selection.Params, "effort"))
+	require.Equal(t, "true", modelParamValue(selection.Params, "fast"))
+	require.Equal(t, "false", modelParamValue(selection.Params, "thinking"))
+
+	customFast := false
+	selection, err = ResolveModelWithStandardOptionsStrict(
+		"cursor/gpt-5.6-terra",
+		&ModelOptions{Fast: &fast},
+		&ModelOptions{Fast: &customFast},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "false", modelParamValue(selection.Params, "fast"),
+		"cursor_options must override protocol-standard Fast")
+}
+
+func TestDefaultModelParamsForUsesPerModelDefaults(t *testing.T) {
+	require.Equal(t, ModelEffortMedium, modelParamValue(DefaultModelParamsFor("gpt-5.6-sol"), "effort"))
+	require.Equal(t, "false", modelParamValue(DefaultModelParamsFor("gpt-5.6-sol"), "fast"))
+	require.Equal(t, "true", modelParamValue(DefaultModelParamsFor("claude-sonnet-5"), "thinking"))
+	require.Equal(t, "false", modelParamValue(DefaultModelParamsFor("claude-opus-4-8"), "fast"))
+	require.Equal(t, "true", modelParamValue(DefaultModelParamsFor("grok-4.6"), "fast"))
+	require.Equal(t, "true", modelParamValue(DefaultModelParamsFor("composer-2.5"), "fast"))
 }
 
 func modelParamValue(params []ModelParam, id string) string {

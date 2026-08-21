@@ -9,7 +9,7 @@
       </h3>
 
       <div class="flex flex-wrap items-center justify-end gap-2">
-        <div class="relative w-60">
+        <div v-if="!hideUserFilter" class="relative w-60">
           <input
             v-model="userSearchQuery"
             data-testid="cache-user-search"
@@ -202,7 +202,7 @@ import { Doughnut } from 'vue-chartjs'
 import { adminAPI } from '@/api/admin'
 import Select from '@/components/common/Select.vue'
 import type { SimpleUser } from '@/api/admin/usage'
-import type { DashboardStats, ModelStat } from '@/types'
+import type { ModelStat } from '@/types'
 import {
   formatCacheObservability,
   getCacheCoverageMetrics,
@@ -211,13 +211,47 @@ import {
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
-const props = defineProps<{
-  stats: DashboardStats
-  modelStats?: ModelStat[]
-  selectedUser?: SimpleUser | null
-  userModelStats?: ModelStat[]
-  userLoading?: boolean
-}>()
+/** Today/total cache fields shared by admin and personal dashboards. */
+export type CacheHitRateStats = {
+  today_requests: number
+  total_requests: number
+  today_input_tokens: number
+  total_input_tokens: number
+  today_cache_creation_tokens: number
+  total_cache_creation_tokens: number
+  today_cache_read_tokens: number
+  total_cache_read_tokens: number
+  today_provider_cache_read_tokens?: number
+  total_provider_cache_read_tokens?: number
+  today_forced_cache_read_tokens?: number
+  total_forced_cache_read_tokens?: number
+  today_reported_input_tokens?: number
+  total_reported_input_tokens?: number
+  today_reported_cache_creation_tokens?: number
+  total_reported_cache_creation_tokens?: number
+  today_reported_forced_cache_read_tokens?: number
+  total_reported_forced_cache_read_tokens?: number
+  today_reported_requests?: number
+  total_reported_requests?: number
+  today_estimated_requests?: number
+  total_estimated_requests?: number
+  today_unavailable_requests?: number
+  total_unavailable_requests?: number
+}
+
+const props = withDefaults(
+  defineProps<{
+    stats: CacheHitRateStats
+    modelStats?: ModelStat[]
+    selectedUser?: SimpleUser | null
+    userModelStats?: ModelStat[]
+    userLoading?: boolean
+    hideUserFilter?: boolean
+  }>(),
+  {
+    hideUserFilter: false
+  }
+)
 
 const emit = defineEmits<{
   'user-change': [user: SimpleUser | null]
@@ -279,6 +313,10 @@ watch(
 )
 
 watch(userSearchQuery, (query) => {
+  if (props.hideUserFilter) {
+    return
+  }
+
   if (userSearchTimer) {
     clearTimeout(userSearchTimer)
   }

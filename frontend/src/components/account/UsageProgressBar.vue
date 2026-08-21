@@ -163,11 +163,11 @@ const barWidth = computed(() => {
 
 // Display percentage (cap at 999% for readability)
 const displayPercent = computed(() => {
-  const percent = Math.round(
-    props.remainingCapacity
-      ? Math.min(Math.max(props.utilization, 0), 100)
-      : props.utilization
-  )
+  const rawPercent = props.remainingCapacity
+    ? Math.min(Math.max(props.utilization, 0), 100)
+    : props.utilization
+  if (rawPercent > 0 && rawPercent < 1) return '<1%'
+  const percent = Math.round(rawPercent)
   return percent > 999 ? '>999%' : `${percent}%`
 })
 

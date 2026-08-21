@@ -154,6 +154,12 @@ type SystemSettings struct {
 	SiteSubtitle                string
 	APIBaseURL                  string
 	ContactInfo                 string
+	CustomerServiceEnabled      bool
+	CustomerServiceButtonText   string
+	CustomerServiceTitle        string
+	CustomerServiceDescription  string
+	CustomerServiceWeChatID     string
+	CustomerServiceQRImage      string
 	DocURL                      string
 	HomeContent                 string
 	CompactHomeEnabled          bool
@@ -205,6 +211,7 @@ type SystemSettings struct {
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`
 	ChannelMonitorHideThroughput         bool   `json:"channel_monitor_hide_throughput"`
+	ChannelMonitorShowQuota              bool   `json:"channel_monitor_show_quota"`
 
 	// Grok model mapping policy (admin settings; empty mapping falls back to these).
 	GrokDefaultTextModel           string `json:"grok_default_text_model"`
@@ -346,6 +353,12 @@ type PublicSettings struct {
 	SiteSubtitle                        string
 	APIBaseURL                          string
 	ContactInfo                         string
+	CustomerServiceEnabled              bool
+	CustomerServiceButtonText           string
+	CustomerServiceTitle                string
+	CustomerServiceDescription          string
+	CustomerServiceWeChatID             string
+	CustomerServiceQRImage              string
 	DocURL                              string
 	HomeContent                         string
 	CompactHomeEnabled                  bool
@@ -386,6 +399,7 @@ type PublicSettings struct {
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`
 	ChannelMonitorHideThroughput         bool   `json:"channel_monitor_hide_throughput"`
+	ChannelMonitorShowQuota              bool   `json:"channel_monitor_show_quota"`
 
 	// Grok model mapping policy (admin settings).
 	GrokDefaultTextModel           string `json:"grok_default_text_model"`

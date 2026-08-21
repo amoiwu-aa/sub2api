@@ -32,6 +32,13 @@ func TestCursorQuotaFetcherCanFetch(t *testing.T) {
 	noUser.Credentials = map[string]any{"access_token": "tok"}
 	require.False(t, f.CanFetch(noUser))
 
+	sandWithoutUser := cursorQuotaAccount()
+	sandWithoutUser.Credentials = map[string]any{
+		"access_token":         "tok",
+		"cursor_agent_profile": "sand",
+	}
+	require.True(t, f.CanFetch(sandWithoutUser))
+
 	noToken := cursorQuotaAccount()
 	noToken.Credentials = map[string]any{"user_id": "user_1"}
 	require.False(t, f.CanFetch(noToken))
@@ -124,6 +131,28 @@ func TestBuildCursorUsageInfoMapsUpstreamDimensions(t *testing.T) {
 	// 不得再产出 5h / 7d 窗口。
 	require.Nil(t, usage.FiveHour)
 	require.Nil(t, usage.SevenDay)
+}
+
+func TestApplyCursorSandUsageStatusMapsOnlyWeeklyQuota(t *testing.T) {
+	now := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+	sandPercent := 0.024486
+	sandReset := time.Date(2026, 8, 27, 21, 58, 49, 552000000, time.UTC)
+	usage := &UsageInfo{UpdatedAt: &now, Source: "upstream"}
+	applyCursorSandUsageStatus(usage, &cursor.SandUsageStatus{
+		UsagePercent:              &sandPercent,
+		NextReset:                 sandReset,
+		HasAvailableUsage:         true,
+		AvailableBankedResetCount: 2,
+	}, now)
+	require.NotNil(t, usage.CursorSandUsage)
+	require.InDelta(t, sandPercent, usage.CursorSandUsage.Utilization, 0.000001)
+	require.Equal(t, sandReset, *usage.CursorSandUsage.ResetsAt)
+	require.NotNil(t, usage.CursorSandHasAvailableUsage)
+	require.True(t, *usage.CursorSandHasAvailableUsage)
+	require.Equal(t, int64(2), usage.CursorSandAvailableBankedResets)
+	require.Nil(t, usage.CursorAutoUsage)
+	require.Nil(t, usage.CursorAPIUsage)
+	require.Zero(t, usage.CursorIncludedLimit)
 }
 
 func TestApplyCursorStripeProfileFlagsPastDue(t *testing.T) {

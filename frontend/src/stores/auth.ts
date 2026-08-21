@@ -13,6 +13,7 @@ import type {
   AuthResponse,
   ActionCaptchaRequestProof
 } from '@/types'
+import { markNewUserOnboardingPending } from '@/utils/onboarding'
 
 const AUTH_TOKEN_KEY = 'auth_token'
 const AUTH_USER_KEY = 'auth_user'
@@ -21,6 +22,25 @@ const TOKEN_EXPIRES_AT_KEY = 'token_expires_at' // 存储过期时间戳而非�
 const PENDING_AUTH_SESSION_KEY = 'pending_auth_session'
 const AUTO_REFRESH_INTERVAL = 60 * 1000 // 60 seconds for user data refresh
 const TOKEN_REFRESH_BUFFER = 120 * 1000 // 120 seconds before expiry to refresh token
+
+const PRIVATE_USER_FIELDS = [
+  'notes',
+  'password_hash',
+  'totp_secret',
+  'totp_secret_encrypted',
+  'created_by_admin_id',
+  'group_rates',
+  'last_used_at',
+  'current_concurrency'
+] as const
+
+function sanitizeAuthUser<T extends Record<string, unknown>>(rawUser: T): T {
+  const sanitized = { ...rawUser }
+  for (const field of PRIVATE_USER_FIELDS) {
+    delete sanitized[field]
+  }
+  return sanitized
+}
 
 type PendingAuthTokenField = 'pending_auth_token' | 'pending_oauth_token'
 
@@ -124,7 +144,11 @@ export const useAuthStore = defineStore('auth', () => {
     if (savedToken && savedUser) {
       try {
         token.value = savedToken
-        user.value = JSON.parse(savedUser)
+        const restoredUser = sanitizeAuthUser(
+          JSON.parse(savedUser) as Record<string, unknown>
+        ) as unknown as User
+        user.value = restoredUser
+        localStorage.setItem(AUTH_USER_KEY, JSON.stringify(restoredUser))
         refreshTokenValue.value = savedRefreshToken
         tokenExpiresAt.value = savedExpiresAt ? parseInt(savedExpiresAt, 10) : null
 
@@ -314,11 +338,15 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem(REFRESH_TOKEN_KEY, response.refresh_token)
     }
 
+    const sanitizedResponseUser = sanitizeAuthUser(
+      response.user as unknown as Record<string, unknown>
+    ) as unknown as User & { run_mode?: 'standard' | 'simple' }
+
     // Extract run_mode if present
-    if (response.user.run_mode) {
-      runMode.value = response.user.run_mode
+    if (sanitizedResponseUser.run_mode) {
+      runMode.value = sanitizedResponseUser.run_mode
     }
-    const { run_mode: _run_mode, ...userData } = response.user
+    const { run_mode: _run_mode, ...userData } = sanitizedResponseUser
     user.value = userData
 
     // Persist to localStorage
@@ -348,6 +376,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       // Use the common helper to set auth state
       setAuthFromResponse(response)
+      markNewUserOnboardingPending(user.value?.id)
 
       return user.value!
     } catch (error) {
@@ -447,10 +476,13 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       const response = await authAPI.getCurrentUser()
-      if (response.data.run_mode) {
-        runMode.value = response.data.run_mode
+      const sanitizedResponseUser = sanitizeAuthUser(
+        response.data as unknown as Record<string, unknown>
+      ) as unknown as User & { run_mode?: 'standard' | 'simple' }
+      if (sanitizedResponseUser.run_mode) {
+        runMode.value = sanitizedResponseUser.run_mode
       }
-      const { run_mode: _run_mode, ...userData } = response.data
+      const { run_mode: _run_mode, ...userData } = sanitizedResponseUser
       user.value = userData
 
       // Update localStorage

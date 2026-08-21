@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/stretchr/testify/require"
 )
@@ -66,17 +67,63 @@ func TestResolveCursorModelSelectionRejectsExplicitBlankEffort(t *testing.T) {
 	require.ErrorContains(t, err, "effort must not be empty")
 }
 
-func TestNormalizeAnthropicCursorEffortMapsOnlyMaxAlias(t *testing.T) {
-	require.Nil(t, normalizeAnthropicCursorEffort(nil))
+func TestCursorFastFromServiceTier(t *testing.T) {
+	require.Nil(t, mustCursorFastFromServiceTier(t, ""))
+	require.True(t, *mustCursorFastFromServiceTier(t, "priority"))
+	require.True(t, *mustCursorFastFromServiceTier(t, "fast"))
+	require.False(t, *mustCursorFastFromServiceTier(t, "flex"))
+	_, err := cursorFastFromServiceTier("turbo")
+	require.ErrorContains(t, err, "unsupported service_tier")
+}
 
-	max := " MAX "
-	mapped := normalizeAnthropicCursorEffort(&max)
-	require.NotNil(t, mapped)
-	require.Equal(t, cursor.ModelEffortXHigh, *mapped)
+func TestAnthropicControlsMapToCursorOptions(t *testing.T) {
+	thinking, err := cursorThinkingFromAnthropic([]byte(`{"type":"adaptive"}`))
+	require.NoError(t, err)
+	require.NotNil(t, thinking)
+	require.True(t, *thinking)
 
-	high := cursor.ModelEffortHigh
-	unchanged := normalizeAnthropicCursorEffort(&high)
-	require.Same(t, &high, unchanged)
+	fast, err := cursorFastFromAnthropic("fast", "")
+	require.NoError(t, err)
+	require.NotNil(t, fast)
+	require.True(t, *fast)
+
+	selection, err := resolveCursorModelSelectionWithStandardOptions(
+		[]byte(`{"model":"cursor/claude-opus-4-8"}`),
+		"cursor/claude-opus-4-8",
+		&cursor.ModelOptions{Thinking: thinking, Fast: fast},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "true", cursorModelParamValue(selection.Params, "thinking"))
+	require.Equal(t, "true", cursorModelParamValue(selection.Params, "fast"))
+}
+
+func TestAnthropicFastBetaAndThinkingVariants(t *testing.T) {
+	fast, err := cursorFastFromAnthropic("", claude.BetaFastMode+",other-beta")
+	require.NoError(t, err)
+	require.NotNil(t, fast)
+	require.True(t, *fast)
+
+	fast, err = cursorFastFromAnthropic("standard", claude.BetaFastMode)
+	require.NoError(t, err)
+	require.NotNil(t, fast)
+	require.False(t, *fast, "explicit standard speed must override the beta header")
+
+	thinking, err := cursorThinkingFromAnthropic([]byte(`{"type":"disabled"}`))
+	require.NoError(t, err)
+	require.NotNil(t, thinking)
+	require.False(t, *thinking)
+
+	_, err = cursorThinkingFromAnthropic([]byte(`{"type":"manual"}`))
+	require.ErrorContains(t, err, "unsupported thinking type")
+	_, err = cursorFastFromAnthropic("turbo", "")
+	require.ErrorContains(t, err, "unsupported speed")
+}
+
+func mustCursorFastFromServiceTier(t *testing.T, tier string) *bool {
+	t.Helper()
+	fast, err := cursorFastFromServiceTier(tier)
+	require.NoError(t, err)
+	return fast
 }
 
 func TestAnnotateCursorModelSelectionPersistsEffortAndSpeedTier(t *testing.T) {

@@ -19,10 +19,15 @@ export interface CursorTokenInfo {
   expires_at?: string
   /** Which branch of the auth chain produced this token. */
   source?: string
+  agent_profile?: 'ide' | 'sand'
+  machine_id?: string
+  client_version?: string
+  sand_namespace?: string
 }
 
 export interface CursorLoginStartRequest {
   proxy_id?: number | null
+  agent_profile?: 'ide' | 'sand'
 }
 
 export interface CursorLoginStartResponse {
@@ -40,7 +45,13 @@ export interface CursorLoginPollResponse {
 
 export interface CursorImportRequest {
   /** WorkosCursorSessionToken cookie or a raw JWT. */
-  token: string
+  token?: string
+  access_token?: string
+  refresh_token?: string
+  machine_id?: string
+  client_version?: string
+  sand_namespace?: string
+  agent_profile?: 'ide' | 'sand'
   proxy_id?: number | null
   selected_team_id?: string
 }

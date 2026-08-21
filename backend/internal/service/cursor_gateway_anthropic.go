@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -88,9 +89,26 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	publicModel := req.Model
 	var standardEffort *string
 	if req.OutputConfig != nil {
-		standardEffort = normalizeAnthropicCursorEffort(req.OutputConfig.Effort)
+		standardEffort = req.OutputConfig.Effort
 	}
-	selection, err := resolveCursorModelSelection(body, publicModel, standardEffort)
+	standardThinking, err := cursorThinkingFromAnthropic(req.Thinking)
+	if err != nil {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	standardFast, err := cursorFastFromAnthropic(req.Speed, c.GetHeader("anthropic-beta"))
+	if err != nil {
+		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	selection, err := resolveCursorAccountModelSelectionWithStandardOptions(
+		account,
+		body,
+		publicModel,
+		&cursor.ModelOptions{
+			Effort:   standardEffort,
+			Fast:     standardFast,
+			Thinking: standardThinking,
+		},
+	)
 	if err != nil {
 		return nil, s.writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -116,7 +134,7 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	input := cursor.AgentTurnInput{
 		Text:                     prompt,
 		ConversationID:           conversationID,
-		Images:                   conversation.Images(),
+		Images:                   conversation.CurrentInputImages(),
 		ModelID:                  selection.ModelID,
 		ModelParams:              selection.Params,
 		MaxMode:                  selection.MaxMode,
@@ -135,12 +153,50 @@ func (s *CursorGatewayService) forwardMessagesOnce(
 	return result, err
 }
 
-func normalizeAnthropicCursorEffort(effort *string) *string {
-	if effort == nil || !strings.EqualFold(strings.TrimSpace(*effort), "max") {
-		return effort
+func cursorThinkingFromAnthropic(raw json.RawMessage) (*bool, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
 	}
-	xhigh := cursor.ModelEffortXHigh
-	return &xhigh
+	if trimmed == "true" || trimmed == "false" {
+		enabled := trimmed == "true"
+		return &enabled, nil
+	}
+	var config struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return nil, fmt.Errorf("invalid thinking configuration")
+	}
+	switch strings.ToLower(strings.TrimSpace(config.Type)) {
+	case "adaptive", "enabled":
+		enabled := true
+		return &enabled, nil
+	case "disabled":
+		enabled := false
+		return &enabled, nil
+	default:
+		return nil, fmt.Errorf("unsupported thinking type %q", config.Type)
+	}
+}
+
+func cursorFastFromAnthropic(speed, betaHeader string) (*bool, error) {
+	switch normalized := strings.ToLower(strings.TrimSpace(speed)); normalized {
+	case "":
+		if containsBetaToken(betaHeader, claude.BetaFastMode) {
+			fast := true
+			return &fast, nil
+		}
+		return nil, nil
+	case "fast":
+		fast := true
+		return &fast, nil
+	case "standard", "default":
+		fast := false
+		return &fast, nil
+	default:
+		return nil, fmt.Errorf("unsupported speed %q", speed)
+	}
 }
 
 // anthropicStreamWriter 维护 Messages SSE 的块索引与开合状态。

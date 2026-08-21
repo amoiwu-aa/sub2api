@@ -156,3 +156,71 @@ func TestRepeatedReadDetectionAcrossProtocols(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingFileReadDetectionAcrossProtocols(t *testing.T) {
+	tests := []struct {
+		name         string
+		conversation func(*testing.T) *cursor.Conversation
+	}{
+		{
+			name: "anthropic messages",
+			conversation: func(t *testing.T) *cursor.Conversation {
+				var req cursor.AnthropicRequest
+				require.NoError(t, json.Unmarshal([]byte(`{
+					"model": "cursor/grok-4.6",
+					"messages": [
+						{"role": "user", "content": "create a summary"},
+						{"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "Read", "input": {"file_path": "summary.md"}}]},
+						{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "File does not exist.", "is_error": true}]}
+					]
+				}`), &req))
+				return req.Conversation()
+			},
+		},
+		{
+			name: "chat completions",
+			conversation: func(t *testing.T) *cursor.Conversation {
+				var req cursor.OpenAIRequest
+				require.NoError(t, json.Unmarshal([]byte(`{
+					"model": "cursor/grok-4.6",
+					"messages": [
+						{"role": "user", "content": "create a summary"},
+						{"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "Read", "arguments": "{\"file_path\":\"summary.md\"}"}}]},
+						{"role": "tool", "tool_call_id": "call_1", "content": "file not found"}
+					]
+				}`), &req))
+				return req.Conversation()
+			},
+		},
+		{
+			name: "responses",
+			conversation: func(t *testing.T) *cursor.Conversation {
+				var req apicompat.ResponsesRequest
+				require.NoError(t, json.Unmarshal([]byte(`{
+					"model": "cursor/grok-4.6",
+					"input": [
+						{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "create a summary"}]},
+						{"type": "function_call", "call_id": "call_1", "name": "Read", "arguments": "{\"file_path\":\"summary.md\"}"},
+						{"type": "function_call_output", "call_id": "call_1", "output": "ENOENT: no such file or directory"}
+					]
+				}`), &req))
+				chatReq, err := apicompat.ResponsesToChatCompletionsRequest(&req)
+				require.NoError(t, err)
+				chatBody, err := json.Marshal(chatReq)
+				require.NoError(t, err)
+				var openAIReq cursor.OpenAIRequest
+				require.NoError(t, json.Unmarshal(chatBody, &openAIReq))
+				return openAIReq.Conversation()
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			observation, missing := test.conversation(t).LatestMissingFileRead()
+			require.True(t, missing)
+			require.Equal(t, "Read", observation.ToolName)
+			require.Equal(t, "summary.md", observation.Path)
+		})
+	}
+}

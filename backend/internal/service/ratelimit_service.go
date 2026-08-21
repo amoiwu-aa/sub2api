@@ -32,6 +32,9 @@ type RateLimitService struct {
 	runtimeBlocker        AccountRuntimeBlocker
 	usageCacheMu          sync.RWMutex
 	usageCache            map[int64]*geminiUsageCacheEntry
+
+	openaiTeamLinkedMu     sync.Mutex
+	openaiTeamLinkedRecent map[string]time.Time
 }
 
 type AccountRuntimeBlocker interface {

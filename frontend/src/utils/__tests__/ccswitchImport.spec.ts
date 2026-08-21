@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CURSOR_GROK_46_CLAUDE_CONTEXT_TOKENS,
   CURSOR_CC_SWITCH_MODEL,
   CURSOR_CC_SWITCH_MODEL_FALLBACKS,
   GROK_CC_SWITCH_MODEL,
@@ -135,6 +136,26 @@ describe('ccswitchImport utils', () => {
     expect(params.get('endpoint')).toBe(baseInput.baseUrl)
     expect(params.has('usageBaseUrl')).toBe(false)
     expect(params.get('model')).toBe(CURSOR_CC_SWITCH_MODEL)
+  })
+
+  it('teaches Claude Code the Cursor Grok 4.6 context window', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'cursor',
+        clientType: 'claude',
+        modelOverride: 'cursor/grok-4.6-max'
+      })
+    )
+
+    const config = JSON.parse(atob(params.get('config') || ''))
+    expect(params.get('model')).toBe('cursor/grok-4.6-max')
+    expect(config.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe(
+      CURSOR_GROK_46_CLAUDE_CONTEXT_TOKENS
+    )
+    expect(config.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe(
+      CURSOR_GROK_46_CLAUDE_CONTEXT_TOKENS
+    )
   })
 
   it.each([
@@ -309,11 +330,12 @@ describe('ccswitchImport utils', () => {
     expect(openClawParams.get('endpoint')).toBe('https://api.example.com/v1')
   })
 
-  it('requires model selection for namespaced, composite, and additive imports', () => {
+  it('requires model selection for every import target', () => {
     expect(ccSwitchImportNeedsModel('cursor', 'claude')).toBe(true)
     expect(ccSwitchImportNeedsModel('kiro', 'claude')).toBe(true)
     expect(ccSwitchImportNeedsModel('composite', 'gemini')).toBe(true)
     expect(ccSwitchImportNeedsModel('anthropic', 'openclaw')).toBe(true)
-    expect(ccSwitchImportNeedsModel('anthropic', 'claude')).toBe(false)
+    expect(ccSwitchImportNeedsModel('anthropic', 'claude')).toBe(true)
+    expect(ccSwitchImportNeedsModel('openai', 'codex')).toBe(true)
   })
 })

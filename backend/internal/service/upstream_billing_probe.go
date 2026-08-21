@@ -641,6 +641,9 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_api_key", 0)
 	}
 	baseURL := account.GetCredential("base_url")
+	if account.IsCNProvider() && account.IsAdaptiveAPIProtocol() {
+		baseURL = account.GetCNProtocolBaseURL(APIProtocolChatCompletions)
+	}
 	if account.Platform == PlatformOpenAI {
 		if baseURL == "" {
 			// 保持官方语义：OpenAI 账号无自定义 base 时探官方域（404 → unsupported）。
@@ -1395,7 +1398,8 @@ func IsUpstreamBillingProbeIdentity(platform, accountType string) bool {
 		return false
 	}
 	switch platform {
-	case PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok:
+	case PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok,
+		PlatformKimi, PlatformZhipu, PlatformDeepseek:
 		return true
 	default:
 		return false
@@ -1419,6 +1423,8 @@ func isUpstreamBillingProbeAccount(account *Account) bool {
 // ollama.com is a first-class configuration here (Ollama Cloud accounts are
 // platform openai/anthropic with base_url https://ollama.com/v1), and it is
 // an official provider API just like the rest, so it belongs on this list.
+// CN provider domains serve the same role: their official APIs cannot expose
+// a custom relay's /v1/sub2api/billing or New API pricing endpoint.
 var upstreamBillingProbeOfficialAPIDomains = []string{
 	"anthropic.com",
 	"googleapis.com",
@@ -1426,6 +1432,10 @@ var upstreamBillingProbeOfficialAPIDomains = []string{
 	"grok.com",
 	"openai.com",
 	"ollama.com",
+	"moonshot.cn",
+	"kimi.com",
+	"bigmodel.cn",
+	"deepseek.com",
 }
 
 func upstreamBillingProbeTargetIsOfficialAPI(baseURL string) bool {

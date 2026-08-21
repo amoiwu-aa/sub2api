@@ -73,6 +73,12 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		SiteSubtitle:                        settings.SiteSubtitle,
 		APIBaseURL:                          settings.APIBaseURL,
 		ContactInfo:                         settings.ContactInfo,
+		CustomerServiceEnabled:              settings.CustomerServiceEnabled,
+		CustomerServiceButtonText:           settings.CustomerServiceButtonText,
+		CustomerServiceTitle:                settings.CustomerServiceTitle,
+		CustomerServiceDescription:          settings.CustomerServiceDescription,
+		CustomerServiceWeChatID:             settings.CustomerServiceWeChatID,
+		CustomerServiceQRImage:              settings.CustomerServiceQRImage,
 		DocURL:                              settings.DocURL,
 		HomeContent:                         settings.HomeContent,
 		CompactHomeEnabled:                  settings.CompactHomeEnabled,
@@ -111,6 +117,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		ChannelMonitorMode:                   settings.ChannelMonitorMode,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 		ChannelMonitorHideThroughput:         settings.ChannelMonitorHideThroughput,
+		ChannelMonitorShowQuota:              settings.ChannelMonitorShowQuota,
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
 

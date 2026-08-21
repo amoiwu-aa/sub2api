@@ -61,6 +61,16 @@ export default {
     verifying: '验证中...',
     processing: '处理中...',
     contactSupport: '联系客服',
+    customerService: {
+      button: '客服售后',
+      title: '客服售后',
+      description: '扫码加入微信群，或复制微信号联系售后客服。',
+      groupQrAlt: '微信群二维码',
+      wechatId: '微信号',
+      otherContact: '其他联系方式',
+      copyWechatId: '复制微信号',
+      wechatIdCopied: '微信号已复制'
+    },
     add: '添加',
     invalidEmail: '请输入有效的邮箱地址',
     optional: '可选',

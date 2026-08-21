@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import type { ApiKey } from '@/types'
+import { CC_SWITCH_FALLBACK_DOWNLOADS } from '@/utils/ccswitchDownload'
 import KeysView from '../KeysView.vue'
 
 const {
@@ -16,6 +17,7 @@ const {
   copyToClipboard,
   isCurrentStep,
   nextStep,
+  loadCcSwitchDownloadLinksMock,
 } = vi.hoisted(() => ({
   listKeys: vi.fn(),
   getPublicSettings: vi.fn(),
@@ -27,6 +29,7 @@ const {
   copyToClipboard: vi.fn(),
   isCurrentStep: vi.fn(),
   nextStep: vi.fn(),
+  loadCcSwitchDownloadLinksMock: vi.fn(),
 }))
 
 const messages: Record<string, string> = {
@@ -76,6 +79,25 @@ const messages: Record<string, string> = {
   'keys.ccsClientSelect.description': 'Choose the import tool.',
   'keys.ccsClientSelect.claudeCode': 'Claude Code',
   'keys.ccsClientSelect.claudeCodeDesc': 'Import as Claude Code configuration',
+  'keys.ccsClientSelect.codex': 'Codex',
+  'keys.ccsClientSelect.codexDesc': 'Import as Codex configuration',
+  'keys.ccsModelSelect.title': 'Select Import Model',
+  'keys.ccsModelSelect.description': 'Select one or more models.',
+  'keys.ccsModelSelect.searchPlaceholder': 'Search models...',
+  'keys.ccsModelSelect.selectedCount': '{count} model(s) selected',
+  'keys.ccsModelSelect.selectVisible': 'Select visible',
+  'keys.ccsModelSelect.clear': 'Clear',
+  'keys.ccsModelSelect.selected': 'Selected',
+  'keys.ccsModelSelect.loading': 'Refreshing models...',
+  'keys.ccsModelSelect.empty': 'No matching models',
+  'keys.ccsModelSelect.continueImport': 'Continue ({count})',
+  'keys.ccsBatchImport.title': 'Import Selected Models',
+  'keys.ccsBatchImport.description': 'Import each model separately.',
+  'keys.ccsBatchImport.progress': '{imported} of {total} configurations started',
+  'keys.ccsBatchImport.import': 'Import',
+  'keys.ccsBatchImport.imported': 'Started',
+  'keys.ccsBatchImport.importNext': 'Import Next',
+  'keys.ccsBatchImport.finish': 'Done',
 }
 
 vi.mock('@/api', () => ({
@@ -124,7 +146,7 @@ vi.mock('@/utils/ccswitchDownload', async () => {
   )
   return {
     ...actual,
-    loadCcSwitchDownloadLinks: vi.fn().mockResolvedValue(actual.CC_SWITCH_FALLBACK_DOWNLOADS),
+    loadCcSwitchDownloadLinks: loadCcSwitchDownloadLinksMock,
   }
 })
 
@@ -144,7 +166,7 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-const createApiKey = (): ApiKey => ({
+const createApiKey = (overrides: Partial<ApiKey> = {}): ApiKey => ({
   id: 1,
   user_id: 1,
   key: 'sk-test-key',
@@ -173,7 +195,19 @@ const createApiKey = (): ApiKey => ({
   reset_5h_at: null,
   reset_1d_at: null,
   reset_7d_at: null,
+  ...overrides,
 })
+
+const createApiKeyForPlatform = (platform: 'anthropic' | 'openai'): ApiKey =>
+  createApiKey({
+    group_id: 1,
+    group: {
+      id: 1,
+      name: platform === 'openai' ? 'OpenAI Group' : 'Anthropic Group',
+      platform,
+      allow_messages_dispatch: false,
+    } as NonNullable<ApiKey['group']>,
+  })
 
 const AppLayoutStub = {
   template: '<div><slot /></div>',
@@ -314,6 +348,15 @@ const getButtonByText = (wrapper: VueWrapper, text: string) => {
   return button
 }
 
+const openCcsModelPicker = async (wrapper: VueWrapper, clientLabel: string) => {
+  await getButtonByText(wrapper, 'Import to CCS').trigger('click')
+  await flushPromises()
+  await getButtonByText(wrapper, 'Installed, continue import').trigger('click')
+  await nextTick()
+  await getButtonByText(wrapper, clientLabel).trigger('click')
+  await flushPromises()
+}
+
 describe('user KeysView column settings', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -328,6 +371,7 @@ describe('user KeysView column settings', () => {
     copyToClipboard.mockReset()
     isCurrentStep.mockReset()
     nextStep.mockReset()
+    loadCcSwitchDownloadLinksMock.mockReset()
 
     listKeys.mockResolvedValue({
       items: [createApiKey()],
@@ -341,6 +385,12 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+    loadCcSwitchDownloadLinksMock.mockResolvedValue(CC_SWITCH_FALLBACK_DOWNLOADS)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('uses the default API key columns with low-frequency columns hidden', async () => {
@@ -539,5 +589,112 @@ describe('user KeysView column settings', () => {
     expect(openSpy).not.toHaveBeenCalled()
 
     openSpy.mockRestore()
+  })
+
+  it.each([
+    {
+      platform: 'anthropic' as const,
+      clientLabel: 'Claude Code',
+      models: ['claude-sonnet-4-6', 'claude-opus-4-6'],
+    },
+    {
+      platform: 'openai' as const,
+      clientLabel: 'Codex',
+      models: ['gpt-5.5', 'gpt-5.6'],
+    },
+  ])(
+    'shows the real model picker for native $platform imports',
+    async ({ platform, clientLabel, models }) => {
+      listKeys.mockResolvedValueOnce({
+        items: [createApiKeyForPlatform(platform)],
+        total: 1,
+        page: 1,
+        page_size: 20,
+        pages: 1,
+      })
+      getPublicSettings.mockResolvedValueOnce({
+        api_base_url: 'https://api.example.com',
+        site_name: 'RingStar',
+      })
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          data: models.map((id) => ({ id })),
+        }),
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+      const wrapper = await mountView()
+
+      await openCcsModelPicker(wrapper, clientLabel)
+
+      expect(wrapper.text()).toContain('Select Import Model')
+      for (const model of models) {
+        expect(wrapper.find(`[data-model="${model}"]`).exists()).toBe(true)
+      }
+      expect(fetchMock).toHaveBeenCalledWith('https://api.example.com/v1/models', {
+        headers: { Authorization: 'Bearer sk-test-key' },
+      })
+      expect(openSpy).not.toHaveBeenCalled()
+    }
+  )
+
+  it('imports multiple selected models as separate CC-Switch providers', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [createApiKeyForPlatform('openai')],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getPublicSettings.mockResolvedValueOnce({
+      api_base_url: 'https://api.example.com',
+      site_name: 'RingStar',
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          data: [{ id: 'gpt-5.5' }, { id: 'gpt-5.6' }],
+        }),
+      })
+    )
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const wrapper = await mountView()
+
+    await openCcsModelPicker(wrapper, 'Codex')
+    await wrapper.get('[data-model="gpt-5.6"]').trigger('click')
+    await wrapper.get('[data-test="ccs-model-confirm"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Import Selected Models')
+    await wrapper.get('[data-test="ccs-batch-import-next"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-test="ccs-batch-import-next"]').trigger('click')
+    await nextTick()
+
+    expect(openSpy).toHaveBeenCalledTimes(2)
+    const imported = openSpy.mock.calls.map(([deeplink]) => {
+      const query = String(deeplink).split('?')[1] || ''
+      const params = new URLSearchParams(query)
+      return {
+        app: params.get('app'),
+        model: params.get('model'),
+        name: params.get('name'),
+      }
+    })
+    expect(imported).toEqual([
+      {
+        app: 'codex',
+        model: 'gpt-5.5',
+        name: 'RingStar · gpt-5.5',
+      },
+      {
+        app: 'codex',
+        model: 'gpt-5.6',
+        name: 'RingStar · gpt-5.6',
+      },
+    ])
   })
 })

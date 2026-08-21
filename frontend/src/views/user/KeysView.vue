@@ -1053,39 +1053,195 @@
     <BaseDialog
       :show="showCcsModelSelect"
       :title="t('keys.ccsModelSelect.title')"
-      width="narrow"
+      width="wide"
       @close="closeCcsModelSelect"
     >
       <div class="space-y-4">
         <p class="text-sm text-gray-600 dark:text-gray-400">
           {{ t('keys.ccsModelSelect.description') }}
         </p>
-        <div class="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+        <div class="relative">
+          <Icon
+            name="search"
+            size="sm"
+            class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            v-model="ccsModelSearch"
+            data-test="ccs-model-search"
+            type="search"
+            class="input w-full pl-9"
+            :placeholder="t('keys.ccsModelSelect.searchPlaceholder')"
+          />
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm font-medium text-primary-600 dark:text-primary-400">
+            {{ t('keys.ccsModelSelect.selectedCount', { count: ccsSelectedModels.length }) }}
+          </span>
+          <div class="flex items-center gap-3 text-sm">
+            <button
+              type="button"
+              class="font-medium text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-primary-400"
+              :disabled="ccsFilteredModelOptions.length === 0 || ccsAllVisibleModelsSelected"
+              @click="selectAllVisibleCcsModels"
+            >
+              {{ t('keys.ccsModelSelect.selectVisible') }}
+            </button>
+            <button
+              type="button"
+              class="font-medium text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-400 dark:hover:text-gray-200"
+              :disabled="ccsSelectedModels.length === 0"
+              @click="clearCcsModelSelection"
+            >
+              {{ t('keys.ccsModelSelect.clear') }}
+            </button>
+          </div>
+        </div>
+        <div class="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
           <button
-            v-for="model in ccsModelOptions"
+            v-for="model in ccsFilteredModelOptions"
             :key="model"
-            @click="handleCcsModelSelect(model)"
-            class="flex w-full items-center justify-between gap-3 rounded-lg border-2 border-gray-200 p-3 text-left transition-all hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
+            type="button"
+            :data-model="model"
+            @click="toggleCcsModelSelection(model)"
+            :class="[
+              'flex w-full items-center justify-between gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              isCcsModelSelected(model)
+                ? 'border-primary-500 bg-primary-50 dark:border-primary-500 dark:bg-primary-900/20'
+                : 'border-gray-200 hover:border-primary-500 hover:bg-primary-50 dark:border-dark-600 dark:hover:border-primary-500 dark:hover:bg-primary-900/20'
+            ]"
           >
-            <span class="min-w-0">
-              <span class="block text-sm font-medium text-gray-900 dark:text-white">
-                {{ ccsModelLabel(model) }}
-              </span>
+            <span class="flex min-w-0 items-center gap-3">
               <span
-                v-if="ccsModelLabel(model) !== model"
-                class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400"
+                :class="[
+                  'flex h-5 w-5 shrink-0 items-center justify-center rounded border',
+                  isCcsModelSelected(model)
+                    ? 'border-primary-500 bg-primary-500 text-white'
+                    : 'border-gray-300 bg-white dark:border-dark-500 dark:bg-dark-700'
+                ]"
               >
-                {{ model }}
+                <Icon v-if="isCcsModelSelected(model)" name="check" size="xs" />
+              </span>
+              <span class="min-w-0">
+                <span class="block text-sm font-medium text-gray-900 dark:text-white">
+                  {{ ccsModelLabel(model) }}
+                </span>
+                <span
+                  v-if="ccsModelLabel(model) !== model"
+                  class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400"
+                >
+                  {{ model }}
+                </span>
               </span>
             </span>
-            <Icon name="chevronRight" size="sm" class="text-gray-400" />
+            <span
+              v-if="isCcsModelSelected(model)"
+              class="shrink-0 text-xs font-medium text-primary-600 dark:text-primary-400"
+            >
+              {{ t('keys.ccsModelSelect.selected') }}
+            </span>
           </button>
+          <div
+            v-if="ccsModelsLoading"
+            class="rounded-lg border border-dashed border-gray-200 px-4 py-3 text-center text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400"
+          >
+            {{ t('keys.ccsModelSelect.loading') }}
+          </div>
+          <div
+            v-else-if="ccsFilteredModelOptions.length === 0"
+            class="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400"
+          >
+            {{ t('keys.ccsModelSelect.empty') }}
+          </div>
         </div>
       </div>
       <template #footer>
-        <div class="flex justify-end">
+        <div class="flex justify-end gap-3">
           <button @click="closeCcsModelSelect" class="btn btn-secondary">
             {{ t('common.cancel') }}
+          </button>
+          <button
+            data-test="ccs-model-confirm"
+            class="btn btn-primary"
+            :disabled="ccsSelectedModels.length === 0"
+            @click="confirmCcsModelSelection"
+          >
+            <Icon name="upload" size="sm" />
+            {{ t('keys.ccsModelSelect.continueImport', { count: ccsSelectedModels.length }) }}
+          </button>
+        </div>
+      </template>
+    </BaseDialog>
+
+    <!-- CC-Switch accepts one primary model per provider deeplink. Multiple
+         selections are therefore imported as separate, clearly named providers. -->
+    <BaseDialog
+      :show="showCcsBatchImport"
+      :title="t('keys.ccsBatchImport.title')"
+      width="wide"
+      @close="closeCcsBatchImport"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ t('keys.ccsBatchImport.description') }}
+        </p>
+        <div class="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+          {{
+            t('keys.ccsBatchImport.progress', {
+              imported: ccsBatchImportedModels.length,
+              total: ccsBatchModels.length
+            })
+          }}
+        </div>
+        <div class="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+          <div
+            v-for="model in ccsBatchModels"
+            :key="model"
+            class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600"
+          >
+            <span class="min-w-0">
+              <span class="block truncate text-sm font-medium text-gray-900 dark:text-white">
+                {{ ccsModelLabel(model) }}
+              </span>
+              <span class="mt-0.5 block truncate font-mono text-xs text-gray-500 dark:text-gray-400">
+                {{ model }}
+              </span>
+            </span>
+            <button
+              type="button"
+              class="btn shrink-0"
+              :class="isCcsBatchModelImported(model) ? 'btn-secondary' : 'btn-primary'"
+              :disabled="isCcsBatchModelImported(model)"
+              :data-batch-model="model"
+              @click="importCcsBatchModel(model)"
+            >
+              <Icon :name="isCcsBatchModelImported(model) ? 'check' : 'upload'" size="sm" />
+              {{
+                isCcsBatchModelImported(model)
+                  ? t('keys.ccsBatchImport.imported')
+                  : t('keys.ccsBatchImport.import')
+              }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <button @click="closeCcsBatchImport" class="btn btn-secondary">
+            {{
+              ccsBatchNextModel
+                ? t('common.cancel')
+                : t('keys.ccsBatchImport.finish')
+            }}
+          </button>
+          <button
+            v-if="ccsBatchNextModel"
+            data-test="ccs-batch-import-next"
+            class="btn btn-primary"
+            @click="importNextCcsBatchModel"
+          >
+            <Icon name="upload" size="sm" />
+            {{ t('keys.ccsBatchImport.importNext') }}
           </button>
         </div>
       </template>
@@ -1249,10 +1405,17 @@ import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatCompactNumber, formatDateTime } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import {
+  ANTHROPIC_CC_SWITCH_MODEL,
   buildCcSwitchImportDeeplink,
   ccSwitchImportNeedsModel,
+  CURSOR_CC_SWITCH_MODEL,
   CURSOR_CC_SWITCH_MODEL_FALLBACKS,
+  GEMINI_CC_SWITCH_MODEL,
   getCcSwitchClientTypes,
+  GROK_CC_SWITCH_MODEL,
+  KIRO_CC_SWITCH_MODEL,
+  OPENAI_CC_SWITCH_CODEX_MODEL,
+  resolveCcSwitchImportConfig,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
 import {
@@ -1482,9 +1645,15 @@ const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
 const showCcsModelSelect = ref(false)
+const showCcsBatchImport = ref(false)
 const showCcsDownloadPrompt = ref(false)
 const ccsDownloadLinks = ref<CcSwitchDownloadLinks>({ ...CC_SWITCH_FALLBACK_DOWNLOADS })
 const ccsModelOptions = ref<string[]>([])
+const ccsModelSearch = ref('')
+const ccsModelsLoading = ref(false)
+const ccsSelectedModels = ref<string[]>([])
+const ccsBatchModels = ref<string[]>([])
+const ccsBatchImportedModels = ref<string[]>([])
 const showColumnDropdown = ref(false)
 const pendingCcsRow = ref<ApiKey | null>(null)
 const pendingCcsClientType = ref<CcSwitchClientType | null>(null)
@@ -1506,6 +1675,25 @@ const ccsClientOptions = computed<CcsClientOption[]>(() => {
     ...ccsClientOptionMeta[type]
   }))
 })
+
+const ccsFilteredModelOptions = computed(() => {
+  const query = ccsModelSearch.value.trim().toLowerCase()
+  if (!query) return ccsModelOptions.value
+  return ccsModelOptions.value.filter((model) => {
+    const label = ccsModelLabel(model).toLowerCase()
+    return model.toLowerCase().includes(query) || label.includes(query)
+  })
+})
+
+const ccsAllVisibleModelsSelected = computed(
+  () =>
+    ccsFilteredModelOptions.value.length > 0 &&
+    ccsFilteredModelOptions.value.every((model) => ccsSelectedModels.value.includes(model))
+)
+
+const ccsBatchNextModel = computed(
+  () => ccsBatchModels.value.find((model) => !ccsBatchImportedModels.value.includes(model)) || null
+)
 
 type CcsDownloadOption = {
   id: CcSwitchDesktopOs | 'other'
@@ -2120,6 +2308,14 @@ const importToCcswitch = (row: ApiKey) => {
   pendingCcsRow.value = row
   pendingCcsClientType.value = null
   ccsModelOptions.value = []
+  ccsModelSearch.value = ''
+  ccsSelectedModels.value = []
+  ccsBatchModels.value = []
+  ccsBatchImportedModels.value = []
+  ccsModelsLoading.value = false
+  showCcsClientSelect.value = false
+  showCcsModelSelect.value = false
+  showCcsBatchImport.value = false
   promptCcSwitchDownload()
 }
 
@@ -2136,7 +2332,7 @@ const importToCcswitch = (row: ApiKey) => {
  */
 const CCS_MODEL_REFETCH_DELAY_MS = 3000
 
-const compositeModelMatchesClient = (model: string, clientType: CcSwitchClientType): boolean => {
+const ccsModelMatchesClient = (model: string, clientType: CcSwitchClientType): boolean => {
   const normalized = model.toLowerCase()
   switch (clientType) {
     case 'claude':
@@ -2158,34 +2354,98 @@ const filterCcsModels = (
   clientType: CcSwitchClientType
 ): string[] => {
   const uniqueModels = [...new Set(models.map((model) => model.trim()).filter(Boolean))]
-  if (platform !== 'composite') {
+  if (platform !== 'composite' && platform !== 'antigravity') {
     return uniqueModels
   }
-  return uniqueModels.filter((model) => compositeModelMatchesClient(model, clientType))
+  return uniqueModels.filter((model) => ccsModelMatchesClient(model, clientType))
 }
 
 const fallbackCcsModels = (
   platform: GroupPlatform,
   clientType: CcSwitchClientType
 ): string[] => {
+  let models: string[]
   if (platform === 'cursor') {
-    return CURSOR_CC_SWITCH_MODEL_FALLBACKS
+    models = CURSOR_CC_SWITCH_MODEL_FALLBACKS
+  } else if (platform === 'kiro') {
+    models = kiroModels
+  } else if (platform === 'composite') {
+    models = allModels.map((model) => model.value)
+  } else {
+    models = getModelsByPlatform(platform)
   }
-  if (platform === 'kiro') {
-    return kiroModels
+  return filterCcsModels(models, platform, clientType)
+}
+
+const preferredCcsModel = (
+  platform: GroupPlatform,
+  clientType: CcSwitchClientType
+): string | undefined => {
+  const baseUrl = publicSettings.value?.api_base_url || window.location.origin
+  const configuredModel = resolveCcSwitchImportConfig(platform, clientType, baseUrl).model
+  if (configuredModel) return configuredModel
+
+  switch (platform) {
+    case 'openai':
+      return OPENAI_CC_SWITCH_CODEX_MODEL
+    case 'anthropic':
+      return ANTHROPIC_CC_SWITCH_MODEL
+    case 'gemini':
+      return GEMINI_CC_SWITCH_MODEL
+    case 'grok':
+      return GROK_CC_SWITCH_MODEL
+    case 'cursor':
+      return CURSOR_CC_SWITCH_MODEL
+    case 'kiro':
+      return KIRO_CC_SWITCH_MODEL
+    case 'antigravity':
+      return clientType === 'gemini' ? GEMINI_CC_SWITCH_MODEL : ANTHROPIC_CC_SWITCH_MODEL
+    case 'composite':
+      switch (clientType) {
+        case 'claude':
+          return ANTHROPIC_CC_SWITCH_MODEL
+        case 'codex':
+          return OPENAI_CC_SWITCH_CODEX_MODEL
+        case 'gemini':
+          return GEMINI_CC_SWITCH_MODEL
+        case 'grokbuild':
+          return GROK_CC_SWITCH_MODEL
+        default:
+          return undefined
+      }
   }
-  if (platform === 'composite') {
-    return filterCcsModels(
-      allModels.map((model) => model.value),
-      platform,
-      clientType
-    )
+}
+
+const applyCcsModelOptions = (
+  models: string[],
+  platform: GroupPlatform,
+  clientType: CcSwitchClientType,
+  preserveSelection: boolean
+) => {
+  const normalizedModels = filterCcsModels(models, platform, clientType)
+  ccsModelOptions.value = normalizedModels
+
+  const preserved = preserveSelection
+    ? ccsSelectedModels.value.filter((model) => normalizedModels.includes(model))
+    : []
+  if (preserved.length > 0) {
+    ccsSelectedModels.value = preserved
+    return
   }
-  return getModelsByPlatform(platform)
+
+  const preferred = preferredCcsModel(platform, clientType)
+  const initialModel =
+    preferred && normalizedModels.includes(preferred) ? preferred : normalizedModels[0]
+  ccsSelectedModels.value = initialModel ? [initialModel] : []
 }
 
 const loadCcsModelOptions = async (row: ApiKey) => {
   const baseUrl = (publicSettings.value?.api_base_url || window.location.origin).replace(/\/+$/, '')
+  const requestedClientType = pendingCcsClientType.value
+  if (!requestedClientType) return
+
+  const platform = row.group?.platform || 'anthropic'
+  ccsModelsLoading.value = true
 
   const fetchOnce = async (): Promise<string[] | null> => {
     try {
@@ -2202,27 +2462,41 @@ const loadCcsModelOptions = async (row: ApiKey) => {
   }
 
   const apply = (ids: string[] | null) => {
-    // 弹窗可能已经被关掉或换了一行，晚到的结果不该覆盖当前状态。
-    const clientType = pendingCcsClientType.value
-    const platform = row.group?.platform || 'anthropic'
-    if (ids && clientType && pendingCcsRow.value?.id === row.id) {
-      const filtered = filterCcsModels(ids, platform, clientType)
+    // The dialog may have closed or switched to another key/client while the
+    // request was in flight. Late results must not overwrite the new state.
+    if (
+      ids &&
+      pendingCcsRow.value?.id === row.id &&
+      pendingCcsClientType.value === requestedClientType
+    ) {
+      const filtered = filterCcsModels(ids, platform, requestedClientType)
       if (filtered.length > 0) {
-        ccsModelOptions.value = filtered
+        applyCcsModelOptions(filtered, platform, requestedClientType, true)
       }
     }
   }
 
-  apply(await fetchOnce())
-  if ((row.group?.platform || '') !== 'kiro') return
-  await new Promise((resolve) => setTimeout(resolve, CCS_MODEL_REFETCH_DELAY_MS))
-  apply(await fetchOnce())
+  try {
+    apply(await fetchOnce())
+    if (platform === 'kiro') {
+      await new Promise((resolve) => setTimeout(resolve, CCS_MODEL_REFETCH_DELAY_MS))
+      apply(await fetchOnce())
+    }
+  } finally {
+    if (
+      pendingCcsRow.value?.id === row.id &&
+      pendingCcsClientType.value === requestedClientType
+    ) {
+      ccsModelsLoading.value = false
+    }
+  }
 }
 
-const executeCcsImport = async (
+const executeCcsImport = (
   row: ApiKey,
   clientType: CcSwitchClientType,
-  modelOverride?: string
+  modelOverride?: string,
+  providerNameOverride?: string
 ) => {
   const baseUrl = publicSettings.value?.api_base_url || window.location.origin
   const platform = row.group?.platform || 'anthropic'
@@ -2243,7 +2517,8 @@ const executeCcsImport = async (
       };
     }
   })`
-  const providerName = (publicSettings.value?.site_name || 'RingStar').trim() || 'RingStar'
+  const defaultProviderName = (publicSettings.value?.site_name || 'RingStar').trim() || 'RingStar'
+  const providerName = providerNameOverride?.trim() || defaultProviderName
   const deeplink = buildCcSwitchImportDeeplink({
     baseUrl,
     platform,
@@ -2266,7 +2541,8 @@ const handleCcsClientSelect = (clientType: CcSwitchClientType) => {
   const platform = row.group?.platform || 'anthropic'
   if (ccSwitchImportNeedsModel(platform, clientType)) {
     pendingCcsClientType.value = clientType
-    ccsModelOptions.value = fallbackCcsModels(platform, clientType)
+    ccsModelSearch.value = ''
+    applyCcsModelOptions(fallbackCcsModels(platform, clientType), platform, clientType, false)
     showCcsClientSelect.value = false
     showCcsModelSelect.value = true
     void loadCcsModelOptions(row)
@@ -2283,21 +2559,93 @@ const closeCcsClientSelect = () => {
   showCcsClientSelect.value = false
   pendingCcsRow.value = null
   pendingCcsClientType.value = null
+  ccsModelOptions.value = []
+  ccsModelSearch.value = ''
+  ccsSelectedModels.value = []
+  ccsModelsLoading.value = false
 }
 
-const handleCcsModelSelect = (model: string) => {
-  if (pendingCcsRow.value) {
-    void executeCcsImport(pendingCcsRow.value, pendingCcsClientType.value || 'claude', model)
+const isCcsModelSelected = (model: string) => ccsSelectedModels.value.includes(model)
+
+const toggleCcsModelSelection = (model: string) => {
+  if (isCcsModelSelected(model)) {
+    ccsSelectedModels.value = ccsSelectedModels.value.filter((item) => item !== model)
+    return
   }
-  showCcsModelSelect.value = false
+
+  const selected = new Set([...ccsSelectedModels.value, model])
+  ccsSelectedModels.value = ccsModelOptions.value.filter((item) => selected.has(item))
+}
+
+const selectAllVisibleCcsModels = () => {
+  const selected = new Set([...ccsSelectedModels.value, ...ccsFilteredModelOptions.value])
+  ccsSelectedModels.value = ccsModelOptions.value.filter((model) => selected.has(model))
+}
+
+const clearCcsModelSelection = () => {
+  ccsSelectedModels.value = []
+}
+
+const resetCcsImportState = () => {
   pendingCcsRow.value = null
   pendingCcsClientType.value = null
+  ccsModelOptions.value = []
+  ccsModelSearch.value = ''
+  ccsModelsLoading.value = false
+  ccsSelectedModels.value = []
+  ccsBatchModels.value = []
+  ccsBatchImportedModels.value = []
+}
+
+const confirmCcsModelSelection = () => {
+  const row = pendingCcsRow.value
+  const clientType = pendingCcsClientType.value
+  if (!row || !clientType) return
+
+  const selected = ccsModelOptions.value.filter((model) =>
+    ccsSelectedModels.value.includes(model)
+  )
+  if (selected.length === 0) return
+
+  if (selected.length === 1) {
+    executeCcsImport(row, clientType, selected[0])
+    showCcsModelSelect.value = false
+    resetCcsImportState()
+    return
+  }
+
+  ccsBatchModels.value = selected
+  ccsBatchImportedModels.value = []
+  showCcsModelSelect.value = false
+  showCcsBatchImport.value = true
+}
+
+const isCcsBatchModelImported = (model: string) => ccsBatchImportedModels.value.includes(model)
+
+const importCcsBatchModel = (model: string) => {
+  const row = pendingCcsRow.value
+  const clientType = pendingCcsClientType.value
+  if (!row || !clientType || isCcsBatchModelImported(model)) return
+
+  const providerBaseName = (publicSettings.value?.site_name || 'RingStar').trim() || 'RingStar'
+  executeCcsImport(row, clientType, model, `${providerBaseName} · ${model}`)
+  ccsBatchImportedModels.value = [...ccsBatchImportedModels.value, model]
+}
+
+const importNextCcsBatchModel = () => {
+  if (ccsBatchNextModel.value) {
+    importCcsBatchModel(ccsBatchNextModel.value)
+  }
+}
+
+const closeCcsBatchImport = () => {
+  showCcsBatchImport.value = false
+  resetCcsImportState()
 }
 
 const closeCcsModelSelect = () => {
   showCcsModelSelect.value = false
-  pendingCcsRow.value = null
-  pendingCcsClientType.value = null
+  resetCcsImportState()
 }
 
 const promptCcSwitchDownload = () => {
@@ -2319,9 +2667,7 @@ const continueCcsImport = () => {
 
 const closeCcsDownloadPrompt = () => {
   showCcsDownloadPrompt.value = false
-  pendingCcsRow.value = null
-  pendingCcsClientType.value = null
-  ccsModelOptions.value = []
+  resetCcsImportState()
 }
 
 const openCcSwitchDownload = (url: string) => {

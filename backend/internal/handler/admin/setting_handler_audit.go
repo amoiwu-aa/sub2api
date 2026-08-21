@@ -332,6 +332,24 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.ContactInfo != after.ContactInfo {
 		changed = append(changed, "contact_info")
 	}
+	if before.CustomerServiceEnabled != after.CustomerServiceEnabled {
+		changed = append(changed, "customer_service_enabled")
+	}
+	if before.CustomerServiceButtonText != after.CustomerServiceButtonText {
+		changed = append(changed, "customer_service_button_text")
+	}
+	if before.CustomerServiceTitle != after.CustomerServiceTitle {
+		changed = append(changed, "customer_service_title")
+	}
+	if before.CustomerServiceDescription != after.CustomerServiceDescription {
+		changed = append(changed, "customer_service_description")
+	}
+	if before.CustomerServiceWeChatID != after.CustomerServiceWeChatID {
+		changed = append(changed, "customer_service_wechat_id")
+	}
+	if before.CustomerServiceQRImage != after.CustomerServiceQRImage {
+		changed = append(changed, "customer_service_qr_image")
+	}
 	if before.DocURL != after.DocURL {
 		changed = append(changed, "doc_url")
 	}

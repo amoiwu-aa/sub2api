@@ -20,7 +20,7 @@ const (
 	cursorCentsPerDollar = 100
 )
 
-// CursorQuotaFetcher 从 Cursor 的 dashboard 接口拉账号额度与订阅状态。
+// CursorQuotaFetcher 从 Cursor dashboard 或 Grok Bot/Sand 原生 RPC 拉取额度。
 //
 // # Cursor 的额度模型和 Claude / OpenAI 不是一回事
 //
@@ -32,11 +32,11 @@ const (
 // 两者都打满之后，超出部分进 onDemand（按量付费），是否允许由账号自己的
 // 开关决定。所以这里不该拼任何滚动窗口，直接映射上游的百分比即可。
 //
-// # 鉴权用的是 cookie，不是 Agent 的 Bearer token
+// # 鉴权路径按客户端协议区分
 //
-// 账号凭证里的 access_token 是 Agent 用的裸 JWT，直接拿去调 dashboard 会被
-// WorkOS 弹回登录页。dashboard 认的是 WorkosCursorSessionToken=<user_id>::<jwt>，
-// user_id 同样在凭证里，缺了它就查不了额度——CanFetch 会据此拦下。
+// 普通 Cursor 账号仍通过 WorkosCursorSessionToken=<user_id>::<jwt> 查询 dashboard，
+// 因而需要 user_id。Grok Bot/Sand 账号则以 Bearer token 和桌面客户端头调用
+// DashboardService 原生 RPC，不要求 user_id。
 type CursorQuotaFetcher struct {
 	proxyRepo ProxyRepository
 }
@@ -50,8 +50,13 @@ func (f *CursorQuotaFetcher) CanFetch(account *Account) bool {
 	if account == nil || account.Platform != PlatformCursor {
 		return false
 	}
-	return strings.TrimSpace(account.GetCredential("access_token")) != "" &&
-		strings.TrimSpace(cursorUserID(account)) != ""
+	if strings.TrimSpace(account.GetCredential("access_token")) == "" {
+		return false
+	}
+	if account.CursorAgentProfile() == cursor.AgentProfileSand {
+		return true
+	}
+	return strings.TrimSpace(cursorUserID(account)) != ""
 }
 
 // cursorUserID 兼容 user_id / userId 两种落库键名。
@@ -72,6 +77,8 @@ func cursorMissingCredentialReason(account *Account) string {
 		return "cursor credentials incomplete: account is missing"
 	case strings.TrimSpace(account.GetCredential("access_token")) == "":
 		return "cursor credentials incomplete: missing access_token"
+	case account.CursorAgentProfile() == cursor.AgentProfileSand:
+		return "cursor credentials incomplete"
 	case strings.TrimSpace(cursorUserID(account)) == "":
 		return "cursor credentials incomplete: missing user_id (required to build the dashboard session cookie)"
 	default:
@@ -109,12 +116,23 @@ func (f *CursorQuotaFetcher) FetchQuota(ctx context.Context, account *Account, p
 	}
 
 	opts := &cursor.Options{HTTPClient: client}
-	cookie := cursor.SessionCookie(cursorUserID(account), account.GetCredential("access_token"))
-
 	fetchCtx, cancel := context.WithTimeout(ctx, cursorQuotaFetchDeadline)
 	defer cancel()
 
-	summary, err := cursor.FetchUsageSummary(fetchCtx, opts, cookie)
+	if account.CursorAgentProfile() == cursor.AgentProfileSand {
+		return f.fetchSandQuota(fetchCtx, opts, account)
+	}
+	return f.fetchDashboardQuota(fetchCtx, opts, account)
+}
+
+func (f *CursorQuotaFetcher) fetchDashboardQuota(
+	ctx context.Context,
+	opts *cursor.Options,
+	account *Account,
+) (*UsageInfo, error) {
+	cookie := cursor.SessionCookie(cursorUserID(account), account.GetCredential("access_token"))
+
+	summary, err := cursor.FetchUsageSummary(ctx, opts, cookie)
 	if err != nil {
 		if degraded := cursorDegradedUsage(err); degraded != nil {
 			return degraded, nil
@@ -123,13 +141,64 @@ func (f *CursorQuotaFetcher) FetchQuota(ctx context.Context, account *Account, p
 	}
 
 	usage := buildCursorUsageInfo(summary, time.Now())
+	f.enrichCursorStripeProfile(ctx, opts, account, usage)
+	return usage, nil
+}
 
-	// 订阅状态是额外信息，拿不到不该让整个额度面板失败：past_due 这类状态
-	// 只影响徽标，用量本身已经查到了。
-	if profile, profileErr := cursor.FetchStripeProfile(fetchCtx, opts, cookie); profileErr == nil {
+func (f *CursorQuotaFetcher) fetchSandQuota(
+	ctx context.Context,
+	opts *cursor.Options,
+	account *Account,
+) (*UsageInfo, error) {
+	token := strings.TrimSpace(account.GetCredential("access_token"))
+	status, err := cursor.FetchSandUsageStatus(
+		ctx,
+		opts,
+		token,
+		account.CursorMachineID(),
+		account.CursorClientVersion(),
+		account.CursorSandNamespace(),
+	)
+	if err != nil {
+		if degraded := cursorDegradedUsage(err); degraded != nil {
+			return degraded, nil
+		}
+		return nil, err
+	}
+
+	now := time.Now()
+	usage := &UsageInfo{UpdatedAt: &now, Source: "upstream"}
+	applyCursorSandUsageStatus(usage, status, now)
+	return usage, nil
+}
+
+func (f *CursorQuotaFetcher) enrichCursorStripeProfile(
+	ctx context.Context,
+	opts *cursor.Options,
+	account *Account,
+	usage *UsageInfo,
+) {
+	userID := strings.TrimSpace(cursorUserID(account))
+	if userID == "" || usage == nil {
+		return
+	}
+	cookie := cursor.SessionCookie(userID, account.GetCredential("access_token"))
+	if profile, profileErr := cursor.FetchStripeProfile(ctx, opts, cookie); profileErr == nil {
 		applyCursorStripeProfile(usage, profile)
 	}
-	return usage, nil
+}
+
+func applyCursorSandUsageStatus(usage *UsageInfo, status *cursor.SandUsageStatus, now time.Time) {
+	if usage == nil || status == nil {
+		return
+	}
+	if status.UsagePercent != nil {
+		usage.CursorSandUsage = cursorProgress(*status.UsagePercent, status.NextReset, now)
+	}
+	hasAvailableUsage := status.HasAvailableUsage
+	usage.CursorSandHasAvailableUsage = &hasAvailableUsage
+	usage.CursorSandAvailableBankedResets = status.AvailableBankedResetCount
+	usage.CursorSandUsesPooledAllowance = status.UsesPooledEnterpriseAllowance
 }
 
 // cursorDegradedUsage 把「账号自身有问题」的上游错误转成降级 UsageInfo。

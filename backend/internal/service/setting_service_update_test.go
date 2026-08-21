@@ -217,6 +217,28 @@ func TestSettingService_AffiliateAdminRechargeSetting(t *testing.T) {
 	})
 }
 
+func TestSettingService_UpdateSettings_PersistsCustomerServiceConfiguration(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		CustomerServiceEnabled:     true,
+		CustomerServiceButtonText:  " 售后支持 ",
+		CustomerServiceTitle:       " 联系我们 ",
+		CustomerServiceDescription: " 扫码加入微信群 ",
+		CustomerServiceWeChatID:    " RingStarSupport ",
+		CustomerServiceQRImage:     " data:image/png;base64,ZmFrZQ== ",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "true", repo.updates[SettingKeyCustomerServiceEnabled])
+	require.Equal(t, "售后支持", repo.updates[SettingKeyCustomerServiceButtonText])
+	require.Equal(t, "联系我们", repo.updates[SettingKeyCustomerServiceTitle])
+	require.Equal(t, "扫码加入微信群", repo.updates[SettingKeyCustomerServiceDescription])
+	require.Equal(t, "RingStarSupport", repo.updates[SettingKeyCustomerServiceWeChatID])
+	require.Equal(t, "data:image/png;base64,ZmFrZQ==", repo.updates[SettingKeyCustomerServiceQRImage])
+}
+
 func (s *defaultSubGroupReaderStub) GetByID(ctx context.Context, id int64) (*Group, error) {
 	s.calls = append(s.calls, id)
 	if err, ok := s.errBy[id]; ok {

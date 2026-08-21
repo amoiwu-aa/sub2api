@@ -22,14 +22,34 @@ import (
 
 const (
 	// AgentHost 是 Agent 的默认上游。
-	AgentHost = "agent.api5.cursor.sh"
-	agentPath = "/agent.v1.AgentService/Run"
+	AgentHost     = "agent.api5.cursor.sh"
+	SandAgentHost = "api2.cursor.sh"
+	agentPath     = "/agent.v1.AgentService/Run"
 
 	// heartbeatInterval 对齐反代：长时间不发心跳上游会掐掉这条流。
 	heartbeatInterval = 10 * time.Second
 	// turnEndGrace 是收到 turn_ended 后再等一小会儿，让尾随的 checkpoint 帧到齐。
 	turnEndGrace = 400 * time.Millisecond
 )
+
+// AgentProfile selects the client contract used for an Agent request.
+// The zero value intentionally keeps the historical Cursor IDE behavior.
+type AgentProfile string
+
+const (
+	AgentProfileIDE  AgentProfile = "ide"
+	AgentProfileSand AgentProfile = "sand"
+)
+
+// ParseAgentProfile accepts persisted values and a couple of early aliases.
+func ParseAgentProfile(value string) AgentProfile {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(AgentProfileSand), "grok-bot", "grok_bot":
+		return AgentProfileSand
+	default:
+		return AgentProfileIDE
+	}
+}
 
 // 看门狗的两档超时。做成变量只为让测试能压到毫秒级。
 var (
@@ -64,6 +84,15 @@ type AgentOptions struct {
 	// SessionID 应在同一账号的多次请求间保持稳定，模拟一个长期存在的 IDE 会话。
 	SessionID string
 	Host      string
+	// Profile changes only the upstream host and client headers. The request
+	// protobuf and stream handling are shared by Cursor and Sand.
+	Profile AgentProfile
+	// MachineID is the raw Sand machine identifier when one is available.
+	// Telemetry.MachineID is used as a stable fallback.
+	MachineID string
+	// ClientVersion and SandNamespace are optional Sand header overrides.
+	ClientVersion string
+	SandNamespace string
 }
 
 // AgentTurnInput 是一轮对话的输入。
@@ -104,6 +133,9 @@ type AgentTurnResult struct {
 	// ConversationState 是最后一个 checkpoint，下一轮要原样带上。
 	ConversationState []byte
 	ExecHandled       int
+	// InlineImageAssetExecSuppressed counts synthetic assets/*.png read/write
+	// calls consumed inside the stream instead of leaking them to the client.
+	InlineImageAssetExecSuppressed int
 	// ExecUnanswered 是没能回执的 exec 数。非 0 说明 execArgFields 漏了上游的新
 	// 工具，这一轮多半是被看门狗收尾的。
 	ExecUnanswered int
@@ -210,7 +242,7 @@ func RunAgentTurn(
 	if strings.TrimSpace(opts.AccessToken) == "" {
 		return nil, errors.New("cursor agent access token is missing")
 	}
-	if !IsSessionToken(opts.AccessToken) {
+	if opts.agentProfile() != AgentProfileSand && !IsSessionToken(opts.AccessToken) {
 		// 提前失败比让上游回一个语焉不详的 ERROR_NOT_LOGGED_IN 好排查。
 		return nil, errCursorAgentNeedsSessionToken
 	}
@@ -219,12 +251,30 @@ func RunAgentTurn(
 	if conversationID == "" {
 		conversationID = uuid.NewString()
 	}
+	requestContextEnv := DefaultRequestContextEnv(input.ProjectName)
+	if len(input.Images) > 0 {
+		requestContextEnv = InlineImageRequestContextEnv(input.ProjectName)
+		imageBytes := 0
+		imageTypes := make([]string, 0, len(input.Images))
+		for _, image := range input.Images {
+			imageBytes += len(image.Data)
+			imageTypes = append(imageTypes, image.MIMEType)
+		}
+		slog.Info("cursor.agent_image_input",
+			"conversation_id", conversationID,
+			"model", input.ModelID,
+			"image_count", len(input.Images),
+			"image_bytes", imageBytes,
+			"image_types", imageTypes,
+			"workspace_materialization", false,
+		)
+	}
 	requestBody, err := EncodeRunRequest(RunRequestInput{
 		Text:              input.Text,
 		ConversationID:    conversationID,
 		ConversationState: input.ConversationState,
 		Images:            input.Images,
-		RequestContext:    EncodeRequestContext(DefaultRequestContextEnv(input.ProjectName)),
+		RequestContext:    EncodeRequestContext(requestContextEnv),
 		ModelID:           input.ModelID,
 		ModelParams:       input.ModelParams,
 		MaxMode:           input.MaxMode,
@@ -248,6 +298,7 @@ func RunAgentTurn(
 	result, err := stream.readTurn(
 		input.NativeToolBridge,
 		input.DisableParallelToolCalls,
+		len(input.Images) > 0,
 		newTextualToolCallFilter(input.Tools, input.NativeToolBridge),
 		onDelta,
 	)
@@ -278,6 +329,7 @@ func RunAgentTurn(
 			"collection_ms", result.ToolCallCollectionMs,
 			"collection_timeout", result.ToolCallCollectionTimedOut,
 			"exec_stubbed", result.ExecHandled,
+			"inline_image_asset_exec_suppressed", result.InlineImageAssetExecSuppressed,
 			"query_unsupported", result.QueryIgnored,
 		)
 	}
@@ -302,7 +354,11 @@ type agentStream struct {
 func openAgentStream(ctx context.Context, opts *AgentOptions, conversationID string) (*agentStream, error) {
 	host := strings.TrimSpace(opts.Host)
 	if host == "" {
-		host = AgentHost
+		if opts.agentProfile() == AgentProfileSand {
+			host = SandAgentHost
+		} else {
+			host = AgentHost
+		}
 	}
 
 	pipeReader, pipeWriter := io.Pipe()
@@ -347,16 +403,36 @@ func openAgentStream(ctx context.Context, opts *AgentOptions, conversationID str
 }
 
 func applyAgentHeaders(req *http.Request, opts *AgentOptions, conversationID string) {
-	sessionID := strings.TrimSpace(opts.SessionID)
-	if sessionID == "" {
-		sessionID = uuid.NewString()
-	}
 	requestID := uuid.NewString()
 
 	header := req.Header
 	header.Set("authorization", "Bearer "+opts.AccessToken)
 	header.Set("content-type", "application/connect+proto")
 	header.Set("connect-protocol-version", "1")
+	header.Set("x-request-id", requestID)
+
+	if opts.agentProfile() == AgentProfileSand {
+		machineID := strings.TrimSpace(opts.MachineID)
+		if machineID == "" {
+			machineID = strings.TrimSpace(opts.Telemetry.MachineID)
+		}
+		version := strings.TrimSpace(opts.ClientVersion)
+		if version == "" {
+			version = SandClientVersion
+		}
+		header.Set("x-cursor-checksum", SandChecksum(machineID, timeNow()))
+		header.Set("x-cursor-client-version", version)
+		header.Set("x-cursor-client-type", "sand")
+		header.Set("x-sand-box-namespace", normalizeSandNamespace(opts.SandNamespace))
+		header.Set("x-ghost-mode", "false")
+		header.Set("user-agent", "Grok Bot/"+version)
+		return
+	}
+
+	sessionID := strings.TrimSpace(opts.SessionID)
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
 	header.Set("x-cursor-checksum", Checksum(opts.Telemetry, timeNow()))
 	header.Set("x-cursor-client-version", ClientVersion)
 	header.Set("x-cursor-client-type", "ide")
@@ -369,11 +445,29 @@ func applyAgentHeaders(req *http.Request, opts *AgentOptions, conversationID str
 	header.Set("x-ghost-mode", "false")
 	header.Set("x-new-onboarding-completed", "false")
 	header.Set("x-session-id", sessionID)
-	header.Set("x-request-id", requestID)
 	header.Set("x-amzn-trace-id", "Root="+requestID)
 	header.Set("user-agent", "Cursor/"+ClientVersion)
-	// 会话 id 与对话 id 分开：前者标识"这台 IDE"，后者标识这段对话。
+	// Keep the conversation identifier on the IDE transport only. Sand sends
+	// the conversation id in the protobuf request.
 	header.Set("x-cursor-conversation-id", conversationID)
+}
+
+func (opts *AgentOptions) agentProfile() AgentProfile {
+	if opts != nil && opts.Profile == AgentProfileSand {
+		return AgentProfileSand
+	}
+	return AgentProfileIDE
+}
+
+func normalizeSandNamespace(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "dev":
+		return "dev"
+	case "lab":
+		return "lab"
+	default:
+		return "prod"
+	}
 }
 
 // send 写出一帧。并发安全。
@@ -426,6 +520,7 @@ func (s *agentStream) close() {
 func (s *agentStream) readTurn(
 	nativeToolBridge NativeToolBridge,
 	disableParallelToolCalls bool,
+	hasInlineImages bool,
 	markupFilter *textualToolCallFilter,
 	onDelta func(AgentDelta) error,
 ) (*AgentTurnResult, error) {
@@ -633,6 +728,28 @@ func (s *agentStream) readTurn(
 				return nil, err
 			}
 		case KindExec:
+			if hasInlineImages {
+				replies := SyntheticInlineImageAssetExecReplies(message.Exec)
+				if len(replies) > 0 {
+					answered := true
+					for _, reply := range replies {
+						if err := s.send(reply); err != nil {
+							answered = false
+							break
+						}
+						result.ExecHandled++
+					}
+					if answered {
+						result.InlineImageAssetExecSuppressed++
+						resetStallTimer(streamStallTimeout)
+						continue
+					}
+					result.ExecUnanswered++
+					activateShortStall()
+					resetStallTimer(execStallTimeout)
+					continue
+				}
+			}
 			// 原生工具桥：映射过的内置只读工具翻译成客户端调用，
 			// 与 MCP 调用共用「不回执、主动关流」的收尾。
 			if call := TranslateNativeExec(nativeToolBridge, message.Exec); call != nil {

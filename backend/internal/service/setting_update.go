@@ -341,6 +341,12 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeySiteSubtitle] = settings.SiteSubtitle
 	updates[SettingKeyAPIBaseURL] = settings.APIBaseURL
 	updates[SettingKeyContactInfo] = settings.ContactInfo
+	updates[SettingKeyCustomerServiceEnabled] = strconv.FormatBool(settings.CustomerServiceEnabled)
+	updates[SettingKeyCustomerServiceButtonText] = strings.TrimSpace(settings.CustomerServiceButtonText)
+	updates[SettingKeyCustomerServiceTitle] = strings.TrimSpace(settings.CustomerServiceTitle)
+	updates[SettingKeyCustomerServiceDescription] = strings.TrimSpace(settings.CustomerServiceDescription)
+	updates[SettingKeyCustomerServiceWeChatID] = strings.TrimSpace(settings.CustomerServiceWeChatID)
+	updates[SettingKeyCustomerServiceQRImage] = strings.TrimSpace(settings.CustomerServiceQRImage)
 	updates[SettingKeyDocURL] = settings.DocURL
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)
@@ -421,6 +427,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		updates[SettingKeyChannelMonitorDefaultIntervalSeconds] = strconv.Itoa(v)
 	}
 	updates[SettingKeyChannelMonitorHideThroughput] = strconv.FormatBool(settings.ChannelMonitorHideThroughput)
+	updates[SettingKeyChannelMonitorShowQuota] = strconv.FormatBool(settings.ChannelMonitorShowQuota)
 
 	// Grok model mapping policy
 	if v := strings.TrimSpace(settings.GrokDefaultTextModel); v != "" {

@@ -50,23 +50,32 @@ type CursorLoginStart struct {
 
 // CursorTokenInfo 是登录/导入/刷新的结果。
 type CursorTokenInfo struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	UserID       string    `json:"user_id,omitempty"`
-	Email        string    `json:"email,omitempty"`
-	TokenType    string    `json:"token_type,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
-	Source       string    `json:"source,omitempty"`
+	AccessToken   string    `json:"access_token"`
+	RefreshToken  string    `json:"refresh_token,omitempty"`
+	UserID        string    `json:"user_id,omitempty"`
+	Email         string    `json:"email,omitempty"`
+	TokenType     string    `json:"token_type,omitempty"`
+	ExpiresAt     time.Time `json:"expires_at,omitempty"`
+	Source        string    `json:"source,omitempty"`
+	AgentProfile  string    `json:"agent_profile,omitempty"`
+	MachineID     string    `json:"machine_id,omitempty"`
+	ClientVersion string    `json:"client_version,omitempty"`
+	SandNamespace string    `json:"sand_namespace,omitempty"`
 }
 
 // StartLogin 生成 PKCE 与浏览器登录 URL，并把 verifier 留在服务端。
 func (s *CursorOAuthService) StartLogin(ctx context.Context, proxyID *int64) (*CursorLoginStart, error) {
+	return s.StartLoginForProfile(ctx, proxyID, cursor.AgentProfileIDE)
+}
+
+func (s *CursorOAuthService) StartLoginForProfile(ctx context.Context, proxyID *int64, profile cursor.AgentProfile) (*CursorLoginStart, error) {
+	profile = cursor.ParseAgentProfile(string(profile))
 	// 提前校验代理：等到 poll 阶段才发现代理不可用，用户已经在浏览器里登录过了。
 	if _, err := s.proxyURL(ctx, proxyID); err != nil {
 		return nil, err
 	}
 
-	pkce, err := cursor.GeneratePKCE()
+	pkce, err := cursor.GeneratePKCEForProfile(profile)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "CURSOR_PKCE_FAILED", "%v", err)
 	}
@@ -76,11 +85,12 @@ func (s *CursorOAuthService) StartLogin(ctx context.Context, proxyID *int64) (*C
 	}
 
 	s.sessionStore.Set(sessionID, &cursor.LoginSession{
-		Verifier:  pkce.Verifier,
-		UUID:      pkce.UUID,
-		LoginURL:  pkce.LoginURL,
-		ProxyID:   proxyID,
-		CreatedAt: time.Now(),
+		Verifier:     pkce.Verifier,
+		UUID:         pkce.UUID,
+		LoginURL:     pkce.LoginURL,
+		ProxyID:      proxyID,
+		AgentProfile: profile,
+		CreatedAt:    time.Now(),
 	})
 
 	return &CursorLoginStart{LoginURL: pkce.LoginURL, SessionID: sessionID, UUID: pkce.UUID}, nil
@@ -100,6 +110,7 @@ func (s *CursorOAuthService) PollLogin(ctx context.Context, sessionID string) (*
 	if err != nil {
 		return nil, err
 	}
+	opts.Profile = cursor.ParseAgentProfile(string(session.AgentProfile))
 
 	tokens, err := cursor.PollOnce(ctx, opts, session.UUID, session.Verifier)
 	if errors.Is(err, cursor.ErrPollPending) {
@@ -110,7 +121,12 @@ func (s *CursorOAuthService) PollLogin(ctx context.Context, sessionID string) (*
 	}
 
 	// 登录拿到的可能仍是 web 态，Agent 只认 session，这里就地换掉。
-	info, err := s.ensureSession(ctx, opts, tokens)
+	var info *CursorTokenInfo
+	if opts.Profile == cursor.AgentProfileSand {
+		info = cursorTokenInfoForProfile(tokens, opts.Profile)
+	} else {
+		info, err = s.ensureSession(ctx, opts, tokens)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +136,17 @@ func (s *CursorOAuthService) PollLogin(ctx context.Context, sessionID string) (*
 
 // ImportToken 接受粘贴的 cookie / JWT 并确保换成 session 态。
 func (s *CursorOAuthService) ImportToken(ctx context.Context, token string, proxyID *int64, selectedTeamID string) (*CursorTokenInfo, error) {
+	return s.ImportTokenForProfile(ctx, token, proxyID, selectedTeamID, cursor.AgentProfileIDE)
+}
+
+func (s *CursorOAuthService) ImportTokenForProfile(
+	ctx context.Context,
+	token string,
+	proxyID *int64,
+	selectedTeamID string,
+	profile cursor.AgentProfile,
+) (*CursorTokenInfo, error) {
+	profile = cursor.ParseAgentProfile(string(profile))
 	if strings.TrimSpace(token) == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "CURSOR_TOKEN_REQUIRED", "token is required")
 	}
@@ -127,6 +154,7 @@ func (s *CursorOAuthService) ImportToken(ctx context.Context, token string, prox
 	if err != nil {
 		return nil, err
 	}
+	opts.Profile = profile
 
 	exchangeCtx, cancel := context.WithTimeout(ctx, cursorRefreshDeadline)
 	defer cancel()
@@ -135,7 +163,51 @@ func (s *CursorOAuthService) ImportToken(ctx context.Context, token string, prox
 	if err != nil {
 		return nil, cursorImportError(err)
 	}
-	return cursorTokenInfo(tokens), nil
+	return cursorTokenInfoForProfile(tokens, profile), nil
+}
+
+func (s *CursorOAuthService) ImportSandCredentials(
+	ctx context.Context,
+	accessToken string,
+	refreshToken string,
+	machineID string,
+	clientVersion string,
+	namespace string,
+	proxyID *int64,
+) (*CursorTokenInfo, error) {
+	accessToken = strings.TrimSpace(accessToken)
+	refreshToken = strings.TrimSpace(refreshToken)
+	if accessToken == "" {
+		return nil, infraerrors.New(http.StatusBadRequest, "CURSOR_SAND_ACCESS_TOKEN_REQUIRED", "Sand access token is required")
+	}
+	lower := strings.ToLower(accessToken)
+	if strings.HasPrefix(lower, "scoped:v1:") || strings.HasPrefix(lower, "plaintext:v1:") {
+		return nil, infraerrors.New(http.StatusBadRequest, "CURSOR_SAND_TOKEN_ENCRYPTED", "sand-secrets.json contains an Electron safeStorage wrapper; paste the decrypted runtime token or use browser login")
+	}
+	if refreshToken != "" {
+		lowerRefresh := strings.ToLower(refreshToken)
+		if strings.HasPrefix(lowerRefresh, "scoped:v1:") || strings.HasPrefix(lowerRefresh, "plaintext:v1:") {
+			return nil, infraerrors.New(http.StatusBadRequest, "CURSOR_SAND_TOKEN_ENCRYPTED", "sand-secrets.json contains an Electron safeStorage wrapper; paste the decrypted runtime token or use browser login")
+		}
+	}
+	if _, err := s.options(ctx, proxyID); err != nil {
+		return nil, err
+	}
+	info := cursorTokenInfoForProfile(&cursor.Tokens{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		Source:       "sand_import",
+	}, cursor.AgentProfileSand)
+	info.MachineID = strings.TrimSpace(machineID)
+	info.ClientVersion = strings.TrimSpace(clientVersion)
+	if info.ClientVersion == "" {
+		info.ClientVersion = cursor.SandClientVersion
+	}
+	info.SandNamespace = strings.TrimSpace(namespace)
+	if info.SandNamespace == "" {
+		info.SandNamespace = "prod"
+	}
+	return info, nil
 }
 
 // RefreshAccountToken 用账号自己的代理刷新其令牌。
@@ -151,6 +223,8 @@ func (s *CursorOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	if err != nil {
 		return nil, err
 	}
+	profile := account.CursorAgentProfile()
+	opts.Profile = profile
 	refreshCtx, cancel := context.WithTimeout(ctx, cursorRefreshDeadline)
 	defer cancel()
 
@@ -159,7 +233,13 @@ func (s *CursorOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	if err != nil {
 		return nil, cursorRefreshError(err)
 	}
-	return cursorTokenInfo(tokens), nil
+	info := cursorTokenInfoForProfile(tokens, profile)
+	if profile == cursor.AgentProfileSand {
+		info.MachineID = account.CursorMachineID()
+		info.ClientVersion = account.CursorClientVersion()
+		info.SandNamespace = account.CursorSandNamespace()
+	}
+	return info, nil
 }
 
 // ensureSession 把 auth/poll 拿到的令牌保证成 session 态。
@@ -231,6 +311,18 @@ func (s *CursorOAuthService) BuildAccountCredentials(info *CursorTokenInfo) map[
 	if !info.ExpiresAt.IsZero() {
 		credentials["expires_at"] = info.ExpiresAt.UTC().Format(time.RFC3339)
 	}
+	if profile := cursor.ParseAgentProfile(info.AgentProfile); profile == cursor.AgentProfileSand {
+		credentials[CursorAgentProfileCredentialKey] = string(profile)
+		if value := strings.TrimSpace(info.MachineID); value != "" {
+			credentials[CursorMachineIDCredentialKey] = value
+		}
+		if value := strings.TrimSpace(info.ClientVersion); value != "" {
+			credentials[CursorClientVersionCredentialKey] = value
+		}
+		if value := strings.TrimSpace(info.SandNamespace); value != "" {
+			credentials[CursorSandNamespaceCredentialKey] = value
+		}
+	}
 	return credentials
 }
 
@@ -248,6 +340,18 @@ func cursorTokenInfo(tokens *cursor.Tokens) *CursorTokenInfo {
 		info.TokenType = claims.Type
 		info.ExpiresAt = claims.ExpiresAt
 		info.UserID = strings.TrimPrefix(claims.Subject, "auth0|")
+	}
+	return info
+}
+
+func cursorTokenInfoForProfile(tokens *cursor.Tokens, profile cursor.AgentProfile) *CursorTokenInfo {
+	info := cursorTokenInfo(tokens)
+	if info == nil {
+		return nil
+	}
+	profile = cursor.ParseAgentProfile(string(profile))
+	if profile == cursor.AgentProfileSand {
+		info.AgentProfile = string(profile)
 	}
 	return info
 }

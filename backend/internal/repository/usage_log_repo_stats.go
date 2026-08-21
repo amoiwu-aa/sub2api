@@ -3,9 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,7 +14,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
-	"golang.org/x/sync/errgroup"
 )
 
 // GetUserStatsAggregated returns aggregated usage statistics for a user using database-level aggregation
@@ -791,7 +790,14 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		args = append(args, *filters.EndTime)
 	}
 
-	query := fmt.Sprintf(`
+	stats := &UsageStats{}
+	var totalAccountCost float64
+
+	if strings.TrimSpace(filters.SessionID) != "" {
+		// Session usage is polled frequently and only needs its aggregate row.
+		// Keep it on the lightweight single-row path instead of producing
+		// endpoint grouping sets that the caller does not consume.
+		query := fmt.Sprintf(`
 		SELECT
 			COUNT(*) as total_requests,
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
@@ -817,24 +823,8 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		%s
 	`, buildWhere(conditions))
 
-	stats := &UsageStats{}
-	var totalAccountCost float64
-
-	start := time.Unix(0, 0).UTC()
-	if filters.StartTime != nil {
-		start = *filters.StartTime
-	}
-	end := time.Now().UTC()
-	if filters.EndTime != nil {
-		end = *filters.EndTime
-	}
-
-	var endpoints, upstreamEndpoints, endpointPaths []EndpointStat
-
-	// 汇总查询:失败即致命。
-	runSummary := func(c context.Context) error {
-		return scanSingleRow(
-			c, r.sql, query, args,
+		if err := scanSingleRow(
+			ctx, r.sql, query, args,
 			&stats.TotalRequests,
 			&stats.TotalInputTokens,
 			&stats.TotalOutputTokens,
@@ -851,71 +841,168 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			&stats.TotalActualCost,
 			&totalAccountCost,
 			&stats.AverageDurationMs,
-		)
-	}
-	// endpoint 明细:best-effort(失败 log + 返空),不致命。
-	runEndpoints := func(c context.Context) {
-		res, err := r.getEndpointStatsByColumnWithFilters(c, "inbound_endpoint", start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.ModelFilterSource, filters.RequestType, filters.Stream, filters.BillingType, filters.BillingMode)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				logger.LegacyPrintf("repository.usage_log", "GetEndpointStatsWithFilters failed in GetStatsWithFilters: %v", err)
-			}
-			res = []EndpointStat{}
+		); err != nil {
+			return nil, err
 		}
-		endpoints = res
-	}
-	runUpstream := func(c context.Context) {
-		res, err := r.getEndpointStatsByColumnWithFilters(c, "upstream_endpoint", start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.ModelFilterSource, filters.RequestType, filters.Stream, filters.BillingType, filters.BillingMode)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				logger.LegacyPrintf("repository.usage_log", "GetUpstreamEndpointStatsWithFilters failed in GetStatsWithFilters: %v", err)
-			}
-			res = []EndpointStat{}
-		}
-		upstreamEndpoints = res
-	}
-	runPaths := func(c context.Context) {
-		res, err := r.getEndpointPathStatsWithFilters(c, start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.ModelFilterSource, filters.RequestType, filters.Stream, filters.BillingType, filters.BillingMode)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				logger.LegacyPrintf("repository.usage_log", "getEndpointPathStatsWithFilters failed in GetStatsWithFilters: %v", err)
-			}
-			res = []EndpointStat{}
-		}
-		endpointPaths = res
+
+		stats.TotalAccountCost = &totalAccountCost
+		stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
+		return stats, nil
 	}
 
-	if strings.TrimSpace(filters.SessionID) != "" {
-		// Session Usage only needs the summary. Avoid three unrelated endpoint
-		// scans on every short-poll attempt.
-		if err := runSummary(ctx); err != nil {
-			return nil, err
-		}
-	} else if r.db != nil {
-		// 生产路径:r.sql 是 *sql.DB 连接池,可并发。4 条查询并行,延迟取最大值。
-		g, gctx := errgroup.WithContext(ctx)
-		g.Go(func() error { return runSummary(gctx) })
-		g.Go(func() error { runEndpoints(gctx); return nil })
-		g.Go(func() error { runUpstream(gctx); return nil })
-		g.Go(func() error { runPaths(gctx); return nil })
-		if err := g.Wait(); err != nil {
-			return nil, err
-		}
-	} else {
-		// 事务路径(ent.Tx 不能并发查询):顺序执行,行为与重构前一致。
-		if err := runSummary(ctx); err != nil {
-			return nil, err
-		}
-		runEndpoints(ctx)
-		runUpstream(ctx)
-		runPaths(ctx)
+	// The official v0.1.179 query folds the summary, inbound endpoint,
+	// upstream endpoint and endpoint-path aggregations into one database scan.
+	// Keep RingStar's cache-observability counters in the same grouping query.
+	query := fmt.Sprintf(`
+		WITH scoped AS (
+			SELECT
+				COALESCE(NULLIF(TRIM(inbound_endpoint), ''), 'unknown') AS inbound_endpoint,
+				COALESCE(NULLIF(TRIM(upstream_endpoint), ''), 'unknown') AS upstream_endpoint,
+				input_tokens,
+				output_tokens,
+				cache_creation_tokens,
+				cache_read_tokens,
+				forced_cache_read_tokens,
+				cache_usage_source,
+				total_cost,
+				actual_cost,
+				COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1) AS account_cost,
+				duration_ms
+			FROM usage_logs
+			%s
+		)
+		SELECT
+			GROUPING(inbound_endpoint) AS inbound_grouped,
+			GROUPING(upstream_endpoint) AS upstream_grouped,
+			inbound_endpoint,
+			upstream_endpoint,
+			COUNT(*) AS requests,
+			COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0))
+				FILTER (WHERE cache_usage_source = 'reported'), 0) AS provider_cache_read_tokens,
+			COUNT(*) FILTER (
+				WHERE cache_usage_source = 'reported'
+				  AND GREATEST(cache_read_tokens - GREATEST(COALESCE(forced_cache_read_tokens, 0), 0), 0) > 0
+			) AS cache_hit_requests,
+			COALESCE(SUM(GREATEST(COALESCE(forced_cache_read_tokens, 0), 0)), 0) AS forced_cache_read_tokens,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'reported') AS reported_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'estimated') AS estimated_requests,
+			COUNT(*) FILTER (WHERE cache_usage_source = 'unavailable') AS unavailable_requests,
+			COALESCE(SUM(total_cost), 0) AS cost,
+			COALESCE(SUM(actual_cost), 0) AS actual_cost,
+			COALESCE(SUM(account_cost), 0) AS account_cost,
+			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms
+		FROM scoped
+		GROUP BY GROUPING SETS (
+			(),
+			(inbound_endpoint),
+			(upstream_endpoint),
+			(inbound_endpoint, upstream_endpoint)
+		)
+	`, buildWhere(conditions))
+
+	useAccountCostForEndpoint := filters.AccountID > 0 && filters.UserID == 0 && filters.APIKeyID == 0
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			inboundGrouped, upstreamGrouped                                      int
+			inboundEndpoint, upstreamEndpoint                                    sql.NullString
+			requests, inputTokens, outputTokens, cacheCreationTokens, cacheReads int64
+			providerCacheReads, cacheHitRequests, forcedCacheReads               int64
+			reportedRequests, estimatedRequests, unavailableRequests             int64
+			cost, actualCost, accountCost, averageDurationMs                     float64
+		)
+		if err := rows.Scan(
+			&inboundGrouped,
+			&upstreamGrouped,
+			&inboundEndpoint,
+			&upstreamEndpoint,
+			&requests,
+			&inputTokens,
+			&outputTokens,
+			&cacheCreationTokens,
+			&cacheReads,
+			&providerCacheReads,
+			&cacheHitRequests,
+			&forcedCacheReads,
+			&reportedRequests,
+			&estimatedRequests,
+			&unavailableRequests,
+			&cost,
+			&actualCost,
+			&accountCost,
+			&averageDurationMs,
+		); err != nil {
+			return nil, err
+		}
+
+		totalTokens := inputTokens + outputTokens + cacheCreationTokens + cacheReads
+		endpointActualCost := actualCost
+		if useAccountCostForEndpoint {
+			endpointActualCost = accountCost
+		}
+
+		switch {
+		case inboundGrouped == 1 && upstreamGrouped == 1:
+			stats.TotalRequests = requests
+			stats.TotalInputTokens = inputTokens
+			stats.TotalOutputTokens = outputTokens
+			stats.TotalCacheCreationTokens = cacheCreationTokens
+			stats.TotalCacheReadTokens = cacheReads
+			stats.TotalCacheTokens = cacheCreationTokens + cacheReads
+			stats.TotalProviderCacheReadTokens = providerCacheReads
+			stats.CacheHitRequests = cacheHitRequests
+			stats.TotalForcedCacheReadTokens = forcedCacheReads
+			stats.ReportedRequests = reportedRequests
+			stats.EstimatedRequests = estimatedRequests
+			stats.UnavailableRequests = unavailableRequests
+			stats.TotalCost = cost
+			stats.TotalActualCost = actualCost
+			totalAccountCost = accountCost
+			stats.AverageDurationMs = averageDurationMs
+		case inboundGrouped == 0 && upstreamGrouped == 1:
+			stats.Endpoints = append(stats.Endpoints, EndpointStat{
+				Endpoint: inboundEndpoint.String, Requests: requests, TotalTokens: totalTokens,
+				Cost: cost, ActualCost: endpointActualCost,
+			})
+		case inboundGrouped == 1 && upstreamGrouped == 0:
+			stats.UpstreamEndpoints = append(stats.UpstreamEndpoints, EndpointStat{
+				Endpoint: upstreamEndpoint.String, Requests: requests, TotalTokens: totalTokens,
+				Cost: cost, ActualCost: endpointActualCost,
+			})
+		case inboundGrouped == 0 && upstreamGrouped == 0:
+			stats.EndpointPaths = append(stats.EndpointPaths, EndpointStat{
+				Endpoint: inboundEndpoint.String + " -> " + upstreamEndpoint.String,
+				Requests: requests, TotalTokens: totalTokens, Cost: cost, ActualCost: endpointActualCost,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	sortEndpointStats := func(values []EndpointStat) {
+		sort.Slice(values, func(i, j int) bool {
+			if values[i].Requests != values[j].Requests {
+				return values[i].Requests > values[j].Requests
+			}
+			return values[i].Endpoint < values[j].Endpoint
+		})
+	}
+	sortEndpointStats(stats.Endpoints)
+	sortEndpointStats(stats.UpstreamEndpoints)
+	sortEndpointStats(stats.EndpointPaths)
 
 	stats.TotalAccountCost = &totalAccountCost
 	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
-	stats.Endpoints = endpoints
-	stats.UpstreamEndpoints = upstreamEndpoints
-	stats.EndpointPaths = endpointPaths
 
 	return stats, nil
 }

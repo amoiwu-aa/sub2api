@@ -42,6 +42,22 @@ type gatewayReasoningEffortOptionForTest struct {
 	Default bool   `json:"default"`
 }
 
+type cursorCodexReasoningLevelForTest struct {
+	Effort string `json:"effort"`
+}
+
+type cursorCodexServiceTierForTest struct {
+	ID string `json:"id"`
+}
+
+type cursorCodexModelForTest struct {
+	Slug                     string                             `json:"slug"`
+	DefaultReasoningLevel    string                             `json:"default_reasoning_level"`
+	SupportedReasoningLevels []cursorCodexReasoningLevelForTest `json:"supported_reasoning_levels"`
+	AdditionalSpeedTiers     []string                           `json:"additional_speed_tiers"`
+	ServiceTiers             []cursorCodexServiceTierForTest    `json:"service_tiers"`
+}
+
 func TestWriteCursorModelsListIncludesVersionedBridgeContract(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -74,6 +90,66 @@ func TestWriteCursorModelsListIncludesVersionedBridgeContract(t *testing.T) {
 	require.NotNil(t, payload.Data[0].CursorCapabilities)
 	require.Equal(t, cursor.BridgeProtocolVersion, payload.CursorBridge.Version)
 	require.Equal(t, service.CursorNativeToolBridgeModeInferAll, payload.CursorBridge.DefaultMode)
+}
+
+func TestWriteCursorModelsListAdvertisesRemainingModelControls(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	h := &GatewayHandler{}
+
+	h.writeCursorModelsList(c, []string{
+		"cursor/gpt-5.6-sol",
+		"cursor/claude-opus-4-8",
+		"cursor/claude-sonnet-5",
+		"cursor/composer-2.5",
+	})
+
+	var payload struct {
+		Data   []cursor.Model            `json:"data"`
+		Models []cursorCodexModelForTest `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+
+	dataByID := make(map[string]cursor.Model, len(payload.Data))
+	for _, model := range payload.Data {
+		dataByID[model.ID] = model
+	}
+	modelsBySlug := make(map[string]cursorCodexModelForTest, len(payload.Models))
+	for _, model := range payload.Models {
+		modelsBySlug[model.Slug] = model
+	}
+
+	gpt := modelsBySlug["cursor/gpt-5.6-sol"]
+	require.Equal(t, cursor.ModelEffortMedium, gpt.DefaultReasoningLevel)
+	require.Subset(t, cursorReasoningEfforts(gpt.SupportedReasoningLevels),
+		[]string{"minimal", cursor.ModelEffortMax, "ultra"})
+	require.Equal(t, []string{"fast"}, gpt.AdditionalSpeedTiers)
+	require.Equal(t, "priority", gpt.ServiceTiers[0].ID)
+
+	opus := dataByID["cursor/claude-opus-4-8"].CursorCapabilities
+	require.NotNil(t, opus)
+	require.True(t, opus.Thinking)
+	require.True(t, opus.Fast)
+	require.Contains(t, cursorReasoningEfforts(modelsBySlug["cursor/claude-opus-4-8"].SupportedReasoningLevels), "ultra")
+
+	sonnet := dataByID["cursor/claude-sonnet-5"].CursorCapabilities
+	require.NotNil(t, sonnet)
+	require.True(t, sonnet.Thinking)
+	require.False(t, sonnet.Fast)
+	require.Empty(t, modelsBySlug["cursor/claude-sonnet-5"].AdditionalSpeedTiers)
+
+	composer := modelsBySlug["cursor/composer-2.5"]
+	require.Empty(t, composer.SupportedReasoningLevels)
+	require.Equal(t, []string{"fast"}, composer.AdditionalSpeedTiers)
+}
+
+func cursorReasoningEfforts(levels []cursorCodexReasoningLevelForTest) []string {
+	values := make([]string, 0, len(levels))
+	for _, level := range levels {
+		values = append(values, level.Effort)
+	}
+	return values
 }
 
 func (s *gatewayModelsAccountRepoStub) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]service.Account, error) {
@@ -134,6 +210,53 @@ func TestGatewayModels_GeminiGroupFallsBackToGeminiModels(t *testing.T) {
 	require.Equal(t, "list", got.Object)
 	require.Contains(t, modelIDsForTest(got.Data), "gemini-2.5-flash")
 	require.NotContains(t, modelIDsForTest(got.Data), "claude-sonnet-4-6")
+}
+
+func TestGatewayModels_CursorGroupIncludesSandCatalogAlongsideIDEMappings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(204)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{
+						ID:       1,
+						Platform: service.PlatformCursor,
+						Credentials: map[string]any{
+							"model_mapping": map[string]any{
+								"cursor/claude-opus-4-8": "cursor/claude-opus-4-8",
+							},
+						},
+					},
+					{
+						ID:       2,
+						Platform: service.PlatformCursor,
+						Credentials: map[string]any{
+							service.CursorAgentProfileCredentialKey: "sand",
+						},
+					},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{ID: groupID, Platform: service.PlatformCursor},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	ids := modelIDsForTest(got.Data)
+	require.Contains(t, ids, "cursor/claude-opus-4-8")
+	require.Contains(t, ids, "cursor/grok-4.6")
+	require.NotContains(t, ids, "cursor/not-a-sand-model")
 }
 
 func TestGatewayModels_Grok45AdvertisesReasoningEffortForGrokBuild(t *testing.T) {

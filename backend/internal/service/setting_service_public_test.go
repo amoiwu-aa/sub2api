@@ -101,6 +101,30 @@ func TestSettingService_GetPublicSettings_ExposesCompactHomeEnabled(t *testing.T
 	require.False(t, missingSettings.CompactHomeEnabled)
 }
 
+func TestSettingService_GetPublicSettings_ExposesCustomerServiceConfiguration(t *testing.T) {
+	repo := &settingPublicRepoStub{
+		values: map[string]string{
+			SettingKeyCustomerServiceEnabled:     "true",
+			SettingKeyCustomerServiceButtonText:  " 售后支持 ",
+			SettingKeyCustomerServiceTitle:       " 联系我们 ",
+			SettingKeyCustomerServiceDescription: " 扫码加入微信群 ",
+			SettingKeyCustomerServiceWeChatID:    " RingStarSupport ",
+			SettingKeyCustomerServiceQRImage:     " data:image/png;base64,ZmFrZQ== ",
+		},
+	}
+	svc := NewSettingService(repo, &config.Config{})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+
+	require.NoError(t, err)
+	require.True(t, settings.CustomerServiceEnabled)
+	require.Equal(t, "售后支持", settings.CustomerServiceButtonText)
+	require.Equal(t, "联系我们", settings.CustomerServiceTitle)
+	require.Equal(t, "扫码加入微信群", settings.CustomerServiceDescription)
+	require.Equal(t, "RingStarSupport", settings.CustomerServiceWeChatID)
+	require.Equal(t, "data:image/png;base64,ZmFrZQ==", settings.CustomerServiceQRImage)
+}
+
 func TestSettingService_ChannelMonitorHideThroughputDefaultsToPrivate(t *testing.T) {
 	missing := NewSettingService(&settingPublicRepoStub{values: map[string]string{}}, &config.Config{}).GetChannelMonitorRuntime(context.Background())
 	require.True(t, missing.HideThroughput)
@@ -113,6 +137,29 @@ func TestSettingService_ChannelMonitorHideThroughputDefaultsToPrivate(t *testing
 			SettingKeyChannelMonitorHideThroughput: value,
 		}}, &config.Config{}).GetChannelMonitorRuntime(context.Background())
 		require.False(t, runtime.HideThroughput, "value=%q", value)
+	}
+}
+
+func TestSettingService_ChannelMonitorShowQuotaFailsClosed(t *testing.T) {
+	// 缺省（迁移插入 'false' / 老库无行）一律不展示。
+	missingRuntime := NewSettingService(&settingPublicRepoStub{values: map[string]string{}}, &config.Config{}).GetChannelMonitorRuntime(context.Background())
+	require.False(t, missingRuntime.ShowQuota)
+	missingPublic, err := NewSettingService(&settingPublicRepoStub{values: map[string]string{}}, &config.Config{}).
+		GetPublicSettings(context.Background())
+	require.NoError(t, err)
+	require.False(t, missingPublic.ChannelMonitorShowQuota)
+
+	// 仅字面 "true" 视为开启；其余值（含异常值）fail-closed。
+	runtime := NewSettingService(&settingPublicRepoStub{values: map[string]string{
+		SettingKeyChannelMonitorShowQuota: "true",
+	}}, &config.Config{}).GetChannelMonitorRuntime(context.Background())
+	require.True(t, runtime.ShowQuota)
+
+	for _, value := range []string{"false", "TRUE", "1", "yes", "on", "garbage"} {
+		rt := NewSettingService(&settingPublicRepoStub{values: map[string]string{
+			SettingKeyChannelMonitorShowQuota: value,
+		}}, &config.Config{}).GetChannelMonitorRuntime(context.Background())
+		require.False(t, rt.ShowQuota, "value=%q", value)
 	}
 }
 

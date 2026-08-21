@@ -621,7 +621,7 @@ func codexModelLookupKey(modelID string) string {
 
 func isKnownCodexModelSuffix(suffix string) bool {
 	switch suffix {
-	case "none", "minimal", "low", "medium", "high", "xhigh":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
 		return true
 	}
 	return isCodexDateSuffix(suffix)

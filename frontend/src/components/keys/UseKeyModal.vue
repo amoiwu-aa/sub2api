@@ -1418,7 +1418,8 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         medium: {},
         high: {},
         xhigh: {},
-        max: {}
+        max: {},
+        ultra: {}
       }
     },
     'gpt-5.6-sol': {
@@ -1435,7 +1436,8 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         medium: {},
         high: {},
         xhigh: {},
-        max: {}
+        max: {},
+        ultra: {}
       }
     },
     'gpt-5.6-sol-wm': {
@@ -1452,7 +1454,8 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         medium: {},
         high: {},
         xhigh: {},
-        max: {}
+        max: {},
+        ultra: {}
       }
     },
     'gpt-5.6-terra': {
@@ -1469,7 +1472,8 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         medium: {},
         high: {},
         xhigh: {},
-        max: {}
+        max: {},
+        ultra: {}
       }
     },
     'gpt-5.6-luna': {
@@ -1486,7 +1490,8 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         medium: {},
         high: {},
         xhigh: {},
-        max: {}
+        max: {},
+        ultra: {}
       }
     },
     'gpt-5.5': {

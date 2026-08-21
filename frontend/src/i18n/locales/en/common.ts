@@ -61,6 +61,16 @@ export default {
     verifying: 'Verifying...',
     processing: 'Processing...',
     contactSupport: 'Contact Support',
+    customerService: {
+      button: 'Support',
+      title: 'Customer Support',
+      description: 'Scan the group QR code or copy the WeChat ID to contact support.',
+      groupQrAlt: 'WeChat group QR code',
+      wechatId: 'WeChat ID',
+      otherContact: 'Other contact',
+      copyWechatId: 'Copy WeChat ID',
+      wechatIdCopied: 'WeChat ID copied'
+    },
     add: 'Add',
     invalidEmail: 'Please enter a valid email address',
     optional: 'optional',

@@ -1251,22 +1251,42 @@ func (h *GatewayHandler) writeCursorModelsList(c *gin.Context, modelIDs []string
 	for index, model := range models {
 		reasoningLevels := make([]codexReasoningLevel, 0)
 		defaultReasoning := "medium"
+		additionalSpeedTiers := []any{}
+		serviceTiers := []any{}
 		if model.CursorCapabilities != nil {
 			for _, effort := range model.CursorCapabilities.Efforts {
-				reasoningLevels = append(reasoningLevels, codexReasoningLevel{
-					Effort:      effort,
-					Description: "RingStar Cursor reasoning effort " + effort,
-				})
-			}
-			if len(model.CursorCapabilities.Efforts) > 0 {
-				defaultReasoning = model.CursorCapabilities.Efforts[len(model.CursorCapabilities.Efforts)-1]
-				if defaultReasoning == cursor.ModelEffortXHigh {
-					defaultReasoning = cursor.ModelEffortHigh
+				codexEffort := effort
+				if codexEffort == cursor.ModelEffortNone {
+					codexEffort = "minimal"
 				}
+				reasoningLevels = append(reasoningLevels, codexReasoningLevel{
+					Effort:      codexEffort,
+					Description: "RingStar Cursor reasoning effort " + codexEffort,
+				})
+				if effort == cursor.ModelEffortMax {
+					reasoningLevels = append(reasoningLevels, codexReasoningLevel{
+						Effort:      "ultra",
+						Description: "Maximum reasoning mapped to the model's max effort",
+					})
+				}
+			}
+			if model.CursorCapabilities.DefaultEffort != "" {
+				defaultReasoning = model.CursorCapabilities.DefaultEffort
+				if defaultReasoning == cursor.ModelEffortNone {
+					defaultReasoning = "minimal"
+				}
+			}
+			if model.CursorCapabilities.Fast {
+				additionalSpeedTiers = []any{"fast"}
+				serviceTiers = []any{map[string]any{
+					"id":          "priority",
+					"name":        "Fast",
+					"description": "Faster responses with increased usage",
+				}}
 			}
 		}
 		codexModels = append(codexModels, codexModel{
-			AdditionalSpeedTiers:       []any{},
+			AdditionalSpeedTiers:       additionalSpeedTiers,
 			ApplyPatchToolType:         "freeform",
 			BaseInstructions:           "Use the client tools through the Responses tool-calling channel.",
 			CompHash:                   "ringstar-" + cursor.BridgeProtocolVersion,
@@ -1289,7 +1309,7 @@ func (h *GatewayHandler) writeCursorModelsList(c *gin.Context, modelIDs []string
 				},
 			},
 			Priority:                    1000 + index,
-			ServiceTiers:                []any{},
+			ServiceTiers:                serviceTiers,
 			ShellType:                   "shell_command",
 			Slug:                        model.ID,
 			SupportVerbosity:            true,
@@ -1351,10 +1371,17 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
 	schedulablePlatforms := h.gatewayService.GetSchedulablePlatforms(ctx, groupID)
-	for _, platform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok, service.PlatformCursor, service.PlatformKiro} {
+	for _, platform := range []string{
+		service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI,
+		service.PlatformAntigravity, service.PlatformGrok,
+		service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek,
+		service.PlatformCursor, service.PlatformKiro,
+	} {
 		platformModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
 		if len(platformModels) == 0 {
-			if _, ok := schedulablePlatforms[platform]; ok {
+			// CN 供应商没有静态默认模型列表（defaultModelIDsForPlatform 的
+			// default 分支是 Claude 列表），composite 下只暴露账号映射键。
+			if _, ok := schedulablePlatforms[platform]; ok && !service.IsCNProvider(platform) {
 				platformModels = defaultModelIDsForPlatform(platform)
 			}
 		}
@@ -1627,7 +1654,12 @@ func defaultModelIDsForPlatform(platform string) []string {
 	case service.PlatformComposite:
 		ids := make([]string, 0)
 		seen := make(map[string]struct{})
-		for _, concretePlatform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok, service.PlatformCursor, service.PlatformKiro} {
+		for _, concretePlatform := range []string{
+			service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI,
+			service.PlatformAntigravity, service.PlatformGrok,
+			service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek,
+			service.PlatformCursor, service.PlatformKiro,
+		} {
 			for _, id := range defaultModelIDsForPlatform(concretePlatform) {
 				if _, ok := seen[id]; ok {
 					continue

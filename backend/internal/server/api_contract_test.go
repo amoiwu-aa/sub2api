@@ -459,7 +459,7 @@ func TestAPIContracts(t *testing.T) {
 					{
 						ID:        900,
 						Code:      "CODE-123",
-						Type:      service.RedeemTypeBalance,
+						Type:      "admin_balance",
 						Value:     1.25,
 						Status:    service.StatusUsed,
 						UsedBy:    ptr(int64(1)),
@@ -479,14 +479,15 @@ func TestAPIContracts(t *testing.T) {
 					{
 						"id": 900,
 						"code": "CODE-123",
-						"type": "balance",
+						"type": "admin_balance",
 						"value": 1.25,
 						"status": "used",
 						"used_by": 1,
 						"used_at": "2025-01-02T03:04:05Z",
 						"created_at": "2025-01-02T03:04:05Z",
 						"group_id": null,
-						"validity_days": 0
+						"validity_days": 0,
+						"balance_validity_days": 0
 					}
 				]
 			}`,
@@ -685,12 +686,18 @@ func TestAPIContracts(t *testing.T) {
 					service.SettingKeyOIDCConnectUserInfoIDPath:       "",
 					service.SettingKeyOIDCConnectUserInfoUsernamePath: "",
 
-					service.SettingKeySiteName:     "Sub2API",
-					service.SettingKeySiteLogo:     "",
-					service.SettingKeySiteSubtitle: "Subtitle",
-					service.SettingKeyAPIBaseURL:   "https://api.example.com",
-					service.SettingKeyContactInfo:  "support",
-					service.SettingKeyDocURL:       "https://docs.example.com",
+					service.SettingKeySiteName:                   "Sub2API",
+					service.SettingKeySiteLogo:                   "",
+					service.SettingKeySiteSubtitle:               "Subtitle",
+					service.SettingKeyAPIBaseURL:                 "https://api.example.com",
+					service.SettingKeyContactInfo:                "support",
+					service.SettingKeyCustomerServiceEnabled:     "true",
+					service.SettingKeyCustomerServiceButtonText:  "售后支持",
+					service.SettingKeyCustomerServiceTitle:       "联系我们",
+					service.SettingKeyCustomerServiceDescription: "扫码加入微信群",
+					service.SettingKeyCustomerServiceWeChatID:    "RingStarSupport",
+					service.SettingKeyCustomerServiceQRImage:     "/support-qr.png",
+					service.SettingKeyDocURL:                     "https://docs.example.com",
 
 					service.SettingKeyDefaultConcurrency:   "5",
 					service.SettingKeyDefaultBalance:       "1.25",
@@ -829,6 +836,12 @@ func TestAPIContracts(t *testing.T) {
 						"api_key_acl_trust_forwarded_ip": false,
 					"forwarded_client_ip_headers": [],
 					"contact_info": "support",
+					"customer_service_enabled": true,
+					"customer_service_button_text": "售后支持",
+					"customer_service_title": "联系我们",
+					"customer_service_description": "扫码加入微信群",
+					"customer_service_wechat_id": "RingStarSupport",
+					"customer_service_qr_image": "/support-qr.png",
 					"doc_url": "https://docs.example.com",
 					"auth_source_default_email_balance": 0,
 					"auth_source_default_email_concurrency": 5,
@@ -1179,6 +1192,12 @@ func TestAPIContracts(t *testing.T) {
 					"api_key_acl_trust_forwarded_ip": false,
 					"forwarded_client_ip_headers": [],
 					"contact_info": "",
+					"customer_service_enabled": false,
+					"customer_service_button_text": "",
+					"customer_service_title": "",
+					"customer_service_description": "",
+					"customer_service_wechat_id": "",
+					"customer_service_qr_image": "",
 					"doc_url": "",
 					"home_content": "",
 					"hide_ccs_import_button": false,
@@ -1489,7 +1508,31 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(
+		userRepo,
+		groupRepo,
+		&accountRepo,
+		proxyRepo,
+		apiKeyRepo,
+		redeemRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)

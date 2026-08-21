@@ -189,6 +189,83 @@ func TestAccountHandlerGetAvailableModels_CursorIncludesGrok46Variants(t *testin
 	require.Equal(t, "Cursor Grok 4.6 (MAX)", models["cursor/grok-4.6-max"])
 }
 
+func TestAccountHandlerGetAvailableModels_SandUsesGrokBotCatalog(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:       47,
+			Name:     "grok-bot",
+			Platform: service.PlatformCursor,
+			Type:     service.AccountTypeOAuth,
+			Status:   service.StatusActive,
+			Credentials: map[string]any{
+				service.CursorAgentProfileCredentialKey: "sand",
+			},
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/47/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data []struct {
+			ID          string `json:"id"`
+			OwnedBy     string `json:"owned_by"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp.Data)
+	for _, model := range resp.Data {
+		require.Equal(t, "grok-bot", model.OwnedBy)
+		require.Contains(t, model.DisplayName, "Grok Bot")
+		require.True(t, cursor.IsSandModelSupported(model.ID))
+	}
+}
+
+func TestAccountHandlerGetAvailableModels_SandRespectsModelWhitelist(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:       48,
+			Name:     "grok-bot-restricted",
+			Platform: service.PlatformCursor,
+			Type:     service.AccountTypeOAuth,
+			Status:   service.StatusActive,
+			Credentials: map[string]any{
+				service.CursorAgentProfileCredentialKey: "sand",
+				"model_mapping": map[string]any{
+					"cursor/grok-4.6": "cursor/grok-4.6",
+				},
+			},
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/48/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, []struct {
+		ID      string `json:"id"`
+		OwnedBy string `json:"owned_by"`
+	}{
+		{ID: "cursor/grok-4.6", OwnedBy: "grok-bot"},
+	}, resp.Data)
+}
+
 func TestAccountTestRequestParsesCursorModelOptions(t *testing.T) {
 	var req TestAccountRequest
 	require.NoError(t, json.Unmarshal([]byte(`{

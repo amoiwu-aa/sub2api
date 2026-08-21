@@ -33,6 +33,17 @@ func nativeReadArgsPayload(path, toolCallID string, offset, limit uint64) []byte
 	return concat(parts...)
 }
 
+func nativeWriteArgsPayload(path, content, toolCallID string) []byte {
+	parts := [][]byte{
+		EncodeStringField(1, path),
+		EncodeStringField(2, content),
+	}
+	if toolCallID != "" {
+		parts = append(parts, EncodeStringField(3, toolCallID))
+	}
+	return concat(parts...)
+}
+
 // nativeBridgeOf 把「内置名 → 客户端工具名」的简写展开成桥接映射。
 // 只关心名字映射的用例用它；参数改写由 ArgNames 专门的用例覆盖。
 func nativeBridgeOf(mapping map[string]string) NativeToolBridge {
@@ -328,6 +339,70 @@ func TestTranslateNativeExecWriteDeleteFetch(t *testing.T) {
 	require.Equal(t, "WebFetch", call.Name)
 	require.Equal(t, "toolu_43", call.CallID)
 	require.JSONEq(t, `{"url":"https://example.com/ref"}`, string(call.Arguments))
+}
+
+func TestSyntheticInlineImageAssetExecRepliesMatchOnlySyntheticUUIDImages(t *testing.T) {
+	const syntheticPath = "/home/cursor/.cursor/projects/empty-window/assets/739a5b20-fda5-4b04-92b0-e955f40f03d9.png"
+	write, err := ParseServerMessage(nativeExecMessage(40, "exec-image-write", 3,
+		nativeWriteArgsPayload(syntheticPath, "", "toolu_image_write")))
+	require.NoError(t, err)
+	require.Len(t, SyntheticInlineImageAssetExecReplies(write.Exec), 1)
+	matchedPath, matched := syntheticInlineImageAssetExecPath(write.Exec)
+	require.True(t, matched)
+	require.Equal(t, syntheticPath, matchedPath)
+
+	read, err := ParseServerMessage(nativeExecMessage(41, "exec-image-read", 7,
+		nativeReadArgsPayload(syntheticPath, "toolu_image_read", 0, 0)))
+	require.NoError(t, err)
+	require.Len(t, SyntheticInlineImageAssetExecReplies(read.Exec), 1)
+
+	realWorkspaceWrite, err := ParseServerMessage(nativeExecMessage(42, "exec-real-write", 3,
+		nativeWriteArgsPayload("D:/work/project/assets/output.png", "content", "")))
+	require.NoError(t, err)
+	require.Empty(t, SyntheticInlineImageAssetExecReplies(realWorkspaceWrite.Exec))
+
+	nonUUIDWrite, err := ParseServerMessage(nativeExecMessage(43, "exec-non-uuid", 3,
+		nativeWriteArgsPayload(
+			"/home/cursor/.cursor/projects/empty-window/assets/output.png",
+			"content",
+			"",
+		)))
+	require.NoError(t, err)
+	require.Empty(t, SyntheticInlineImageAssetExecReplies(nonUUIDWrite.Exec))
+}
+
+func TestRunAgentTurnConsumesSyntheticInlineImageAssetExecsInStream(t *testing.T) {
+	const syntheticPath = "/home/cursor/.cursor/projects/empty-window/assets/739a5b20-fda5-4b04-92b0-e955f40f03d9.png"
+	server := &agentTestServer{t: t, script: [][]byte{
+		nativeExecMessage(44, "exec-image-write", 3,
+			nativeWriteArgsPayload(syntheticPath, "", "toolu_image_write")),
+		nativeExecMessage(45, "exec-image-read", 7,
+			nativeReadArgsPayload(syntheticPath, "toolu_image_read", 0, 0)),
+		textDeltaMessage("The screenshot shows a normal reasoning indicator."),
+		turnEndedMessage(),
+	}}
+	client, host := startAgentTestServer(t, server)
+
+	result, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{
+			Text:           "Inspect the attached screenshot.",
+			ConversationID: "conv-inline-image-assets",
+			Images: []AttachedImage{{
+				Data:     []byte("image"),
+				MIMEType: "image/png",
+			}},
+			NativeToolBridge: nativeBridgeOf(map[string]string{
+				"read": "Read", "write": "Write",
+			}),
+		}, nil)
+	require.NoError(t, err)
+	require.True(t, result.TurnEnded)
+	require.Equal(t, "The screenshot shows a normal reasoning indicator.", result.Text)
+	require.Empty(t, result.ToolCalls)
+	require.Zero(t, result.NativeToolCalls)
+	require.Equal(t, 2, result.InlineImageAssetExecSuppressed)
+	require.Equal(t, 2, result.ExecHandled)
+	require.Zero(t, result.ExecUnanswered)
 }
 
 func TestRunAgentTurnBridgesNativeReadExec(t *testing.T) {

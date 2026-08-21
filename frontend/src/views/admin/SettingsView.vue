@@ -1128,6 +1128,47 @@
                   </button>
                 </div>
 
+                <div
+                  class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400"
+                  :data-testid="`openai-fast-policy-summary-${ruleIndex}`"
+                >
+                  <span class="font-medium text-gray-700 dark:text-gray-300">
+                    {{
+                      t(
+                        hasOpenAIFastPolicyTargetModels(rule)
+                          ? "admin.settings.openaiFastPolicy.summaryTargetModels"
+                          : "admin.settings.openaiFastPolicy.summaryAllModels",
+                      )
+                    }}
+                  </span>
+                  <span aria-hidden="true">→</span>
+                  <span
+                    class="inline-flex items-center rounded bg-primary-50 px-2 py-0.5 font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
+                  >
+                    {{ openaiFastPolicyActionSummary(rule.action) }}
+                  </span>
+                  <template v-if="hasOpenAIFastPolicyTargetModels(rule)">
+                    <span aria-hidden="true">·</span>
+                    <span class="font-medium text-gray-700 dark:text-gray-300">
+                      {{
+                        t(
+                          "admin.settings.openaiFastPolicy.summaryOtherModels",
+                        )
+                      }}
+                    </span>
+                    <span aria-hidden="true">→</span>
+                    <span
+                      class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 font-medium text-gray-700 dark:bg-dark-600 dark:text-gray-300"
+                    >
+                      {{
+                        openaiFastPolicyActionSummary(
+                          rule.fallback_action || "pass",
+                        )
+                      }}
+                    </span>
+                  </template>
+                </div>
+
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <!-- Service Tier -->
                   <div>
@@ -1227,14 +1268,23 @@
                   </p>
                 </div>
 
-                <!-- Model Whitelist -->
-                <div class="mt-3">
+                <!-- Target Models -->
+                <div
+                  class="mt-3"
+                  role="group"
+                  :aria-labelledby="`openai-fast-policy-models-label-${ruleIndex}`"
+                  :aria-describedby="`openai-fast-policy-models-hint-${ruleIndex}`"
+                >
                   <label
+                    :id="`openai-fast-policy-models-label-${ruleIndex}`"
                     class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400"
                   >
                     {{ t("admin.settings.openaiFastPolicy.modelWhitelist") }}
                   </label>
-                  <p class="mb-2 text-xs text-gray-400 dark:text-gray-500">
+                  <p
+                    :id="`openai-fast-policy-models-hint-${ruleIndex}`"
+                    class="mb-2 text-xs text-gray-400 dark:text-gray-500"
+                  >
                     {{
                       t("admin.settings.openaiFastPolicy.modelWhitelistHint")
                     }}
@@ -1298,11 +1348,9 @@
                   </button>
                 </div>
 
-                <!-- Fallback Action (only when model_whitelist is non-empty) -->
+                <!-- Other Models Action (only when target models are non-empty) -->
                 <div
-                  v-if="
-                    rule.model_whitelist && rule.model_whitelist.length > 0
-                  "
+                  v-if="hasOpenAIFastPolicyTargetModels(rule)"
                   class="mt-3"
                 >
                   <label
@@ -6454,6 +6502,109 @@
                 </p>
               </div>
 
+              <!-- Customer Service -->
+              <div class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">
+                      {{ t("admin.settings.site.customerService.enabled") }}
+                    </label>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.site.customerService.enabledHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.customer_service_enabled"
+                    data-testid="customer-service-toggle"
+                  />
+                </div>
+
+                <div
+                  v-if="form.customer_service_enabled"
+                  class="space-y-4 border-l-2 border-primary-100 pl-4 dark:border-primary-900/60"
+                >
+                  <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.site.customerService.title") }}
+                    </h3>
+                    <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.site.customerService.description") }}
+                    </p>
+                  </div>
+
+                  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.site.customerService.buttonText") }}
+                      </label>
+                      <input
+                        v-model="form.customer_service_button_text"
+                        type="text"
+                        class="input"
+                        :placeholder="t('admin.settings.site.customerService.buttonTextPlaceholder')"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.site.customerService.buttonTextHint") }}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.site.customerService.dialogTitle") }}
+                      </label>
+                      <input
+                        v-model="form.customer_service_title"
+                        type="text"
+                        class="input"
+                        :placeholder="t('admin.settings.site.customerService.dialogTitlePlaceholder')"
+                      />
+                      <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.site.customerService.dialogTitleHint") }}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.site.customerService.content") }}
+                    </label>
+                    <textarea
+                      v-model="form.customer_service_description"
+                      rows="3"
+                      class="input"
+                      :placeholder="t('admin.settings.site.customerService.contentPlaceholder')"
+                    ></textarea>
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.site.customerService.wechatId") }}
+                    </label>
+                    <input
+                      v-model="form.customer_service_wechat_id"
+                      type="text"
+                      class="input font-mono text-sm"
+                      :placeholder="t('admin.settings.site.customerService.wechatIdPlaceholder')"
+                    />
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.site.customerService.qrImage") }}
+                    </label>
+                    <ImageUpload
+                      v-model="form.customer_service_qr_image"
+                      mode="image"
+                      data-testid="customer-service-qr-upload"
+                      :upload-label="t('admin.settings.site.uploadImage')"
+                      :remove-label="t('admin.settings.site.remove')"
+                      :hint="t('admin.settings.site.customerService.qrImageHint')"
+                      :max-size="300 * 1024"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <!-- Doc URL -->
               <div>
                 <label
@@ -7040,6 +7191,18 @@
                   </p>
                 </div>
                 <Toggle v-model="form.channel_monitor_hide_throughput" />
+              </div>
+
+              <div v-if="form.channel_monitor_mode === 'v1'" class="flex items-start justify-between gap-4">
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">
+                    {{ t('admin.settings.features.channelMonitor.showQuota') }}
+                  </p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t('admin.settings.features.channelMonitor.showQuotaHint') }}
+                  </p>
+                </div>
+                <Toggle v-model="form.channel_monitor_show_quota" />
               </div>
             </div>
           </div>
@@ -9510,6 +9673,7 @@ type SettingsForm = Omit<
 > & {
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
   channel_monitor_hide_throughput: boolean;
+  channel_monitor_show_quota: boolean;
   smtp_password: string;
   turnstile_secret_key: string;
   tencent_captcha_app_secret_key: string;
@@ -9590,6 +9754,12 @@ const form = reactive<SettingsForm>({
   site_subtitle: "AI API Gateway",
   api_base_url: "",
   contact_info: "",
+  customer_service_enabled: false,
+  customer_service_button_text: "",
+  customer_service_title: "",
+  customer_service_description: "",
+  customer_service_wechat_id: "",
+  customer_service_qr_image: "",
   doc_url: "",
   home_content: "",
   compact_home_enabled: false,
@@ -9825,6 +9995,7 @@ const form = reactive<SettingsForm>({
   channel_monitor_mode: 'v1' as 'v1' | 'v2',
   channel_monitor_default_interval_seconds: 60,
   channel_monitor_hide_throughput: false,
+  channel_monitor_show_quota: false,
   // Available Channels feature switch
   available_channels_enabled: false,
   // Model Plaza feature switches + description
@@ -10830,6 +11001,9 @@ async function loadSettings() {
     form.channel_monitor_hide_throughput = Boolean(
       settings.channel_monitor_hide_throughput
     );
+    form.channel_monitor_show_quota = Boolean(
+      settings.channel_monitor_show_quota
+    );
     form.login_agreement_updated_at =
       settings.login_agreement_updated_at || "2026-03-31";
     form.login_agreement_documents =
@@ -11227,6 +11401,12 @@ async function saveSettings() {
       site_subtitle: form.site_subtitle,
       api_base_url: form.api_base_url,
       contact_info: form.contact_info,
+      customer_service_enabled: form.customer_service_enabled,
+      customer_service_button_text: form.customer_service_button_text,
+      customer_service_title: form.customer_service_title,
+      customer_service_description: form.customer_service_description,
+      customer_service_wechat_id: form.customer_service_wechat_id,
+      customer_service_qr_image: form.customer_service_qr_image,
       doc_url: form.doc_url,
       home_content: form.home_content,
       compact_home_enabled: form.compact_home_enabled,
@@ -11492,6 +11672,7 @@ async function saveSettings() {
       channel_monitor_default_interval_seconds:
         Number(form.channel_monitor_default_interval_seconds) || 60,
       channel_monitor_hide_throughput: Boolean(form.channel_monitor_hide_throughput),
+      channel_monitor_show_quota: Boolean(form.channel_monitor_show_quota),
       // Available Channels feature switch
       available_channels_enabled: form.available_channels_enabled,
       // Model Plaza feature switches + description
@@ -12134,6 +12315,16 @@ const openaiFastPolicyActionOptions = computed(() => [
   },
   { value: "block", label: t("admin.settings.openaiFastPolicy.actionBlock") },
 ]);
+
+function openaiFastPolicyActionSummary(
+  action: OpenAIFastPolicyRule["action"],
+) {
+  return t(`admin.settings.openaiFastPolicy.summaryAction.${action}`);
+}
+
+function hasOpenAIFastPolicyTargetModels(rule: OpenAIFastPolicyRule) {
+  return Boolean(rule.model_whitelist?.some((pattern) => pattern.trim() !== ""));
+}
 
 const openaiFastPolicyScopeOptions = computed(() => [
   { value: "all", label: t("admin.settings.openaiFastPolicy.scopeAll") },

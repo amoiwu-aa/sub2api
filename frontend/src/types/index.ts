@@ -233,6 +233,12 @@ export interface PublicSettings {
   site_subtitle: string
   api_base_url: string
   contact_info: string
+  customer_service_enabled?: boolean
+  customer_service_button_text?: string
+  customer_service_title?: string
+  customer_service_description?: string
+  customer_service_wechat_id?: string
+  customer_service_qr_image?: string
   doc_url: string
   home_content: string
   compact_home_enabled: boolean
@@ -268,6 +274,8 @@ export interface PublicSettings {
   channel_monitor_default_interval_seconds: number
   /** When true, user monitor hides RPM/TPM so scale cannot be reverse-estimated. */
   channel_monitor_hide_throughput?: boolean
+  /** When true, user monitor shows account quota/balance snapshots (default off). */
+  channel_monitor_show_quota?: boolean
   available_channels_enabled: boolean
   model_plaza_enabled: boolean
   model_plaza_require_auth: boolean
@@ -538,6 +546,9 @@ export type GroupPlatform =
   | 'grok'
   | 'cursor'
   | 'kiro'
+  | 'kimi'
+  | 'zhipu'
+  | 'deepseek'
   | 'composite'
 
 export type VideoModelPrices = Record<string, Record<string, number>>
@@ -903,6 +914,9 @@ export type AccountPlatform =
   | 'grok'
   | 'cursor'
   | 'kiro'
+  | 'kimi'
+  | 'zhipu'
+  | 'deepseek'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -1472,6 +1486,10 @@ export interface AccountUsageInfo {
   cursor_subscription_status?: string   // active | past_due | canceled
   cursor_payment_failed?: boolean
   cursor_payment_action?: string
+  cursor_sand_usage?: UsageProgress | null
+  cursor_sand_has_available_usage?: boolean
+  cursor_sand_available_banked_resets?: number
+  cursor_sand_uses_pooled_allowance?: boolean
   cursor_auto_usage?: UsageProgress | null
   cursor_api_usage?: UsageProgress | null
   cursor_included_used?: number         // 美元

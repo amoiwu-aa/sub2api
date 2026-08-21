@@ -31,11 +31,11 @@
       </div>
       <div v-if="!isAffiliateAdmin">
         <label class="input-label">{{ t('admin.users.form.roleLabel') }}</label>
-        <select v-model="form.role" class="input">
-          <option value="user">{{ t('admin.users.roles.user') }}</option>
-          <option value="affiliate_admin">{{ t('admin.users.roles.affiliate_admin') }}</option>
-          <option value="admin">{{ t('admin.users.roles.admin') }}</option>
-        </select>
+        <Select
+          v-model="form.role"
+          :options="roleOptions"
+          :searchable="false"
+        />
       </div>
       <div
         v-if="!isAffiliateAdmin && form.role === 'affiliate_admin'"
@@ -103,6 +103,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, UserAttributeValuesMap } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Select from '@/components/common/Select.vue'
 import UserAttributeForm from '@/components/user/UserAttributeForm.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
@@ -117,7 +118,21 @@ const isAffiliateAdmin = computed(() => authStore.isAffiliateAdmin)
 const submitting = ref(false); const passwordCopied = ref(false)
 const canPublishAnnouncements = ref(false)
 const distributionPermissionLoaded = ref(true)
-const form = reactive({ email: '', password: '', username: '', notes: '', role: 'user', concurrency: 1, rpm_limit: 0, customAttributes: {} as UserAttributeValuesMap })
+const roleOptions = computed(() => [
+  { value: 'user', label: t('admin.users.roles.user') },
+  { value: 'affiliate_admin', label: t('admin.users.roles.affiliate_admin') },
+  { value: 'admin', label: t('admin.users.roles.admin') }
+])
+const form = reactive({
+  email: '',
+  password: '',
+  username: '',
+  notes: '',
+  role: 'user' as AdminUser['role'],
+  concurrency: 1,
+  rpm_limit: 0,
+  customAttributes: {} as UserAttributeValuesMap
+})
 
 let permissionLoadSeq = 0
 watch(() => props.user, async (u) => {

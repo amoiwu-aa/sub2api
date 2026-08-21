@@ -15,11 +15,12 @@ const SessionTTL = 15 * time.Minute
 // verifier 不返回给前端：它是 PKCE 的私密部分，返回出去等于把「谁都能拿这个
 // uuid 去换令牌」的能力交给了浏览器。前端只需要 session_id 与 login_url。
 type LoginSession struct {
-	Verifier  string
-	UUID      string
-	LoginURL  string
-	ProxyID   *int64
-	CreatedAt time.Time
+	Verifier     string
+	UUID         string
+	LoginURL     string
+	ProxyID      *int64
+	AgentProfile AgentProfile
+	CreatedAt    time.Time
 }
 
 // SessionStore 是登录会话的内存存储，带 TTL 清理。

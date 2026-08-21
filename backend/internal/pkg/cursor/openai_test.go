@@ -16,9 +16,10 @@ func parseOpenAIRequest(t *testing.T, body string) *OpenAIRequest {
 }
 
 func TestOpenAIRequestParsesReasoningEffort(t *testing.T) {
-	req := parseOpenAIRequest(t, `{"model":"cursor/grok-4.6","reasoning_effort":"xhigh","messages":[]}`)
+	req := parseOpenAIRequest(t, `{"model":"cursor/grok-4.6","reasoning_effort":"xhigh","service_tier":"priority","messages":[]}`)
 	require.NotNil(t, req.ReasoningEffort)
 	require.Equal(t, ModelEffortXHigh, *req.ReasoningEffort)
+	require.Equal(t, "priority", req.ServiceTier)
 }
 
 func TestMessagesToAgentTextAddsRolePrefixes(t *testing.T) {

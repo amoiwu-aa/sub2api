@@ -162,4 +162,17 @@ describe('UsageProgressBar', () => {
     expect(wrapper.get('.h-1\\.5 > div').attributes('style')).toContain('width: 100%')
     expect(wrapper.get('.h-1\\.5 > div').classes()).toContain('bg-red-500')
   })
+
+  it('非零但不足 1% 的额度显示为小于 1%，避免误读为零用量', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '周额',
+        utilization: 0.024486,
+        color: 'purple'
+      }
+    })
+
+    expect(wrapper.text()).toContain('<1%')
+    expect(wrapper.get('.h-1\\.5 > div').attributes('style')).toContain('width: 0.024486%')
+  })
 })

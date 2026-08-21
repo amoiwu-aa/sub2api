@@ -8,13 +8,16 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 )
 
 const upstreamModelsBodyLimit int64 = 8 << 20
+const cursorSandModelSyncTimeout = 30 * time.Second
 
 // UpstreamModelSyncErrorKind classifies model sync failures for safe HTTP mapping.
 type UpstreamModelSyncErrorKind string
@@ -81,6 +84,10 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 		return nil, newUpstreamModelSyncConfigError("Account is required", nil)
 	}
 
+	if account.IsCursor() && account.CursorAgentProfile() == cursor.AgentProfileSand {
+		return s.fetchCursorSandUpstreamModels(ctx, account)
+	}
+
 	if account.Platform == PlatformAntigravity && account.Type != AccountTypeAPIKey {
 		return s.fetchAntigravityOAuthUpstreamModels(ctx, account)
 	}
@@ -131,13 +138,95 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 	return models, nil
 }
 
+type cursorSandModelSyncHTTPClient struct {
+	service *AccountTestService
+	account *Account
+}
+
+func (c *cursorSandModelSyncHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	if c == nil || c.service == nil || c.account == nil {
+		return nil, fmt.Errorf("cursor Sand model sync HTTP client is not configured")
+	}
+	return c.service.doUpstreamModelsRequest(req, upstreamModelsProxyURL(c.account), c.account)
+}
+
+func (s *AccountTestService) fetchCursorSandUpstreamModels(ctx context.Context, account *Account) ([]string, error) {
+	if account == nil {
+		return nil, newUpstreamModelSyncConfigError("Account is required", nil)
+	}
+	if account.Type != AccountTypeOAuth {
+		return nil, newUpstreamModelSyncUnsupportedError(
+			fmt.Sprintf("Unsupported Cursor Sand account type for upstream model sync: %s", account.Type),
+			nil,
+		)
+	}
+
+	accessToken := strings.TrimSpace(account.GetCursorAccessToken())
+	machineID := account.CursorMachineID()
+	clientVersion := account.CursorClientVersion()
+	namespace := account.CursorSandNamespace()
+	var httpClient cursor.HTTPClient
+
+	if s.cursorGatewayService != nil {
+		agentOptions, err := s.cursorGatewayService.NewTestAgentOptions(ctx, account)
+		if err != nil {
+			return nil, newUpstreamModelSyncUpstreamError("Failed to prepare Grok Bot model sync", err)
+		}
+		if agentOptions == nil || agentOptions.HTTPClient == nil {
+			return nil, newUpstreamModelSyncConfigError("Cursor gateway HTTP client is not configured", nil)
+		}
+		accessToken = strings.TrimSpace(agentOptions.AccessToken)
+		httpClient = agentOptions.HTTPClient
+		machineID = strings.TrimSpace(agentOptions.MachineID)
+		if machineID == "" {
+			machineID = strings.TrimSpace(agentOptions.Telemetry.MachineID)
+		}
+		clientVersion = strings.TrimSpace(agentOptions.ClientVersion)
+		namespace = strings.TrimSpace(agentOptions.SandNamespace)
+	} else {
+		if s.httpUpstream == nil {
+			return nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)
+		}
+		if account.ProxyID != nil && account.Proxy == nil {
+			return nil, newUpstreamModelSyncConfigError("Configured proxy is unavailable", nil)
+		}
+		httpClient = &cursorSandModelSyncHTTPClient{service: s, account: account}
+	}
+
+	if accessToken == "" {
+		return nil, newUpstreamModelSyncConfigError("No Grok Bot access token is available", nil)
+	}
+
+	fetchCtx, cancel := context.WithTimeout(ctx, cursorSandModelSyncTimeout)
+	defer cancel()
+	models, err := cursor.FetchSandUsableModels(
+		fetchCtx,
+		&cursor.Options{HTTPClient: httpClient, Profile: cursor.AgentProfileSand},
+		accessToken,
+		machineID,
+		clientVersion,
+		namespace,
+		nil,
+	)
+	if err != nil {
+		return nil, newUpstreamModelSyncUpstreamError("Failed to fetch Grok Bot model list", err)
+	}
+
+	publicModels := cursor.SandPublicModelIDs(models)
+	if len(publicModels) == 0 {
+		return nil, newUpstreamModelSyncUpstreamError("Upstream returned no verified Grok Bot models", nil)
+	}
+	return publicModels, nil
+}
+
 func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
 	switch {
 	case account.Platform == PlatformAntigravity:
 		return s.buildAntigravityAPIKeyModelsRequest(ctx, account)
 	case account.IsGrok():
 		return s.buildGrokUpstreamModelsRequest(ctx, account)
-	case account.IsOpenAI():
+	case account.IsOpenAI() || account.IsCNProvider():
+		// 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）复用 OpenAI /v1/models 探测。
 		return s.buildOpenAIUpstreamModelsRequest(ctx, account)
 	case account.IsGemini():
 		return s.buildGeminiUpstreamModelsRequest(ctx, account)
@@ -347,12 +436,14 @@ func (s *AccountTestService) buildOpenAIUpstreamModelsRequest(ctx context.Contex
 			fmt.Sprintf("Unsupported OpenAI account type for upstream model sync: %s", account.Type), nil,
 		)
 	}
-	apiKey := strings.TrimSpace(account.GetOpenAIApiKey())
+	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
 	if apiKey == "" {
 		return nil, newUpstreamModelSyncConfigError("No OpenAI API key is available", nil)
 	}
 
-	baseURL := account.GetOpenAIBaseURL()
+	// 协议感知：Anthropic 协议账号的凭证 base_url 指向 /anthropic 端点，模型
+	// 列表同步需使用 OpenAI 格式 base（供应商 × 模式默认）。
+	baseURL := account.GetOpenAIFormatBaseURL()
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://api.openai.com"
 	}

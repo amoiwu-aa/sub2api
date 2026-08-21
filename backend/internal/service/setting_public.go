@@ -185,6 +185,12 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeySiteSubtitle,
 		SettingKeyAPIBaseURL,
 		SettingKeyContactInfo,
+		SettingKeyCustomerServiceEnabled,
+		SettingKeyCustomerServiceButtonText,
+		SettingKeyCustomerServiceTitle,
+		SettingKeyCustomerServiceDescription,
+		SettingKeyCustomerServiceWeChatID,
+		SettingKeyCustomerServiceQRImage,
 		SettingKeyDocURL,
 		SettingKeyHomeContent,
 		SettingKeyCompactHomeEnabled,
@@ -235,6 +241,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyChannelMonitorMode,
 		SettingKeyChannelMonitorDefaultIntervalSeconds,
 		SettingKeyChannelMonitorHideThroughput,
+		SettingKeyChannelMonitorShowQuota,
 		SettingKeyAvailableChannelsEnabled,
 		SettingKeyModelPlazaEnabled,
 		SettingKeyModelPlazaRequireAuth,
@@ -328,6 +335,12 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SiteSubtitle:                        s.getStringOrDefault(settings, SettingKeySiteSubtitle, "AI API Gateway"),
 		APIBaseURL:                          settings[SettingKeyAPIBaseURL],
 		ContactInfo:                         settings[SettingKeyContactInfo],
+		CustomerServiceEnabled:              settings[SettingKeyCustomerServiceEnabled] == "true",
+		CustomerServiceButtonText:           strings.TrimSpace(settings[SettingKeyCustomerServiceButtonText]),
+		CustomerServiceTitle:                strings.TrimSpace(settings[SettingKeyCustomerServiceTitle]),
+		CustomerServiceDescription:          strings.TrimSpace(settings[SettingKeyCustomerServiceDescription]),
+		CustomerServiceWeChatID:             strings.TrimSpace(settings[SettingKeyCustomerServiceWeChatID]),
+		CustomerServiceQRImage:              strings.TrimSpace(settings[SettingKeyCustomerServiceQRImage]),
 		DocURL:                              settings[SettingKeyDocURL],
 		HomeContent:                         settings[SettingKeyHomeContent],
 		CompactHomeEnabled:                  settings[SettingKeyCompactHomeEnabled] == "true",
@@ -363,6 +376,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		ChannelMonitorMode:                   normalizeChannelMonitorMode(settings[SettingKeyChannelMonitorMode]),
 		ChannelMonitorDefaultIntervalSeconds: parseChannelMonitorInterval(settings[SettingKeyChannelMonitorDefaultIntervalSeconds]),
 		ChannelMonitorHideThroughput:         !isFalseSettingValue(settings[SettingKeyChannelMonitorHideThroughput]),
+		ChannelMonitorShowQuota:              settings[SettingKeyChannelMonitorShowQuota] == "true",
 
 		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
 
@@ -430,6 +444,8 @@ type ChannelMonitorRuntime struct {
 	DefaultIntervalSeconds int
 	// HideThroughput: when true, user-facing V2 APIs omit RPM/TPM scale signals.
 	HideThroughput bool
+	// ShowQuota is fail-closed and only exposes quota snapshots when explicitly enabled.
+	ShowQuota bool
 }
 
 // ActiveProbesAllowed reports whether V1 active provider probes may run.
@@ -458,6 +474,7 @@ func (s *SettingService) GetChannelMonitorRuntime(ctx context.Context) ChannelMo
 		SettingKeyChannelMonitorMode,
 		SettingKeyChannelMonitorDefaultIntervalSeconds,
 		SettingKeyChannelMonitorHideThroughput,
+		SettingKeyChannelMonitorShowQuota,
 	})
 	if err != nil {
 		return ChannelMonitorRuntime{
@@ -472,6 +489,7 @@ func (s *SettingService) GetChannelMonitorRuntime(ctx context.Context) ChannelMo
 		Mode:                   normalizeChannelMonitorMode(vals[SettingKeyChannelMonitorMode]),
 		DefaultIntervalSeconds: parseChannelMonitorInterval(vals[SettingKeyChannelMonitorDefaultIntervalSeconds]),
 		HideThroughput:         !isFalseSettingValue(vals[SettingKeyChannelMonitorHideThroughput]),
+		ShowQuota:              vals[SettingKeyChannelMonitorShowQuota] == "true",
 	}
 }
 
@@ -574,6 +592,12 @@ type PublicSettingsInjectionPayload struct {
 	SiteSubtitle                        string                   `json:"site_subtitle"`
 	APIBaseURL                          string                   `json:"api_base_url"`
 	ContactInfo                         string                   `json:"contact_info"`
+	CustomerServiceEnabled              bool                     `json:"customer_service_enabled"`
+	CustomerServiceButtonText           string                   `json:"customer_service_button_text"`
+	CustomerServiceTitle                string                   `json:"customer_service_title"`
+	CustomerServiceDescription          string                   `json:"customer_service_description"`
+	CustomerServiceWeChatID             string                   `json:"customer_service_wechat_id"`
+	CustomerServiceQRImage              string                   `json:"customer_service_qr_image"`
 	DocURL                              string                   `json:"doc_url"`
 	HomeContent                         string                   `json:"home_content"`
 	CompactHomeEnabled                  bool                     `json:"compact_home_enabled"`
@@ -618,6 +642,7 @@ type PublicSettingsInjectionPayload struct {
 	// ChannelMonitorHideThroughput is public so the user UI can hide RPM/TPM
 	// without waiting for API redaction alone (defense in depth).
 	ChannelMonitorHideThroughput bool `json:"channel_monitor_hide_throughput"`
+	ChannelMonitorShowQuota      bool `json:"channel_monitor_show_quota"`
 	AvailableChannelsEnabled     bool `json:"available_channels_enabled"`
 	ModelPlazaEnabled            bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth        bool `json:"model_plaza_require_auth"`
@@ -663,6 +688,12 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteSubtitle:                        settings.SiteSubtitle,
 		APIBaseURL:                          settings.APIBaseURL,
 		ContactInfo:                         settings.ContactInfo,
+		CustomerServiceEnabled:              settings.CustomerServiceEnabled,
+		CustomerServiceButtonText:           settings.CustomerServiceButtonText,
+		CustomerServiceTitle:                settings.CustomerServiceTitle,
+		CustomerServiceDescription:          settings.CustomerServiceDescription,
+		CustomerServiceWeChatID:             settings.CustomerServiceWeChatID,
+		CustomerServiceQRImage:              settings.CustomerServiceQRImage,
 		DocURL:                              settings.DocURL,
 		HomeContent:                         settings.HomeContent,
 		CompactHomeEnabled:                  settings.CompactHomeEnabled,
@@ -701,6 +732,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ChannelMonitorMode:                   settings.ChannelMonitorMode,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 		ChannelMonitorHideThroughput:         settings.ChannelMonitorHideThroughput,
+		ChannelMonitorShowQuota:              settings.ChannelMonitorShowQuota,
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
 		ModelPlazaEnabled:                    settings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:                settings.ModelPlazaRequireAuth,

@@ -20,6 +20,7 @@ import antigravityAPI from './antigravity'
 import grokAPI from './grok'
 import kiroAPI from './kiro'
 import cursorAPI from './cursor'
+import cnProvidersAPI from './cnProviders'
 import userAttributesAPI from './userAttributes'
 import opsAPI from './ops'
 import errorPassthroughAPI from './errorPassthrough'
@@ -58,6 +59,7 @@ export const adminAPI = {
   grok: grokAPI,
   kiro: kiroAPI,
   cursor: cursorAPI,
+  cnProviders: cnProvidersAPI,
   userAttributes: userAttributesAPI,
   ops: opsAPI,
   errorPassthrough: errorPassthroughAPI,
@@ -94,6 +96,7 @@ export {
   grokAPI,
   kiroAPI,
   cursorAPI,
+  cnProvidersAPI,
   userAttributesAPI,
   opsAPI,
   errorPassthroughAPI,

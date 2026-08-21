@@ -366,6 +366,7 @@
             label="24h"
             :title="t('admin.accounts.usageWindow.grokFreeQuota24hHint', { limit: formatCompactNumber(grokFreeTokenBar.limit) })"
             :utilization="grokFreeTokenBar.utilization"
+            :window-stats="grokFreeQuotaUsage"
             :show-now-when-idle="true"
             color="emerald"
           />
@@ -379,6 +380,7 @@
             label="7d"
             :utilization="grokWeeklyBillingBar.utilization"
             :resets-at="grokWeeklyBillingBar.resetsAt"
+            :window-stats="grokWeeklyBillingBar.windowStats"
             :show-now-when-idle="true"
             color="indigo"
           />
@@ -387,6 +389,7 @@
             label="30d"
             :utilization="grokMonthlyBillingBar.utilization"
             :resets-at="grokMonthlyBillingBar.resetsAt"
+            :window-stats="grokMonthlyBillingBar.windowStats"
             :show-now-when-idle="true"
             color="indigo"
           />
@@ -395,12 +398,16 @@
             class="flex flex-wrap items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400"
           >
             <span
+              v-if="grokPrepaidMoneyLine.showPrepaid"
               class="rounded bg-emerald-50 px-1 py-0.5 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
               :title="t('admin.accounts.usageWindow.grokPrepaid')"
             >
               {{ t('admin.accounts.usageWindow.grokPrepaid') }} ${{ grokPrepaidMoneyLine.prepaid }}
             </span>
-            <span :title="t('admin.accounts.usageWindow.grokMonthlyLimit')">
+            <span
+              v-if="grokPrepaidMoneyLine.showUsedLimit"
+              :title="t('admin.accounts.usageWindow.grokMonthlyLimit')"
+            >
               {{ t('admin.accounts.usageWindow.grokUsed') }}
               {{ grokPrepaidMoneyLine.used }}/{{ grokPrepaidMoneyLine.limit }}
             </span>
@@ -420,6 +427,21 @@
       <div v-else class="space-y-1">
         <div class="text-xs text-gray-400">-</div>
         <GrokQuotaProbeCell :account="account" compact @probed="handleGrokProbed" />
+      </div>
+    </template>
+
+    <!-- CN providers (Kimi / Zhipu / DeepSeek): coding-plan quota or payg balance -->
+    <template v-else-if="account.platform === 'kimi' || account.platform === 'zhipu' || account.platform === 'deepseek'">
+      <div class="space-y-1">
+        <!-- 子单元格各自按 模式×平台 判定可见；两者都不可见时（智谱 payg 无公开
+             余额端点、coding 探测也不适用）才回落到占位符。 -->
+        <div
+          v-if="!cnQuotaCellVisible && !cnBalanceCellVisible"
+          class="text-xs text-gray-400"
+          :title="t('admin.accounts.cnProviders.noBalanceEndpoint')"
+        >-</div>
+        <CNProviderQuotaCell :account="account" />
+        <CNProviderBalanceCell :account="account" />
       </div>
     </template>
 
@@ -606,7 +628,7 @@
       <div v-else class="text-xs text-gray-400">-</div>
     </template>
 
-    <!-- Cursor OAuth: 无上游账号额度接口，展示本地 5h / 7d 用量窗口 -->
+    <!-- Cursor IDE uses its billing buckets; Sand uses an independent weekly pool. -->
     <template v-else-if="account.platform === 'cursor' && account.type === 'oauth'">
       <div v-if="loading" class="space-y-1.5">
         <div class="flex items-center gap-1">
@@ -630,8 +652,24 @@
       </div>
 
       <div v-else-if="usageInfo" class="space-y-1">
-        <!-- 套餐徽章 + 订阅异常标记；plan 来自 usage-summary / stripe -->
-        <div v-if="cursorPlanLabel || cursorSubscriptionWarning" class="flex flex-wrap items-center gap-1">
+        <!-- Sand profile badge or Cursor IDE subscription status. -->
+        <div
+          v-if="
+            cursorIsSandProfile ||
+            cursorPlanLabel ||
+            cursorSubscriptionWarning ||
+            usageInfo.cursor_sand_uses_pooled_allowance ||
+            usageInfo.cursor_sand_has_available_usage === false
+          "
+          class="flex flex-wrap items-center gap-1"
+        >
+          <span
+            v-if="cursorIsSandProfile"
+            class="inline-block rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 dark:bg-teal-900/40 dark:text-teal-300"
+            :title="t('admin.accounts.cursor.sandQuotaHint')"
+          >
+            {{ t('admin.accounts.cursor.sandQuotaBadge') }}
+          </span>
           <span
             v-if="cursorPlanLabel"
             :class="[
@@ -649,26 +687,56 @@
           >
             ⚠ {{ cursorSubscriptionWarning.label }}
           </span>
+          <span
+            v-if="usageInfo.cursor_sand_uses_pooled_allowance"
+            class="inline-block rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"
+          >
+            {{ t('admin.accounts.cursor.sandPooled') }}
+          </span>
+          <span
+            v-if="usageInfo.cursor_sand_has_available_usage === false"
+            class="inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300"
+          >
+            {{ t('admin.accounts.cursor.sandExhausted') }}
+          </span>
         </div>
+
+        <UsageProgressBar
+          v-if="cursorIsSandProfile && usageInfo.cursor_sand_usage"
+          :label="t('admin.accounts.cursor.sandUsageLabel')"
+          :utilization="usageInfo.cursor_sand_usage.utilization || 0"
+          :resets-at="usageInfo.cursor_sand_usage.resets_at"
+          color="purple"
+        />
 
         <!-- Auto 与 API 是 Cursor 计费周期内的两个独立维度，不是滚动窗口 -->
         <UsageProgressBar
-          v-if="usageInfo.cursor_auto_usage"
+          v-if="!cursorIsSandProfile && usageInfo.cursor_auto_usage"
           :label="t('admin.accounts.cursor.autoLabel')"
           :utilization="usageInfo.cursor_auto_usage.utilization || 0"
           :resets-at="usageInfo.cursor_auto_usage.resets_at"
           color="indigo"
         />
         <UsageProgressBar
-          v-if="usageInfo.cursor_api_usage"
+          v-if="!cursorIsSandProfile && usageInfo.cursor_api_usage"
           :label="t('admin.accounts.cursor.apiLabel')"
           :utilization="usageInfo.cursor_api_usage.utilization || 0"
           :resets-at="usageInfo.cursor_api_usage.resets_at"
           color="emerald"
         />
 
-        <div v-if="cursorSpendDisplay" class="text-[10px] text-gray-500 dark:text-gray-400" :title="cursorSpendTitle">
+        <div v-if="!cursorIsSandProfile && cursorSpendDisplay" class="text-[10px] text-gray-500 dark:text-gray-400" :title="cursorSpendTitle">
           💳 {{ cursorSpendDisplay }}
+        </div>
+        <div
+          v-if="cursorIsSandProfile && (usageInfo.cursor_sand_available_banked_resets || 0) > 0"
+          class="text-[10px] text-gray-500 dark:text-gray-400"
+        >
+          {{
+            t('admin.accounts.cursor.sandBankedResets', {
+              count: usageInfo.cursor_sand_available_banked_resets
+            })
+          }}
         </div>
 
         <div class="mt-0.5 flex items-center gap-1.5">
@@ -740,6 +808,7 @@
       <OllamaCloudUsageCell
         v-if="account.ollama_cloud_usage?.eligible"
         :account="account"
+        @updated="handleOllamaCloudUsageUpdated"
       />
       <!-- Today stats row (requests, tokens, cost, user_cost) -->
       <div
@@ -818,7 +887,10 @@ import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
+import CNProviderQuotaCell from './CNProviderQuotaCell.vue'
+import CNProviderBalanceCell from './CNProviderBalanceCell.vue'
 import OllamaCloudUsageCell from './OllamaCloudUsageCell.vue'
+import { cnQuotaCellVisible as cnQuotaCellVisibleFn, cnBalanceCellVisible as cnBalanceCellVisibleFn } from './credentialsBuilder'
 
 // Module-level cache shared across all AccountUsageCell instances
 const _usageCache = new Map<number, { data: AccountUsageInfo; ts: number }>()
@@ -883,6 +955,15 @@ let visibilityObserver: IntersectionObserver | null = null
 const showUsageWindows = computed(() => {
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   if (props.account.platform === 'gemini') return true
+  // CN providers: apikey 账号也有滚动用量窗口（coding plan）或余额（payg），
+  // 由 CNProviderQuotaCell / CNProviderBalanceCell 自行探测与展示。
+  if (
+    props.account.platform === 'kimi' ||
+    props.account.platform === 'zhipu' ||
+    props.account.platform === 'deepseek'
+  ) {
+    return true
+  }
   return props.account.type === 'oauth' || props.account.type === 'setup-token'
 })
 
@@ -906,12 +987,21 @@ const shouldFetchUsage = computed(() => {
   if (props.account.platform === 'kiro') {
     return props.account.type === 'oauth'
   }
-  // Cursor 无上游账号额度接口，但可查本地 usage_logs 拼 5h/7d 窗口
+  // Cursor and Sand both expose account-level quota snapshots.
   if (props.account.platform === 'cursor') {
     return props.account.type === 'oauth'
   }
   return false
 })
+
+// CN 供应商子单元格可见性（与 CNProviderQuotaCell / CNProviderBalanceCell 共用
+// credentialsBuilder 的单一实现）：都不可见时显示 `-` 占位符。
+const cnAccountMode = computed(() => {
+  const mode = props.account.credentials?.account_mode
+  return typeof mode === 'string' ? mode : ''
+})
+const cnQuotaCellVisible = computed(() => cnQuotaCellVisibleFn(props.account.platform, cnAccountMode.value))
+const cnBalanceCellVisible = computed(() => cnBalanceCellVisibleFn(props.account.platform, cnAccountMode.value))
 
 const isBatchManaged = computed(() => typeof props.requestBatchedUsage === 'function')
 
@@ -1038,9 +1128,20 @@ const kiroCreditsDisplay = computed(() => {
   return `${used.toFixed(2)} / ${info.kiro_credits_limit.toFixed(0)}`
 })
 
+const cursorAgentProfile = computed(() => {
+  const credentials = props.account.credentials || {}
+  const raw = credentials.cursor_agent_profile ?? credentials.agent_profile
+  return typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+})
+
+const cursorIsSandProfile = computed(() => {
+  return ['sand', 'grok-bot', 'grok_bot'].includes(cursorAgentProfile.value)
+})
+
 // Cursor 套餐徽标：上游 membershipType 是 free / pro / business 等小写串，
 // 这里只做展示层归一，不改后端字段。
 const cursorPlanLabel = computed(() => {
+  if (cursorIsSandProfile.value) return null
   const raw = (usageInfo.value?.cursor_plan || '').trim()
   if (!raw) return null
   const key = raw.toLowerCase().replace(/[\s-]+/g, '_')
@@ -1091,6 +1192,7 @@ const cursorPlanTitle = computed(() => {
 
 // Cursor 按计费周期结算：订阅内额度用美元展示，超出部分单列 on-demand。
 const cursorSpendDisplay = computed(() => {
+  if (cursorIsSandProfile.value) return null
   const info = usageInfo.value
   if (!info || info.cursor_included_limit === undefined) return null
   const used = info.cursor_included_used ?? 0
@@ -1412,9 +1514,16 @@ const geminiUsageBars = computed(() => {
 interface GrokQuotaBarInfo {
   utilization: number
   resetsAt: string | null
+  windowStats?: WindowStats | null
 }
 
 const grokBilling = computed(() => usageInfo.value?.grok_billing || null)
+const grokLocalUsage7d = computed(() => (
+  usageInfo.value?.grok_local_usage_7d || usageInfo.value?.seven_day?.window_stats || null
+))
+const grokLocalUsageMonthly = computed(() => (
+  usageInfo.value?.grok_local_usage_monthly || usageInfo.value?.thirty_day?.window_stats || null
+))
 const grokWeeklyBillingBar = computed((): GrokQuotaBarInfo | null => {
   const billing = grokBilling.value
   if (billing?.period_type?.toLowerCase() !== 'weekly' || billing.usage_percent == null) {
@@ -1422,7 +1531,8 @@ const grokWeeklyBillingBar = computed((): GrokQuotaBarInfo | null => {
   }
   return {
     utilization: Math.min(100, Math.max(0, billing.usage_percent)),
-    resetsAt: billing.period_end || null
+    resetsAt: billing.period_end || null,
+    windowStats: grokLocalUsage7d.value
   }
 })
 // Monthly used/limit % from billing probe (used_percent or derived from cents).
@@ -1446,7 +1556,8 @@ const grokMonthlyBillingBar = computed((): GrokQuotaBarInfo | null => {
   }
   return {
     utilization: Math.min(100, Math.max(0, utilization)),
-    resetsAt: billing.billing_period_end || billing.period_end || null
+    resetsAt: billing.billing_period_end || billing.period_end || null,
+    windowStats: grokLocalUsageMonthly.value
   }
 })
 const formatGrokMoney = (value?: number | null) => {
@@ -1456,30 +1567,33 @@ const formatGrokMoney = (value?: number | null) => {
   if (value >= 10) return value.toFixed(1)
   return value.toFixed(2)
 }
-// Prepaid money line for paid Grok: show when prepaid_balance is present.
-// Monthly used/limit numbers are optional context; primary progress is the 30d bar.
+// Prepaid chip only when there is a positive prepaid balance.
+// Used/limit only when monthly limit is a positive number (0 means unlimited / unset).
 const grokPrepaidMoneyLine = computed(() => {
   const billing = grokBilling.value
   if (!billing) return null
   const prepaid = billing.prepaid_balance
-  // "只针对预付": only render when prepaid field exists (including $0.00).
-  if (prepaid == null || !Number.isFinite(prepaid)) return null
+  const showPrepaid = prepaid != null && Number.isFinite(prepaid) && prepaid > 0
+  const limitRaw =
+    billing.monthly_limit != null
+      ? billing.monthly_limit
+      : billing.monthly_limit_cents != null
+        ? billing.monthly_limit_cents / 100
+        : null
+  const showUsedLimit = limitRaw != null && Number.isFinite(limitRaw) && limitRaw > 0
+  if (!showPrepaid && !showUsedLimit) return null
   const used =
     billing.monthly_used != null
       ? billing.monthly_used
       : billing.used_cents != null
         ? billing.used_cents / 100
         : 0
-  const limit =
-    billing.monthly_limit != null
-      ? billing.monthly_limit
-      : billing.monthly_limit_cents != null
-        ? billing.monthly_limit_cents / 100
-        : 0
   return {
-    prepaid: formatGrokMoney(prepaid),
-    used: formatGrokMoney(used),
-    limit: formatGrokMoney(limit)
+    showPrepaid,
+    showUsedLimit,
+    prepaid: showPrepaid ? formatGrokMoney(prepaid) : null,
+    used: showUsedLimit ? formatGrokMoney(used) : null,
+    limit: showUsedLimit ? formatGrokMoney(limitRaw) : null
   }
 })
 const grokPlanLabelIsFree = (value: string) => value.includes('free') || value.includes('basic')
@@ -1816,6 +1930,10 @@ const handleQuotaResetAccountUpdated = (account: Account) => {
   // account-updated) cannot latch it and swallow a later, unrelated refresh.
   suppressOpenAIUsageRefreshUntil.value = Date.now() + SUPPRESS_USAGE_REFRESH_WINDOW_MS
   emit('account-updated', account)
+}
+
+const handleOllamaCloudUsageUpdated = (state: NonNullable<Account['ollama_cloud_usage']>) => {
+  emit('account-updated', { ...props.account, ollama_cloud_usage: state })
 }
 
 // ===== Key account today stats formatters =====

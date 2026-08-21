@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
@@ -624,8 +625,8 @@ type ForwardResult struct {
 	ClientDisconnect              bool // 客户端是否在流式传输过程中断开
 	ReasoningEffort               *string
 	// ServiceTier 是本次请求生效的速度/服务档位，写进用量日志并参与计费。
-	// Cursor 通道写 "fast" / "standard"（OpenAI 的 priority/flex 走
-	// openai_gateway_usage.go 的专属路径，不经过这里）。
+	// Cursor 通道写 "fast" / "standard"，Anthropic speed=fast 归一化为 "fast"；
+	// OpenAI 的 priority/flex 走 openai_gateway_usage.go 的专属路径。
 	ServiceTier *string
 
 	// UpstreamCredits 是上游对本次请求自报的计费量（目前只有 Kiro 的 meteringEvent）。
@@ -1477,6 +1478,21 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		}
 
 		mapping := acc.GetModelMapping()
+		if platform == PlatformCursor && acc.CursorAgentProfile() == cursor.AgentProfileSand {
+			hasAnyMapping = true
+			if len(mapping) == 0 {
+				for _, modelID := range cursor.SandDefaultModelIDs() {
+					modelSet[modelID] = struct{}{}
+				}
+				continue
+			}
+			for modelID := range mapping {
+				if acc.IsModelSupported(modelID) {
+					modelSet[modelID] = struct{}{}
+				}
+			}
+			continue
+		}
 		if len(mapping) > 0 {
 			hasAnyMapping = true
 			for model := range mapping {

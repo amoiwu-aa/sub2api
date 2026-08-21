@@ -119,7 +119,27 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 		logger.LegacyPrintf("service.openai_probe", "probe_load_account_failed: account_id=%d err=%v", accountID, err)
 		return
 	}
-	if account.Platform != PlatformOpenAI || account.Type != AccountTypeAPIKey {
+	if account.Type != AccountTypeAPIKey {
+		return
+	}
+	if account.IsCNProvider() {
+		// DeepSeek 的固定 responses 和 adaptive 账号使用原生 /responses；
+		// 其他国产供应商协议走 Chat Completions，并清理可能残留的强制模式。
+		if account.GetAPIProtocol() == APIProtocolResponses ||
+			(account.Platform == PlatformDeepseek && account.IsAdaptiveAPIProtocol()) {
+			_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
+				openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeForceResponses),
+				openai_compat.ExtraKeyResponsesSupported: true,
+			})
+			return
+		}
+		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
+			openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+			openai_compat.ExtraKeyResponsesSupported: false,
+		})
+		return
+	}
+	if account.Platform != PlatformOpenAI {
 		// 仅 OpenAI APIKey 账号需要探测；其他账号类型无能力差异。
 		return
 	}

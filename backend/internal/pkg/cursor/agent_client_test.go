@@ -222,6 +222,52 @@ func TestRunAgentTurnStreamsDeltasAndCapturesCheckpoint(t *testing.T) {
 	require.Equal(t, 1, fields[0].Number)
 }
 
+func TestRunAgentTurnImageRequestOmitsSyntheticWorkspace(t *testing.T) {
+	server := &agentTestServer{t: t, script: [][]byte{turnEndedMessage()}}
+	client, host := startAgentTestServer(t, server)
+
+	_, err := RunAgentTurn(context.Background(), testAgentOptions(t, client, host),
+		AgentTurnInput{
+			Text:           "describe it\n[Attached image]",
+			ConversationID: "conv-image",
+			ModelID:        "grok-4.6",
+			Images: []AttachedImage{{
+				ID:       "image-1",
+				Data:     []byte("image-bytes"),
+				MIMEType: "image/png",
+			}},
+		},
+		nil,
+	)
+	require.NoError(t, err)
+
+	frames := server.receivedFrames()
+	require.NotEmpty(t, frames)
+	outer, err := ReadFields(frames[0])
+	require.NoError(t, err)
+	runRequest, ok := FieldBytes(outer, 1)
+	require.True(t, ok)
+	runRequestFields, err := ReadFields(runRequest)
+	require.NoError(t, err)
+	actionEnvelope := mustFieldBytes(t, runRequestFields, 2)
+	actionEnvelopeFields, err := ReadFields(actionEnvelope)
+	require.NoError(t, err)
+	action := mustFieldBytes(t, actionEnvelopeFields, 1)
+	actionFields, err := ReadFields(action)
+	require.NoError(t, err)
+	requestContext := mustFieldBytes(t, actionFields, 2)
+	requestContextFields, err := ReadFields(requestContext)
+	require.NoError(t, err)
+	env := mustFieldBytes(t, requestContextFields, 4)
+	envFields, err := ReadFields(env)
+	require.NoError(t, err)
+
+	for _, fieldNumber := range []int{2, 7, 11, 12} {
+		_, present := FieldBytes(envFields, fieldNumber)
+		require.False(t, present, "field %d must be omitted", fieldNumber)
+	}
+}
+
 func TestRunAgentTurnSendsOfficialHeaders(t *testing.T) {
 	server := &agentTestServer{t: t, script: [][]byte{turnEndedMessage()}}
 	client, host := startAgentTestServer(t, server)
@@ -242,6 +288,33 @@ func TestRunAgentTurnSendsOfficialHeaders(t *testing.T) {
 	checksum := headers.Get("X-Cursor-Checksum")
 	telemetry := DeriveTelemetryIDs("account-42")
 	require.True(t, strings.HasSuffix(checksum, telemetry.MachineID+"/"+telemetry.MacMachineID))
+}
+
+func TestRunAgentTurnSendsSandHeadersAndAcceptsOpaqueToken(t *testing.T) {
+	server := &agentTestServer{t: t, script: [][]byte{turnEndedMessage()}}
+	client, host := startAgentTestServer(t, server)
+	opts := testAgentOptions(t, client, host)
+	opts.Profile = AgentProfileSand
+	opts.AccessToken = "sand-access-token"
+	opts.MachineID = "machine-123"
+	opts.ClientVersion = "0.20.0"
+	opts.SandNamespace = "prod"
+
+	_, err := RunAgentTurn(context.Background(), opts,
+		AgentTurnInput{Text: "hi", ConversationID: "conv-sand"}, nil)
+	require.NoError(t, err)
+
+	headers := server.capturedHeaders()
+	require.Equal(t, "Bearer "+opts.AccessToken, headers.Get("Authorization"))
+	require.Equal(t, "sand", headers.Get("X-Cursor-Client-Type"))
+	require.Equal(t, "0.20.0", headers.Get("X-Cursor-Client-Version"))
+	require.Equal(t, "prod", headers.Get("X-Sand-Box-Namespace"))
+	require.Equal(t, "false", headers.Get("X-Ghost-Mode"))
+	require.NotEmpty(t, headers.Get("X-Cursor-Checksum"))
+	require.Empty(t, headers.Get("X-Session-Id"))
+	require.Empty(t, headers.Get("X-Cursor-Conversation-Id"))
+	require.Empty(t, headers.Get("X-Amzn-Trace-Id"))
+	require.Equal(t, "Grok Bot/0.20.0", headers.Get("User-Agent"))
 }
 
 func TestRunAgentTurnRepliesToExecWithStub(t *testing.T) {

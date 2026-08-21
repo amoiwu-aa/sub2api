@@ -39,6 +39,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --canvas: #020617;
   /* 暗色表面用不透明色：半透明叠加在深底上会让边界发糊 */
   --surface-card: #0f172a;
@@ -66,6 +67,7 @@
 
   html {
     @apply scroll-smooth antialiased;
+    color-scheme: light;
   }
 
   body {

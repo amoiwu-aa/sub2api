@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import { shouldPromptNewUserOnboarding } from '@/utils/onboarding'
 
 // Mock authAPI
 const mockLogin = vi.fn()
@@ -55,6 +56,7 @@ describe('useAuthStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    sessionStorage.clear()
     vi.useFakeTimers()
     vi.clearAllMocks()
   })
@@ -77,6 +79,26 @@ describe('useAuthStore', () => {
       expect(store.isAuthenticated).toBe(true)
       expect(localStorage.getItem('auth_token')).toBe('test-token-123')
       expect(localStorage.getItem('auth_user')).toBe(JSON.stringify(fakeUser))
+    })
+
+    it('丢弃后端或旧缓存中的管理员私有字段', async () => {
+      mockLogin.mockResolvedValue({
+        ...fakeAuthResponse,
+        user: {
+          ...fakeUser,
+          notes: 'administrator-only note',
+          created_by_admin_id: 12,
+          group_rates: { 1: 0.5 },
+        },
+      })
+      const store = useAuthStore()
+
+      await store.login({ email: 'test@example.com', password: '123456' })
+
+      expect(store.user).not.toHaveProperty('notes')
+      expect(store.user).not.toHaveProperty('created_by_admin_id')
+      expect(store.user).not.toHaveProperty('group_rates')
+      expect(JSON.parse(localStorage.getItem('auth_user') || '{}')).not.toHaveProperty('notes')
     })
 
     it('登录失败时清除状态并抛出错误', async () => {
@@ -174,6 +196,21 @@ describe('useAuthStore', () => {
       expect(store.token).toBe('saved-token')
       expect(store.user).toEqual(fakeUser)
       expect(store.isAuthenticated).toBe(true)
+    })
+
+    it('恢复旧版本缓存时清除管理员备注', () => {
+      localStorage.setItem('auth_token', 'saved-token')
+      localStorage.setItem(
+        'auth_user',
+        JSON.stringify({ ...fakeUser, notes: 'legacy administrator note' })
+      )
+      mockGetCurrentUser.mockResolvedValue({ data: fakeUser })
+
+      const store = useAuthStore()
+      store.checkAuth()
+
+      expect(store.user).not.toHaveProperty('notes')
+      expect(JSON.parse(localStorage.getItem('auth_user') || '{}')).not.toHaveProperty('notes')
     })
 
     it('localStorage 无数据时保持未认证状态', () => {
@@ -311,6 +348,17 @@ describe('useAuthStore', () => {
         provider: 'oidc',
         redirect: '/register',
       })
+    })
+  })
+
+  describe('register', () => {
+    it('marks a successful registration for the onboarding choice dialog', async () => {
+      mockRegister.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+
+      await store.register({ email: 'test@example.com', password: '123456' })
+
+      expect(shouldPromptNewUserOnboarding(store.user, Date.parse('2026-08-20T01:00:00Z'))).toBe(true)
     })
   })
 

@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// SandClientVersion matches the packaged Grok Bot/Sand client analyzed in
+// this repository. Accounts may override it through AgentOptions.
+const SandClientVersion = "0.20.0"
+
 // 设备指纹与 x-cursor-checksum。
 //
 // 协议对照来源：反代 device.js 的 deriveTelemetryIds 与 cursor-agent-env.js 的
@@ -51,6 +55,17 @@ func Checksum(ids TelemetryIDs, at time.Time) string {
 	// 输入恒为 6 字节（3 的倍数），所以标准 RawURLEncoding 与反代那份手写
 	// base64 逐字符一致——它用的正是 base64url 字母表且不带 padding。
 	return base64.RawURLEncoding.EncodeToString(payload) + ids.MachineID + "/" + ids.MacMachineID
+}
+
+// SandChecksum mirrors the Sand client's checksum:
+//
+//	base64url(obfuscate(timestampBytes)) + machineID
+//
+// Unlike the IDE checksum, Sand does not append a slash-separated telemetry
+// pair. The timestamp encoding and rolling obfuscation are shared.
+func SandChecksum(machineID string, at time.Time) string {
+	payload := obfuscateChecksumBytes(checksumTimestampBytes(at))
+	return base64.RawURLEncoding.EncodeToString(payload) + strings.TrimSpace(machineID)
 }
 
 // checksumTimestampBytes 复刻反代的 6 字节时间戳编码。

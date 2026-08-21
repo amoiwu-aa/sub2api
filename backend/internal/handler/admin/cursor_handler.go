@@ -4,9 +4,11 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/cursor"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -32,7 +34,8 @@ func NewCursorHandler(
 }
 
 type CursorLoginStartRequest struct {
-	ProxyID *int64 `json:"proxy_id"`
+	ProxyID      *int64 `json:"proxy_id"`
+	AgentProfile string `json:"agent_profile"`
 }
 
 // StartLogin 生成 PKCE 与浏览器登录 URL。
@@ -41,7 +44,11 @@ func (h *CursorHandler) StartLogin(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		req = CursorLoginStartRequest{}
 	}
-	result, err := h.cursorOAuthService.StartLogin(c.Request.Context(), req.ProxyID)
+	result, err := h.cursorOAuthService.StartLoginForProfile(
+		c.Request.Context(),
+		req.ProxyID,
+		cursor.ParseAgentProfile(req.AgentProfile),
+	)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -89,7 +96,13 @@ func (h *CursorHandler) PollLogin(c *gin.Context) {
 
 type CursorImportRequest struct {
 	// Token 是 WorkosCursorSessionToken cookie 或裸 JWT。
-	Token          string `json:"token" binding:"required"`
+	Token          string `json:"token"`
+	AccessToken    string `json:"access_token"`
+	RefreshToken   string `json:"refresh_token"`
+	MachineID      string `json:"machine_id"`
+	ClientVersion  string `json:"client_version"`
+	SandNamespace  string `json:"sand_namespace"`
+	AgentProfile   string `json:"agent_profile"`
 	ProxyID        *int64 `json:"proxy_id"`
 	SelectedTeamID string `json:"selected_team_id"`
 }
@@ -107,8 +120,23 @@ func (h *CursorHandler) Import(c *gin.Context) {
 		return
 	}
 
-	tokenInfo, err := h.cursorOAuthService.ImportToken(
-		c.Request.Context(), req.Token, req.ProxyID, req.SelectedTeamID)
+	profile := cursor.ParseAgentProfile(req.AgentProfile)
+	var tokenInfo *service.CursorTokenInfo
+	var err error
+	if profile == cursor.AgentProfileSand && strings.TrimSpace(req.AccessToken) != "" {
+		tokenInfo, err = h.cursorOAuthService.ImportSandCredentials(
+			c.Request.Context(),
+			req.AccessToken,
+			req.RefreshToken,
+			req.MachineID,
+			req.ClientVersion,
+			req.SandNamespace,
+			req.ProxyID,
+		)
+	} else {
+		tokenInfo, err = h.cursorOAuthService.ImportTokenForProfile(
+			c.Request.Context(), req.Token, req.ProxyID, req.SelectedTeamID, profile)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

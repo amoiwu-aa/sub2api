@@ -71,6 +71,8 @@ func RegisterAdminRoutes(
 		// Cursor（浏览器 PKCE 登录 + 粘贴 Cookie）
 		registerCursorRoutes(super, h)
 
+		registerCNProviderRoutes(super, h)
+
 		// 代理管理
 		registerProxyRoutes(super, h, stepUpAuth)
 
@@ -557,6 +559,15 @@ func registerCursorRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		cursor.POST("/oauth/poll", h.Admin.Cursor.PollLogin)
 		cursor.POST("/import", h.Admin.Cursor.Import)
 		cursor.POST("/accounts/:id/refresh", h.Admin.Cursor.RefreshAccountToken)
+	}
+}
+
+// registerCNProviderRoutes 注册国产供应商（Kimi/智谱/DeepSeek）的额度与余额查询端点。
+func registerCNProviderRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	cn := admin.Group("/cn-providers")
+	{
+		cn.GET("/accounts/:id/quota", h.Admin.CNProvider.QueryQuota)
+		cn.GET("/accounts/:id/balance", h.Admin.CNProvider.QueryBalance)
 	}
 }
 

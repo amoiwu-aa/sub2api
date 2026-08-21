@@ -24,6 +24,7 @@ func TestAuthHandlerGetCurrentUserReturnsProfileCompatibilityFields(t *testing.T
 			ID:           31,
 			Email:        "me@example.com",
 			Username:     "linuxdo-handle",
+			Notes:        "administrator-only note",
 			Role:         service.RoleUser,
 			Status:       service.StatusActive,
 			AvatarURL:    "https://cdn.example.com/linuxdo.png",
@@ -65,6 +66,8 @@ func TestAuthHandlerGetCurrentUserReturnsProfileCompatibilityFields(t *testing.T
 	require.Equal(t, true, resp.Data["email_bound"])
 	require.Equal(t, true, resp.Data["linuxdo_bound"])
 	require.Equal(t, "https://cdn.example.com/linuxdo.png", resp.Data["avatar_url"])
+	_, notesExposed := resp.Data["notes"]
+	require.False(t, notesExposed, "administrator notes must not be returned by /auth/me")
 
 	authBindings, ok := resp.Data["auth_bindings"].(map[string]any)
 	require.True(t, ok)

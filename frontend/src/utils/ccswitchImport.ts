@@ -6,6 +6,7 @@ export const GEMINI_CC_SWITCH_MODEL = 'gemini-2.5-flash'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
 export const CURSOR_CC_SWITCH_MODEL = 'cursor/default'
 export const KIRO_CC_SWITCH_MODEL = 'kiro/auto'
+export const CURSOR_GROK_46_CLAUDE_CONTEXT_TOKENS = '1000000'
 
 /**
  * Cursor models use the cursor/ namespace. Keep the fallback list focused on
@@ -45,8 +46,6 @@ export interface CcSwitchImportDeeplinkInput {
   modelOverride?: string | null
 }
 
-const ADDITIVE_CC_SWITCH_CLIENTS: CcSwitchClientType[] = ['opencode', 'openclaw', 'hermes']
-
 const CLIENTS_BY_PLATFORM: Record<GroupPlatform, CcSwitchClientType[]> = {
   anthropic: ['claude', 'opencode', 'openclaw', 'hermes'],
   openai: ['codex', 'opencode', 'openclaw', 'hermes'],
@@ -55,6 +54,9 @@ const CLIENTS_BY_PLATFORM: Record<GroupPlatform, CcSwitchClientType[]> = {
   grok: ['grokbuild', 'claude', 'codex', 'opencode', 'openclaw', 'hermes'],
   cursor: ['claude', 'codex', 'opencode', 'openclaw', 'hermes'],
   kiro: ['claude', 'opencode', 'openclaw', 'hermes'],
+  kimi: ['claude', 'codex', 'opencode', 'openclaw', 'hermes'],
+  zhipu: ['claude', 'codex', 'opencode', 'openclaw', 'hermes'],
+  deepseek: ['claude', 'codex', 'opencode', 'openclaw', 'hermes'],
   composite: [
     'claude',
     'codex',
@@ -85,20 +87,15 @@ export function getCcSwitchClientTypes(
 }
 
 /**
- * Namespaced and mixed-platform groups need an explicit model to avoid the
- * imported tool falling back to a model from the wrong upstream family.
+ * Every import now asks the user to pick a model. Native OpenAI/Anthropic
+ * clients used to skip this step, which hid the key's real model catalog and
+ * made those groups behave differently from Cursor/Kiro/additive clients.
  */
 export function ccSwitchImportNeedsModel(
-  platform: GroupPlatform | undefined | null,
-  clientType: CcSwitchClientType
+  _platform: GroupPlatform | undefined | null,
+  _clientType: CcSwitchClientType
 ): boolean {
-  const normalizedPlatform = platform || 'anthropic'
-  return (
-    normalizedPlatform === 'cursor' ||
-    normalizedPlatform === 'kiro' ||
-    normalizedPlatform === 'composite' ||
-    ADDITIVE_CC_SWITCH_CLIENTS.includes(clientType)
-  )
+  return true
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -129,11 +126,39 @@ function defaultModelFor(
       return CURSOR_CC_SWITCH_MODEL
     case 'kiro':
       return KIRO_CC_SWITCH_MODEL
+    case 'kimi':
+    case 'zhipu':
+    case 'deepseek':
+      // 国产供应商的实际模型目录变化较快，导入前由用户显式选择。
+      return undefined
     case 'composite':
       return undefined
     default:
       return clientType === 'claude' ? undefined : ANTHROPIC_CC_SWITCH_MODEL
   }
+}
+
+function claudeImportConfig(
+  platform: GroupPlatform,
+  clientType: CcSwitchClientType,
+  model: string | undefined
+): string | undefined {
+  if (
+    platform !== 'cursor' ||
+    clientType !== 'claude' ||
+    (model !== 'cursor/grok-4.6' && model !== 'cursor/grok-4.6-max')
+  ) {
+    return undefined
+  }
+
+  return btoa(
+    JSON.stringify({
+      env: {
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: CURSOR_GROK_46_CLAUDE_CONTEXT_TOKENS,
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: CURSOR_GROK_46_CLAUDE_CONTEXT_TOKENS
+      }
+    })
+  )
 }
 
 export function resolveCcSwitchImportConfig(
@@ -178,6 +203,7 @@ export function resolveCcSwitchImportConfig(
 
 export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput): string {
   const config = resolveCcSwitchImportConfig(input.platform, input.clientType, input.baseUrl)
+  const platform = input.platform || 'anthropic'
   const entries: [string, string][] = [
     ['resource', 'provider'],
     ['app', config.app],
@@ -194,6 +220,11 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
   const model = (input.modelOverride || '').trim() || config.model
   if (model) {
     entries.splice(2, 0, ['model', model])
+  }
+
+  const inlineConfig = claudeImportConfig(platform, input.clientType, model)
+  if (inlineConfig) {
+    entries.push(['config', inlineConfig])
   }
 
   // The usage script appends /v1/usage itself. Keep its base URL at the host

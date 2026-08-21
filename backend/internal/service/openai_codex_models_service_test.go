@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 	"golang.org/x/net/http2"
 )
 
@@ -182,11 +183,11 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
 	}
 
-	if string(manifest.Body) != manifestBody {
-		t.Errorf("body not passed through verbatim: got %q", manifest.Body)
-	}
-	if manifest.ETag != `W/"abc123"` {
-		t.Errorf("etag not passed through: got %q", manifest.ETag)
+	requireCodexManifestModelEfforts(t, manifest.Body, "gpt-5.5", []string{"low", "medium", "high", "xhigh"})
+	require.Equal(t, "GPT-5.5", gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.5").display_name`).String())
+	require.False(t, gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.5").additional_speed_tiers`).Exists())
+	if manifest.ETag == `W/"abc123"` {
+		t.Errorf("enriched OAuth manifest must not keep the upstream ETag")
 	}
 	if gotAuth != "Bearer test-access-token" {
 		t.Errorf("authorization header: got %q", gotAuth)
@@ -348,8 +349,8 @@ func TestFetchCodexModelsManifestDefaultClientVersion(t *testing.T) {
 	if _, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "", ""); err != nil {
 		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
 	}
-	if gotClientVersion != openAICodexProbeVersion {
-		t.Errorf("default client_version: got %q, want %q", gotClientVersion, openAICodexProbeVersion)
+	if gotClientVersion != CodexCanonicalClientVersion() {
+		t.Errorf("default client_version: got %q, want %q", gotClientVersion, CodexCanonicalClientVersion())
 	}
 }
 
@@ -452,9 +453,9 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 		t.Errorf("originator header: got %q", gotRequest.Header.Get("Originator"))
 	}
 	if gotRequest.Header.Get("Version") != "0.144.0" {
-		t.Errorf("version header: got %q", gotRequest.Header.Get("Version"))
+		t.Errorf("version header must match the client_version query param: got %q", gotRequest.Header.Get("Version"))
 	}
-	if gotRequest.Header.Get("User-Agent") != codexCLIUserAgent {
+	if gotRequest.Header.Get("User-Agent") != CodexCanonicalUserAgent() {
 		t.Errorf("user-agent header: got %q", gotRequest.Header.Get("User-Agent"))
 	}
 	if gotRequest.Header.Get("chatgpt-account-id") != "" {
@@ -463,11 +464,13 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 	if gotProxyURL != "" || gotAccountID != 2 || gotConcurrency != 3 {
 		t.Errorf("upstream routing metadata: proxy=%q account_id=%d concurrency=%d", gotProxyURL, gotAccountID, gotConcurrency)
 	}
-	if string(manifest.Body) != manifestBody {
-		t.Errorf("body not passed through verbatim: got %q", manifest.Body)
+	if string(manifest.Body) == manifestBody {
+		t.Fatal("expected GPT-5.6 slug-only catalog to be enriched")
 	}
-	if manifest.ETag != `W/"api-key-manifest"` {
-		t.Errorf("etag not passed through: got %q", manifest.ETag)
+	requireCodexManifestModelEfforts(t, manifest.Body, "gpt-5.6", []string{"low", "medium", "high", "xhigh", "max", "ultra"})
+	require.Equal(t, "fast", gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.6").additional_speed_tiers.0`).String())
+	if manifest.ETag == `W/"api-key-manifest"` {
+		t.Errorf("enriched API key manifest must not keep the upstream ETag")
 	}
 }
 
@@ -493,9 +496,9 @@ func TestFetchCodexModelsManifestAPIKeyConvertsStandardOpenAIModelList(t *testin
 	if err != nil {
 		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
 	}
-	if got, want := string(manifest.Body), `{"models":[{"slug":"gpt-5.6"},{"slug":"gpt-5.6-codex"}]}`; got != want {
-		t.Errorf("converted body: got %q, want %q", got, want)
-	}
+	requireCodexManifestModelEfforts(t, manifest.Body, "gpt-5.6", []string{"low", "medium", "high", "xhigh", "max", "ultra"})
+	requireCodexManifestModelEfforts(t, manifest.Body, "gpt-5.6-codex", []string{"low", "medium", "high", "xhigh", "max", "ultra"})
+	require.Equal(t, "fast", gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.6").additional_speed_tiers.0`).String())
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 	require.Equal(t, `W/"openai-list"`, manifest.upstreamETag)
 }
@@ -545,7 +548,11 @@ func TestFetchCodexModelsManifestAPIKeyDisablesResponsesLiteForAffectedModels(t 
 	s := newCodexModelsAPIKeyTestService(upstream)
 	manifest, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.145.0", "")
 	require.NoError(t, err)
-	require.JSONEq(t, `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false},{"slug":"gpt-5.6-codex","use_responses_lite":true}],"metadata":{"version":1}}`, string(manifest.Body))
+	require.Equal(t, false, gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.6-sol").use_responses_lite`).Bool())
+	require.Equal(t, true, gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.6-codex").use_responses_lite`).Bool())
+	requireCodexManifestModelEfforts(t, manifest.Body, "gpt-5.6-sol", []string{"low", "medium", "high", "xhigh", "max", "ultra"})
+	require.Equal(t, "fast", gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.6-sol").additional_speed_tiers.0`).String())
+	require.Equal(t, int64(1), gjson.GetBytes(manifest.Body, "metadata.version").Int())
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 	require.Equal(t, `"upstream-strong"`, manifest.upstreamETag)
 
@@ -568,7 +575,8 @@ func TestFetchCodexModelsManifestOAuthPreservesResponsesLite(t *testing.T) {
 	s := &OpenAIGatewayService{}
 	manifest, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "0.145.0", "")
 	require.NoError(t, err)
-	require.Equal(t, manifestBody, string(manifest.Body))
+	require.Equal(t, true, gjson.GetBytes(manifest.Body, "models.0.use_responses_lite").Bool())
+	requireCodexManifestModelEfforts(t, manifest.Body, "gpt-5.6-sol", []string{"low", "medium", "high", "xhigh", "max", "ultra"})
 }
 
 func TestConvertOpenAIModelListToCodexManifest(t *testing.T) {
@@ -690,9 +698,7 @@ func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T)
 	if err != nil {
 		t.Fatalf("second fetch returned error: %v", err)
 	}
-	if got, want := string(manifest.Body), `{"models":[{"slug":"gpt-5.6"}]}`; got != want {
-		t.Errorf("body: got %q, want %q", got, want)
-	}
+	requireGPT56CodexPickerFields(t, manifest.Body, "gpt-5.6")
 	if got := calls.Load(); got != 2 {
 		t.Errorf("upstream calls: got %d, want 2", got)
 	}
@@ -776,9 +782,7 @@ func TestFetchCodexModelsManifestAPIKeySharedRefreshSurvivesCallerCancellation(t
 		if result.err != nil {
 			t.Fatalf("second caller returned error: %v", result.err)
 		}
-		if string(result.manifest.Body) != manifestBody {
-			t.Errorf("second caller body: got %q", result.manifest.Body)
-		}
+		requireGPT56CodexPickerFields(t, result.manifest.Body, "gpt-5.6")
 	case <-time.After(time.Second):
 		t.Fatal("second caller did not receive shared refresh result")
 	}
@@ -1097,9 +1101,8 @@ func TestFetchCodexModelsManifestAPIKeyRevalidatesStaleETag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stale fetch returned error: %v", err)
 	}
-	if got := string(manifest.Body); got != `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false}]}` {
-		t.Fatalf("stale body: got %q", got)
-	}
+	require.Equal(t, false, gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.6-sol").use_responses_lite`).Bool())
+	requireGPT56CodexPickerFields(t, manifest.Body, "gpt-5.6-sol")
 	select {
 	case <-refreshDone:
 	case <-time.After(time.Second):
@@ -1123,9 +1126,11 @@ func TestFetchCodexModelsManifestAPIKeyRevalidatesStaleETag(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	manifest, err = s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
-	if err != nil || string(manifest.Body) != `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false}]}` {
-		t.Fatalf("renewed cached manifest: body=%q err=%v", manifest.Body, err)
+	if err != nil {
+		t.Fatalf("renewed cached manifest: err=%v", err)
 	}
+	require.Equal(t, false, gjson.GetBytes(manifest.Body, `models.#(slug="gpt-5.6-sol").use_responses_lite`).Bool())
+	requireGPT56CodexPickerFields(t, manifest.Body, "gpt-5.6-sol")
 	if got := calls.Load(); got != 2 {
 		t.Errorf("upstream calls: got %d, want 2", got)
 	}

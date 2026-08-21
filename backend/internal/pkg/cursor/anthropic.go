@@ -27,6 +27,8 @@ type AnthropicRequest struct {
 	Stream     bool            `json:"stream,omitempty"`
 	// OutputConfig.Effort 是 Anthropic Messages 的标准推理档位字段。
 	OutputConfig *AnthropicOutputConfig `json:"output_config,omitempty"`
+	Thinking     json.RawMessage        `json:"thinking,omitempty"`
+	Speed        string                 `json:"speed,omitempty"`
 	Metadata     *struct {
 		ConversationID string `json:"conversation_id,omitempty"`
 		UserID         string `json:"user_id,omitempty"`
@@ -213,6 +215,7 @@ func anthropicMessageToTurns(message AnthropicMessage) ([]Turn, error) {
 				ToolCallID: block.ToolUseID,
 				Text:       resultText,
 				Images:     resultImages,
+				ToolError:  block.IsError,
 			}
 			if block.IsError {
 				result.Text = "[tool error] " + result.Text

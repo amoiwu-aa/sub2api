@@ -51,8 +51,51 @@ const (
 	PlatformGrok        = domain.PlatformGrok
 	PlatformCursor      = domain.PlatformCursor
 	PlatformKiro        = domain.PlatformKiro
+	PlatformKimi        = domain.PlatformKimi
+	PlatformZhipu       = domain.PlatformZhipu
+	PlatformDeepseek    = domain.PlatformDeepseek
 	PlatformComposite   = domain.PlatformComposite
 )
+
+// Account modes for domestic providers.
+const (
+	AccountModePayG   = domain.AccountModePayG
+	AccountModeCoding = domain.AccountModeCoding
+)
+
+// Upstream API protocols for domestic providers.
+const (
+	APIProtocolChatCompletions = domain.APIProtocolChatCompletions
+	APIProtocolAnthropic       = domain.APIProtocolAnthropic
+	APIProtocolResponses       = domain.APIProtocolResponses
+	APIProtocolAdaptive        = domain.APIProtocolAdaptive
+)
+
+// Default upstream endpoints. Keep these synchronized with the frontend
+// presets in credentialsBuilder.ts.
+const (
+	DefaultKimiPayGBaseURL    = "https://api.moonshot.cn/v1"
+	DefaultKimiCodingBaseURL  = "https://api.kimi.com/coding/v1"
+	DefaultZhipuPayGBaseURL   = "https://open.bigmodel.cn/api/paas/v4"
+	DefaultZhipuCodingBaseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
+	DefaultDeepseekBaseURL    = "https://api.deepseek.com"
+
+	DefaultKimiPayGAnthropicBaseURL   = "https://api.moonshot.cn/anthropic"
+	DefaultKimiCodingAnthropicBaseURL = "https://api.kimi.com/coding"
+	DefaultZhipuAnthropicBaseURL      = "https://open.bigmodel.cn/api/anthropic"
+	DefaultDeepseekAnthropicBaseURL   = "https://api.deepseek.com/anthropic"
+)
+
+// IsCNProvider reports whether platform is one of the domestic OpenAI-
+// compatible providers introduced by the upstream project.
+func IsCNProvider(platform string) bool {
+	switch platform {
+	case PlatformKimi, PlatformZhipu, PlatformDeepseek:
+		return true
+	default:
+		return false
+	}
+}
 
 // AllowedQuotaPlatforms 是允许设置 user × platform quota 的平台列表（单一权威来源）。
 // ent/schema/user_platform_quota.go 的 Validate 函数独立维护（构建期约束），
@@ -69,6 +112,9 @@ var AllowedQuotaPlatforms = []string{
 	PlatformGrok,
 	PlatformCursor,
 	PlatformKiro,
+	PlatformKimi,
+	PlatformZhipu,
+	PlatformDeepseek,
 }
 
 // AllowedSchedulingThresholdPlatforms 是允许设置账号自动停调阈值的平台列表。
@@ -77,6 +123,8 @@ var AllowedSchedulingThresholdPlatforms = []string{
 	PlatformOpenAI,
 	PlatformAnthropic,
 	PlatformGrok,
+	PlatformKimi,
+	PlatformZhipu,
 }
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
@@ -310,6 +358,12 @@ const (
 	SettingKeySiteSubtitle                = "site_subtitle"                 // 网站副标题
 	SettingKeyAPIBaseURL                  = "api_base_url"                  // API端点地址（用于客户端配置和导入）
 	SettingKeyContactInfo                 = "contact_info"                  // 客服联系方式
+	SettingKeyCustomerServiceEnabled      = "customer_service_enabled"      // 是否在顶栏展示客服售后入口
+	SettingKeyCustomerServiceButtonText   = "customer_service_button_text"  // 顶栏客服售后入口文案
+	SettingKeyCustomerServiceTitle        = "customer_service_title"        // 客服售后弹窗标题
+	SettingKeyCustomerServiceDescription  = "customer_service_description"  // 客服售后说明
+	SettingKeyCustomerServiceWeChatID     = "customer_service_wechat_id"    // 客服微信号
+	SettingKeyCustomerServiceQRImage      = "customer_service_qr_image"     // 微信群二维码图片
 	SettingKeyDocURL                      = "doc_url"                       // 文档链接
 	SettingKeyHomeContent                 = "home_content"                  // 首页内容（支持 Markdown/HTML，或 URL 作为 iframe src）
 	SettingKeyCompactHomeEnabled          = "compact_home_enabled"          // 是否启用内置简洁首页
@@ -318,8 +372,8 @@ const (
 	SettingKeyPurchaseSubscriptionURL     = "purchase_subscription_url"     // "购买订阅"页面 URL（作为 iframe src）
 	SettingKeyRedeemShopEnabled           = "redeem_shop_enabled"           // 兑换页是否展示卡网购买入口
 	SettingKeyRedeemShopURL               = "redeem_shop_url"               // 卡网购买页绝对 URL（新标签打开）
-	SettingKeyRedeemShopButtonText        = "redeem_shop_button_text"        // 购买按钮文案（空则前端用默认）
-	SettingKeyRedeemShopDescription       = "redeem_shop_description"        // 购买引导说明（空则前端用默认）
+	SettingKeyRedeemShopButtonText        = "redeem_shop_button_text"       // 购买按钮文案（空则前端用默认）
+	SettingKeyRedeemShopDescription       = "redeem_shop_description"       // 购买引导说明（空则前端用默认）
 	SettingKeyTableDefaultPageSize        = "table_default_page_size"       // 表格默认每页条数
 	SettingKeyTablePageSizeOptions        = "table_page_size_options"       // 表格可选每页条数（JSON 数组）
 	SettingKeyCustomMenuItems             = "custom_menu_items"             // 自定义菜单项（JSON 数组）
@@ -439,6 +493,10 @@ const (
 	// cannot reverse-estimate fleet volume from rates × window length.
 	// Default false (show rates). Admin endpoints always keep full metrics.
 	SettingKeyChannelMonitorHideThroughput = "channel_monitor_hide_throughput"
+
+	// SettingKeyChannelMonitorShowQuota controls whether quota/balance snapshots
+	// are exposed on user-facing monitor APIs. Admin endpoints always retain them.
+	SettingKeyChannelMonitorShowQuota = "channel_monitor_show_quota"
 
 	// SettingKeyGrokDefaultTextModel is the fallback Grok text model for empty
 	// request models and built-in Grok aliases (e.g. "grok" → this id). Default grok-4.5.

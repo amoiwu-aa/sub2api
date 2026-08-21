@@ -23,6 +23,7 @@ var (
 	errCursorAccessTokenMissing  = errors.New("cursor access token is missing")
 	errCursorConfiguredProxyMiss = errors.New("cursor configured proxy is missing")
 	errCursorTokenNotSession     = errors.New("cursor access token is not a session token")
+	errCursorTokenInvalid        = errors.New("cursor access token is not usable by the Sand client")
 )
 
 // CursorTokenCache 复用与 Gemini/Grok 相同的 token 缓存接口。
@@ -61,11 +62,12 @@ func (p *CursorTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	if account.ProxyID != nil && account.Proxy == nil {
 		return "", errCursorConfiguredProxyMiss
 	}
+	profile := account.CursorAgentProfile()
 
 	cacheKey := CursorTokenCacheKey(account)
 	if p.tokenCache != nil {
 		if token, err := p.tokenCache.GetAccessToken(ctx, cacheKey); err == nil {
-			if cached := strings.TrimSpace(token); cached != "" && cursor.IsSessionToken(cached) {
+			if cached := strings.TrimSpace(token); cursorTokenUsableForAccount(account, cached) {
 				return cached, nil
 			}
 		}
@@ -74,10 +76,14 @@ func (p *CursorTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	accessToken := strings.TrimSpace(account.GetCursorAccessToken())
 	expiresAt := cursorAccessTokenExpiry(account, accessToken)
 	// web 态必须换成 session 才能调 Agent，这与「快过期了」是两回事。
-	needsRefresh := accessToken == "" ||
-		!cursor.IsSessionToken(accessToken) ||
-		expiresAt == nil ||
-		time.Until(*expiresAt) <= cursorTokenProviderSkew
+	needsRefresh := accessToken == "" || !cursorTokenUsableForAccount(account, accessToken)
+	if profile != cursor.AgentProfileSand {
+		needsRefresh = needsRefresh ||
+			expiresAt == nil ||
+			time.Until(*expiresAt) <= cursorTokenProviderSkew
+	} else if expiresAt != nil {
+		needsRefresh = needsRefresh || time.Until(*expiresAt) <= cursorTokenProviderSkew
+	}
 
 	if needsRefresh && p.refreshAPI != nil && p.executor != nil {
 		refreshCtx, cancel := context.WithTimeout(ctx, cursorRequestRefreshLimit)
@@ -86,14 +92,14 @@ func (p *CursorTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 		switch {
 		case err != nil:
 			p.markTempUnschedulable(account, err)
-			if accessToken == "" || !cursor.IsSessionToken(accessToken) ||
+			if accessToken == "" || !cursorTokenUsableForAccount(account, accessToken) ||
 				expiresAt == nil || !time.Now().Before(*expiresAt) {
 				return "", err
 			}
 		case result != nil && result.LockHeld:
 			if p.tokenCache != nil {
 				if token, cacheErr := p.tokenCache.GetAccessToken(ctx, cacheKey); cacheErr == nil {
-					if cached := strings.TrimSpace(token); cached != "" && cursor.IsSessionToken(cached) {
+					if cached := strings.TrimSpace(token); cursorTokenUsableForAccount(account, cached) {
 						return cached, nil
 					}
 				}
@@ -103,6 +109,7 @@ func (p *CursorTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 				return "", errOAuthRefreshAccountStateChanged
 			}
 			account = result.Account
+			profile = account.CursorAgentProfile()
 			accessToken = strings.TrimSpace(account.GetCursorAccessToken())
 			expiresAt = cursorAccessTokenExpiry(account, accessToken)
 		}
@@ -113,7 +120,10 @@ func (p *CursorTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	}
 	// 走到这里还不是 session 就必须失败：拿 web token 打 Agent 只会拿到
 	// ERROR_NOT_LOGGED_IN，那是个和真实故障无关的误导性错误。
-	if !cursor.IsSessionToken(accessToken) {
+	if !cursorTokenUsableForAccount(account, accessToken) {
+		if profile == cursor.AgentProfileSand {
+			return "", errCursorTokenInvalid
+		}
 		return "", errCursorTokenNotSession
 	}
 
@@ -127,7 +137,10 @@ func (p *CursorTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			if latestToken == "" {
 				return "", errCursorAccessTokenMissing
 			}
-			if !cursor.IsSessionToken(latestToken) {
+			if !cursorTokenUsableForAccount(latestAccount, latestToken) {
+				if latestAccount.CursorAgentProfile() == cursor.AgentProfileSand {
+					return "", errCursorTokenInvalid
+				}
 				return "", errCursorTokenNotSession
 			}
 			return latestToken, nil

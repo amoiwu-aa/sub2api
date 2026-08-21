@@ -297,7 +297,15 @@ export default {
     },
     ccsModelSelect: {
       title: '选择导入模型',
-      description: '请选择要写入 CC-Switch 配置的模型：',
+      description: '可选择一个或多个模型。模型列表会优先读取当前 API Key 的真实可用模型。',
+      searchPlaceholder: '搜索模型名称...',
+      selectedCount: '已选择 {count} 个模型',
+      selectVisible: '全选当前结果',
+      clear: '清空',
+      selected: '已选择',
+      loading: '正在刷新此 API Key 的真实可用模型...',
+      empty: '没有找到匹配的模型',
+      continueImport: '继续导入（{count}）',
       models: {
         cursorDefault: '自动选择（推荐）',
         cursorGrok45: 'Grok 4.5',
@@ -309,6 +317,15 @@ export default {
         cursorGrok46Max: 'Grok 4.6（Max）',
         cursorComposer25: 'Composer 2.5'
       }
+    },
+    ccsBatchImport: {
+      title: '逐个导入所选模型',
+      description: 'CC-Switch 每个导入链接只接收一个主模型。请逐个点击导入，系统会用模型名区分各个配置。',
+      progress: '已发起 {imported} / {total} 个配置',
+      import: '导入',
+      imported: '已发起',
+      importNext: '导入下一个',
+      finish: '完成'
     },
     // 配额和有效期
     quotaLimit: '额度限制',
@@ -523,7 +540,39 @@ export default {
       openai: 'OpenAI',
       anthropic: 'Anthropic',
       gemini: 'Gemini',
-      grok: 'Grok'
+      grok: 'Grok',
+      antigravity: 'Antigravity',
+      kimi: 'Kimi',
+      zhipu: '智谱 GLM',
+      deepseek: 'DeepSeek'
+    },
+    // 检查模式（监控条目的工作方式）
+    checkMode: {
+      probe: '探活',
+      quota: '配额',
+      quota_probe: '探活 + 配额'
+    },
+    // 配额快照展示（MonitorQuotaView，管理端与用户端共用）
+    quota: {
+      unavailable: '配额信息不可用',
+      resetSoon: '即将重置',
+      windows: {
+        '5h': '5 小时',
+        '7d': '7 天',
+        '7dSonnet': '7 天 Sonnet',
+        '7dFable': '7 天 Fable',
+        weekly: '周',
+        daily: '日',
+        '30d': '30 天',
+        total: '总量'
+      },
+      labels: {
+        requests: '请求',
+        tokens: 'Token',
+        shared: '共享',
+        pro: 'Pro',
+        flash: 'Flash'
+      }
     },
     extraModelsHeader: '附加模型',
     extraModelsEmpty: '无附加模型',

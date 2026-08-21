@@ -156,6 +156,43 @@ func TestCursorParkStopsEvenWithOnDemandEnabled(t *testing.T) {
 	require.Equal(t, 1, repo.calls)
 }
 
+func TestCursorParkUsesSandWeeklyResetWhenNativeQuotaIsUnavailable(t *testing.T) {
+	available := false
+	resetAt := time.Now().Add(6 * 24 * time.Hour)
+	repo := &parkRecorder{}
+	s := &AccountUsageService{accountRepo: repo}
+	usage := &UsageInfo{
+		CursorSandHasAvailableUsage: &available,
+		CursorSandUsage:             &UsageProgress{Utilization: 100, ResetsAt: &resetAt},
+		CursorAutoUsage:             &UsageProgress{Utilization: 10},
+		CursorAPIUsage:              &UsageProgress{Utilization: 10},
+	}
+	account := cursorParkAccount()
+	account.Credentials = map[string]any{CursorAgentProfileCredentialKey: "sand"}
+
+	require.True(t, s.parkExhaustedCursorAccount(account, usage))
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, resetAt, repo.until)
+	require.Contains(t, repo.reason, "grok bot weekly unavailable")
+}
+
+func TestCursorParkSandIgnoresCursorIDEQuotaPools(t *testing.T) {
+	available := true
+	repo := &parkRecorder{}
+	s := &AccountUsageService{accountRepo: repo}
+	account := cursorParkAccount()
+	account.Credentials = map[string]any{CursorAgentProfileCredentialKey: "sand"}
+	usage := &UsageInfo{
+		CursorSandHasAvailableUsage: &available,
+		CursorSandUsage:             &UsageProgress{Utilization: 12},
+		CursorAutoUsage:             &UsageProgress{Utilization: 100},
+		CursorAPIUsage:              &UsageProgress{Utilization: 100},
+	}
+
+	require.False(t, s.parkExhaustedCursorAccount(account, usage))
+	require.Zero(t, repo.calls)
+}
+
 // TestCursorParkWatermarkIsNotBelowFullUsage 水位不该低于 100%：
 // 订阅内额度是已经付过钱的，提前停等于主动作废自己买的量。
 func TestCursorParkWatermarkIsNotBelowFullUsage(t *testing.T) {

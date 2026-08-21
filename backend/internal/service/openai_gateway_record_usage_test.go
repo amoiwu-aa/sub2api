@@ -1092,7 +1092,7 @@ func TestOpenAIGatewayServiceRecordUsage_GPT56SeparatesCacheWriteForBillingAndSt
 	require.InDelta(t, usageRepo.lastLog.TotalCost*1.1, usageRepo.lastLog.ActualCost, 1e-12)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillingDisabledByDefault(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillingDisabledWhenGroupAndAccountOff(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
@@ -1108,7 +1108,7 @@ func TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillingDisabledByDefaul
 			Model:    "gpt-5.4-2026-03-05",
 			Duration: time.Second,
 		},
-		APIKey:  openAIRecordUsageAPIKeyWithGroup(svc, 1014, true),
+		APIKey:  openAIRecordUsageAPIKeyWithGroup(svc, 1014, false),
 		User:    &User{ID: 2014},
 		Account: &Account{ID: 3014, Platform: PlatformOpenAI},
 	})
@@ -1163,7 +1163,7 @@ func TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillingEnabledPerAccoun
 	require.True(t, usageRepo.lastLog.LongContextBillingApplied)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_GroupAndAccountLongContextMustBothAllow(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_GroupOrAccountLongContextAllows(t *testing.T) {
 	tokens := OpenAIUsage{InputTokens: 300000, OutputTokens: 2000}
 	baseInput := 300000 * 2.5e-6
 	baseOutput := 2000 * 15e-6
@@ -1178,9 +1178,9 @@ func TestOpenAIGatewayServiceRecordUsage_GroupAndAccountLongContextMustBothAllow
 			Account: &Account{ID: 3020, Platform: PlatformOpenAI},
 		})
 		require.NoError(t, err)
-		require.False(t, usageRepo.lastLog.LongContextBillingApplied)
-		require.InDelta(t, baseInput, usageRepo.lastLog.InputCost, 1e-10)
-		require.InDelta(t, baseOutput, usageRepo.lastLog.OutputCost, 1e-10)
+		require.True(t, usageRepo.lastLog.LongContextBillingApplied)
+		require.InDelta(t, baseInput*2, usageRepo.lastLog.InputCost, 1e-10)
+		require.InDelta(t, baseOutput*1.5, usageRepo.lastLog.OutputCost, 1e-10)
 	})
 
 	t.Run("group off account on", func(t *testing.T) {
@@ -1196,8 +1196,9 @@ func TestOpenAIGatewayServiceRecordUsage_GroupAndAccountLongContextMustBothAllow
 			},
 		})
 		require.NoError(t, err)
-		require.False(t, usageRepo.lastLog.LongContextBillingApplied)
-		require.InDelta(t, baseInput, usageRepo.lastLog.InputCost, 1e-10)
+		require.True(t, usageRepo.lastLog.LongContextBillingApplied)
+		require.InDelta(t, baseInput*2, usageRepo.lastLog.InputCost, 1e-10)
+		require.InDelta(t, baseOutput*1.5, usageRepo.lastLog.OutputCost, 1e-10)
 	})
 
 	t.Run("group on account on", func(t *testing.T) {
@@ -1305,7 +1306,7 @@ func TestOpenAIGatewayServiceRecordUsage_SparkShadowUsesCurrentParentBillingSett
 					Model:     "gpt-5.4-2026-03-05",
 					Duration:  time.Second,
 				},
-				APIKey: openAIRecordUsageAPIKeyWithGroup(svc, 1016, true),
+				APIKey: openAIRecordUsageAPIKeyWithGroup(svc, 1016, false),
 				User:   &User{ID: 2016},
 				Account: &Account{
 					ID:              3016,
@@ -2677,6 +2678,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesImageCoun
 		"gemini-image",
 		0.15,
 		1.0,
+		time.Time{},
 		nil,
 	)
 
@@ -2716,6 +2718,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingUsesSizeTier(
 		"gemini-image",
 		1.0,
 		1.0,
+		time.Time{},
 		nil,
 	)
 
@@ -2748,6 +2751,7 @@ func TestGatewayServiceCalculateRecordUsageCost_GroupImagePriceOverridesChannelI
 		"gemini-image",
 		1.0,
 		1.0,
+		time.Time{},
 		nil,
 	)
 
@@ -2811,6 +2815,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingNormalizesMis
 		"gemini-image",
 		1.0,
 		1.0,
+		time.Time{},
 		nil,
 	)
 

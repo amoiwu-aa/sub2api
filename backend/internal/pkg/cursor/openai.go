@@ -23,6 +23,7 @@ type OpenAIRequest struct {
 	// ReasoningEffort 是 Chat Completions 的标准推理档位字段。Cursor 通道把它
 	// 映射到 RequestedModel.params["effort"]。
 	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	ServiceTier     string  `json:"service_tier,omitempty"`
 	StreamOptions   *struct {
 		IncludeUsage bool `json:"include_usage,omitempty"`
 	} `json:"stream_options,omitempty"`

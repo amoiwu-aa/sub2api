@@ -3,7 +3,10 @@ package cursor
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // 原生工具桥：把模型对 Cursor 内置工具的 exec 调用翻译成客户端协议的
@@ -242,6 +245,69 @@ func TranslateNativeExec(bridge NativeToolBridge, exec *ExecRequest) *McpToolCal
 		Arguments: arguments,
 		CallID:    callID,
 	}
+}
+
+// SyntheticInlineImageAssetExecReplies intercepts Cursor's attempt to
+// materialize an already-inline image under its synthetic editor workspace.
+// Those files do not exist on the real client machine, so forwarding the exec
+// to Claude Code produces visible empty Write/Read calls and can loop.
+func SyntheticInlineImageAssetExecReplies(exec *ExecRequest) [][]byte {
+	if _, ok := syntheticInlineImageAssetExecPath(exec); !ok {
+		return nil
+	}
+
+	const message = "The image is already attached as inline visual input. " +
+		"Inspect it directly; do not materialize or read this synthetic asset path.\n"
+	switch exec.Kind {
+	case "read", "redacted_read":
+		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
+			EncodeBytesField(1, EncodeStringField(2, message)))}
+	case "write", "delete":
+		return [][]byte{EncodeExecClientMessage(exec.ID, exec.ExecID, exec.ArgFieldNum,
+			EncodeBytesField(1, EncodeStringField(1, message)))}
+	default:
+		return nil
+	}
+}
+
+func syntheticInlineImageAssetExecPath(exec *ExecRequest) (string, bool) {
+	if exec == nil {
+		return "", false
+	}
+	switch exec.Kind {
+	case "read", "redacted_read", "write", "delete":
+	default:
+		return "", false
+	}
+
+	key := resolveNativeBridgeKey(exec)
+	values, _, err := parseNativeExecArgs(exec.Kind, key, exec.ArgBytes)
+	if err != nil {
+		return "", false
+	}
+	rawPath, _ := values["path"].(string)
+	normalized := path.Clean(strings.ReplaceAll(strings.TrimSpace(rawPath), `\`, "/"))
+	const projectRoot = "/home/cursor/.cursor/projects/"
+	if !strings.HasPrefix(normalized, projectRoot) {
+		return "", false
+	}
+
+	relative := strings.TrimPrefix(normalized, projectRoot)
+	parts := strings.Split(relative, "/")
+	if len(parts) < 3 || parts[len(parts)-2] != "assets" {
+		return "", false
+	}
+	filename := parts[len(parts)-1]
+	extension := strings.ToLower(path.Ext(filename))
+	switch extension {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+	default:
+		return "", false
+	}
+	if _, err := uuid.Parse(strings.TrimSuffix(filename, extension)); err != nil {
+		return "", false
+	}
+	return normalized, true
 }
 
 // encodeNativeArgs 按规范参数表写出入参：必填项恒出现（含零值），可选项

@@ -144,6 +144,29 @@ export default {
     confirmDontShow: '确定不再显示新手引导吗？\n\n您可以随时在右上角头像菜单中重新开启。',
     confirmExit: '确定要退出新手引导吗？您可以随时在右上角菜单重新开始。',
     interactiveHint: '按 Enter 或点击继续',
+    prompt: {
+      title: '欢迎加入 RingStar',
+      badge: '首次使用',
+      description: '账号已经创建成功。您可以进入引导模式，跟随页面提示完成第一把 API 密钥的创建和使用。',
+      timeHint: '预计用时约 1 分钟，所有操作都可以稍后修改。',
+      replayHint: '选择跳过也没关系，之后可以从右上角头像菜单重新打开“新手引导”。',
+      skip: '暂时跳过',
+      start: '进入引导模式',
+      items: {
+        key: {
+          title: '创建 API 密钥',
+          description: '选择可用分组并生成自己的访问密钥。'
+        },
+        client: {
+          title: '连接常用客户端',
+          description: '了解如何复制配置或导入到支持的客户端。'
+        },
+        usage: {
+          title: '查看用量',
+          description: '认识余额、请求记录和 Token 用量入口。'
+        }
+      }
+    },
     navigation: {
       flipPage: '翻页',
       exit: '退出'

@@ -292,7 +292,15 @@ export default {
     },
     ccsModelSelect: {
       title: 'Select Import Model',
-      description: 'Choose the model to save in the CC-Switch configuration:',
+      description: 'Select one or more models. The list is refreshed from this API key whenever possible.',
+      searchPlaceholder: 'Search models...',
+      selectedCount: '{count} model(s) selected',
+      selectVisible: 'Select visible',
+      clear: 'Clear',
+      selected: 'Selected',
+      loading: 'Refreshing the models available to this API key...',
+      empty: 'No matching models found',
+      continueImport: 'Continue ({count})',
       models: {
         cursorDefault: 'Auto (Recommended)',
         cursorGrok45: 'Grok 4.5',
@@ -304,6 +312,15 @@ export default {
         cursorGrok46Max: 'Grok 4.6 (Max)',
         cursorComposer25: 'Composer 2.5',
       }
+    },
+    ccsBatchImport: {
+      title: 'Import Selected Models',
+      description: 'CC-Switch accepts one primary model per import link. Import each item separately; the model name is added to distinguish the configurations.',
+      progress: '{imported} of {total} configurations started',
+      import: 'Import',
+      imported: 'Started',
+      importNext: 'Import Next',
+      finish: 'Done',
     },
     // Quota and expiration
     quotaLimit: 'Quota Limit',
@@ -518,7 +535,39 @@ export default {
       openai: 'OpenAI',
       anthropic: 'Anthropic',
       gemini: 'Gemini',
-      grok: 'Grok'
+      grok: 'Grok',
+      antigravity: 'Antigravity',
+      kimi: 'Kimi',
+      zhipu: 'Zhipu GLM',
+      deepseek: 'DeepSeek'
+    },
+    // Check modes (how a monitor performs its checks)
+    checkMode: {
+      probe: 'Probe',
+      quota: 'Quota',
+      quota_probe: 'Probe + Quota'
+    },
+    // Quota snapshot rendering (MonitorQuotaView, shared by admin + user views)
+    quota: {
+      unavailable: 'Quota unavailable',
+      resetSoon: 'resetting',
+      windows: {
+        '5h': '5h',
+        '7d': '7d',
+        '7dSonnet': '7d Sonnet',
+        '7dFable': '7d Fable',
+        weekly: 'Weekly',
+        daily: 'Daily',
+        '30d': '30d',
+        total: 'Total'
+      },
+      labels: {
+        requests: 'Requests',
+        tokens: 'Tokens',
+        shared: 'Shared',
+        pro: 'Pro',
+        flash: 'Flash'
+      }
     },
     extraModelsHeader: 'Extra Models',
     extraModelsEmpty: 'No extra models',

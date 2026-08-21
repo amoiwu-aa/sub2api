@@ -54,6 +54,9 @@ type Turn struct {
 	// ToolCallID / ToolName 只在 Role == RoleTool 时有意义。
 	ToolCallID string
 	ToolName   string
+	// ToolError preserves an explicit client-side tool failure signal when the
+	// inbound protocol provides one (for example Anthropic tool_result.is_error).
+	ToolError bool
 }
 
 // Conversation 是一次请求归一化后的全部输入。
@@ -93,6 +96,47 @@ func (c *Conversation) Images() []AttachedImage {
 	return images
 }
 
+// CurrentInputImages returns only images that belong to the current client
+// input batch. Stateless API clients replay the full conversation on every
+// request; attaching every historical image to Cursor's one current
+// UserMessage makes old images look new and can trigger repeated synthetic
+// assets/*.png materialization. The current batch starts at the latest real
+// user instruction and includes its following assistant/tool continuation, so
+// an image remains available after a legitimate tool call in the same task.
+func (c *Conversation) CurrentInputImages() []AttachedImage {
+	if c == nil {
+		return nil
+	}
+
+	start := 0
+	for i := len(c.Turns) - 1; i >= 0; i-- {
+		if c.Turns[i].Role == RoleUser && strings.TrimSpace(c.Turns[i].Text) != "" {
+			start = i
+			break
+		}
+	}
+
+	images := make([]AttachedImage, 0)
+	seen := make(map[[sha256.Size]byte]struct{})
+	for _, turn := range c.Turns[start:] {
+		if turn.Role != RoleUser && turn.Role != RoleTool {
+			continue
+		}
+		for _, image := range turn.Images {
+			if len(image.Data) == 0 {
+				continue
+			}
+			digest := sha256.Sum256(image.Data)
+			if _, duplicate := seen[digest]; duplicate {
+				continue
+			}
+			seen[digest] = struct{}{}
+			images = append(images, image)
+		}
+	}
+	return images
+}
+
 // HasHistory 报告是否存在需要重放的历史（多于一条用户消息，或含工具往返）。
 func (c *Conversation) HasHistory() bool {
 	if c == nil {
@@ -111,9 +155,10 @@ func (c *Conversation) HasHistory() bool {
 	return nonSystem > 1
 }
 
-// ToolContinuationDepth reports assistant tool turns after the latest
-// non-empty user instruction. Tool results alone intentionally do not reset
-// the counter because they are the normal client-driven continuation shape.
+// ToolContinuationDepth reports consecutive non-mutating assistant tool turns
+// after the latest non-empty user instruction or workspace action. Tool
+// results alone intentionally do not reset the counter because they are the
+// normal client-driven continuation shape.
 func (c *Conversation) ToolContinuationDepth() int {
 	if c == nil {
 		return 0
@@ -128,6 +173,9 @@ func (c *Conversation) ToolContinuationDepth() int {
 				return depth
 			}
 		case RoleAssistant:
+			if containsWorkspaceMutation(turn.ToolCalls) {
+				return depth
+			}
 			if len(turn.ToolCalls) > 0 {
 				depth++
 			}
@@ -141,6 +189,96 @@ func (c *Conversation) ToolContinuationDepth() int {
 type RepeatedReadObservation struct {
 	ToolName string
 	Repeats  int
+}
+
+// MissingFileReadObservation describes the latest single Read preflight whose
+// client result unambiguously says the target file is absent.
+type MissingFileReadObservation struct {
+	ToolName   string
+	ToolCallID string
+	Path       string
+}
+
+// LatestMissingFileRead reports a missing-file result when the latest completed
+// tool batch contains exactly one Read. Non-read calls such as TaskUpdate may
+// share the batch; multiple Reads stay available because suppressing Read
+// globally could block follow-up work on a different path.
+func (c *Conversation) LatestMissingFileRead() (MissingFileReadObservation, bool) {
+	if c == nil || len(c.Turns) < 2 {
+		return MissingFileReadObservation{}, false
+	}
+
+	results := make(map[string]Turn)
+	callIndex := len(c.Turns) - 1
+	for callIndex >= 0 {
+		turn := c.Turns[callIndex]
+		if turn.Role == RoleSystem {
+			callIndex--
+			continue
+		}
+		if turn.Role != RoleTool {
+			break
+		}
+		if id := strings.TrimSpace(turn.ToolCallID); id != "" {
+			results[id] = turn
+		}
+		callIndex--
+	}
+	if len(results) == 0 || callIndex < 0 {
+		return MissingFileReadObservation{}, false
+	}
+	assistant := c.Turns[callIndex]
+	if assistant.Role != RoleAssistant {
+		return MissingFileReadObservation{}, false
+	}
+
+	var readCall *ToolCall
+	for i := range assistant.ToolCalls {
+		call := &assistant.ToolCalls[i]
+		if !isReadToolName(call.Name) {
+			continue
+		}
+		if readCall != nil {
+			return MissingFileReadObservation{}, false
+		}
+		readCall = call
+	}
+	if readCall == nil {
+		return MissingFileReadObservation{}, false
+	}
+	id := strings.TrimSpace(readCall.ID)
+	result, completed := results[id]
+	if id == "" || !completed || !isMissingFileToolResult(result) {
+		return MissingFileReadObservation{}, false
+	}
+
+	return MissingFileReadObservation{
+		ToolName:   strings.TrimSpace(readCall.Name),
+		ToolCallID: id,
+		Path:       toolArgumentPath(readCall.Arguments),
+	}, true
+}
+
+// ReplaceToolResult rewrites one completed tool result while keeping the
+// call/result pairing intact for history validation and replay.
+func (c *Conversation) ReplaceToolResult(toolCallID, text string) bool {
+	if c == nil {
+		return false
+	}
+	id := strings.TrimSpace(toolCallID)
+	if id == "" {
+		return false
+	}
+	for i := len(c.Turns) - 1; i >= 0; i-- {
+		turn := &c.Turns[i]
+		if turn.Role != RoleTool || strings.TrimSpace(turn.ToolCallID) != id {
+			continue
+		}
+		turn.Text = text
+		turn.ToolError = false
+		return true
+	}
+	return false
 }
 
 // RepeatedRead reports a no-progress read loop. JSON arguments are
@@ -241,6 +379,119 @@ func isReadToolName(name string) bool {
 	}
 }
 
+func structuredToolResultErrorCode(raw string) string {
+	lower := strings.ToLower(raw)
+	start := strings.LastIndex(lower, "<meta>")
+	end := strings.LastIndex(lower, "</meta>")
+	if start < 0 || end <= start+len("<meta>") {
+		return ""
+	}
+
+	var meta map[string]any
+	if json.Unmarshal([]byte(raw[start+len("<meta>"):end]), &meta) != nil {
+		return ""
+	}
+	for _, key := range []string{"errorCode", "error_code"} {
+		if code, ok := meta[key].(string); ok && strings.TrimSpace(code) != "" {
+			return strings.ToLower(strings.TrimSpace(code))
+		}
+	}
+	if result, ok := meta["tool_result"].(map[string]any); ok {
+		if code, ok := result["error_code"].(string); ok {
+			return strings.ToLower(strings.TrimSpace(code))
+		}
+	}
+	return ""
+}
+
+func isMissingFileToolResult(turn Turn) bool {
+	raw := strings.TrimSpace(turn.Text)
+	if raw == "" {
+		return false
+	}
+	lower := strings.ToLower(raw)
+	if structuredToolResultErrorCode(raw) == "path_not_found" {
+		return true
+	}
+	if strings.HasPrefix(lower, "path does not exist:") ||
+		strings.HasPrefix(lower, "file does not exist:") {
+		return true
+	}
+
+	// These markers are specific enough to classify even when the protocol has
+	// no explicit error bit.
+	for _, marker := range []string{
+		"enoent",
+		"no such file or directory",
+		"the system cannot find the file",
+		"系统找不到指定的文件",
+		"找不到指定的文件",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+
+	normalized := strings.Trim(strings.Join(strings.Fields(lower), " "), " \t\r\n.:;")
+	switch normalized {
+	case "file not found",
+		"file does not exist",
+		"path not found",
+		"path does not exist",
+		"cannot find the file",
+		"could not find file",
+		"文件不存在",
+		"路径不存在",
+		"未找到文件":
+		return true
+	}
+
+	// Broader wording is accepted only when the client explicitly marked the
+	// tool result as an error or wrapped it as one.
+	errorMarked := turn.ToolError ||
+		strings.Contains(lower, "[tool error]") ||
+		strings.Contains(lower, "<tool_use_error>") ||
+		strings.HasPrefix(lower, "error:")
+	if !errorMarked {
+		return false
+	}
+	for _, marker := range []string{
+		"not found",
+		"does not exist",
+		"cannot find",
+		"could not find",
+		"找不到",
+		"不存在",
+		"未找到",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolArgumentPath(arguments string) string {
+	var object map[string]any
+	if json.Unmarshal([]byte(strings.TrimSpace(arguments)), &object) != nil {
+		return ""
+	}
+	for _, key := range []string{
+		"path",
+		"file_path",
+		"filepath",
+		"absolute_path",
+		"target_file",
+		"filename",
+		"file",
+	} {
+		if value, ok := object[key].(string); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
 func containsWorkspaceMutation(calls []ToolCall) bool {
 	for _, call := range calls {
 		name := strings.ToLower(strings.TrimSpace(call.Name))
@@ -294,6 +545,17 @@ func (c *Conversation) Render() string {
 	); policy != "" {
 		sb.WriteString(policy)
 		sb.WriteString("\n\n")
+	}
+
+	if len(c.CurrentInputImages()) > 0 {
+		sb.WriteString("<image_input_policy>\n")
+		sb.WriteString("The current input includes inline image attachments that are already available ")
+		sb.WriteString("as visual input. Inspect them directly. Do not call Read or Write merely to ")
+		sb.WriteString("materialize or reopen synthetic paths under ")
+		sb.WriteString("/home/cursor/.cursor/projects/*/assets/. Real workspace file operations ")
+		sb.WriteString("explicitly required by the user remain allowed. Historical [Attached image] ")
+		sb.WriteString("markers are references only unless that image is attached to the current input.\n")
+		sb.WriteString("</image_input_policy>\n\n")
 	}
 
 	system := collectSystemText(c.Turns)

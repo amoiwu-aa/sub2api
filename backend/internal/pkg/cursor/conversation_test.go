@@ -167,6 +167,12 @@ func TestToolContinuationDepth(t *testing.T) {
 		Turn{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_3", Name: "Write"}}},
 		Turn{Role: RoleTool, ToolCallID: "call_3", Text: "written"},
 	)
+	require.Zero(t, conversation.ToolContinuationDepth())
+
+	conversation.Turns = append(conversation.Turns,
+		Turn{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_4", Name: "Read"}}},
+		Turn{Role: RoleTool, ToolCallID: "call_4", Text: "written contents"},
+	)
 	require.Equal(t, 1, conversation.ToolContinuationDepth())
 }
 
@@ -218,6 +224,130 @@ func TestRepeatedRead(t *testing.T) {
 		turns = append(turns, repeatedTurns[3:]...)
 		_, repeated := (&Conversation{Turns: turns}).RepeatedRead(2)
 		require.False(t, repeated)
+	})
+}
+
+func TestLatestMissingFileRead(t *testing.T) {
+	conversation := &Conversation{Turns: []Turn{
+		{Role: RoleUser, Text: "create a summary"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{
+			ID:        "read_1",
+			Name:      "Read",
+			Arguments: `{"file_path":"summary.md"}`,
+		}}},
+		{
+			Role:       RoleTool,
+			ToolCallID: "read_1",
+			Text:       "[tool error] File does not exist.",
+			ToolError:  true,
+		},
+	}}
+
+	observation, ok := conversation.LatestMissingFileRead()
+	require.True(t, ok)
+	require.Equal(t, "Read", observation.ToolName)
+	require.Equal(t, "read_1", observation.ToolCallID)
+	require.Equal(t, "summary.md", observation.Path)
+
+	require.True(t, conversation.ReplaceToolResult("read_1", "Read preflight completed."))
+	require.Equal(t, "Read preflight completed.", conversation.Turns[2].Text)
+	require.False(t, conversation.Turns[2].ToolError)
+
+	t.Run("existing file content remains a normal read", func(t *testing.T) {
+		turns := []Turn{
+			{Role: RoleUser, Text: "inspect"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{
+				ID: "read_2", Name: "Read", Arguments: `{"file_path":"notes.md"}`,
+			}}},
+			{
+				Role:       RoleTool,
+				ToolCallID: "read_2",
+				Text:       "Troubleshooting note: the UI may display \"file not found\".",
+			},
+		}
+		_, missing := (&Conversation{Turns: turns}).LatestMissingFileRead()
+		require.False(t, missing)
+	})
+
+	t.Run("other read errors are not treated as creation preflight", func(t *testing.T) {
+		turns := []Turn{
+			{Role: RoleUser, Text: "inspect"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{
+				ID: "read_3", Name: "Read", Arguments: `{"file_path":"secret.md"}`,
+			}}},
+			{
+				Role:       RoleTool,
+				ToolCallID: "read_3",
+				Text:       "[tool error] Permission denied.",
+				ToolError:  true,
+			},
+		}
+		_, missing := (&Conversation{Turns: turns}).LatestMissingFileRead()
+		require.False(t, missing)
+	})
+
+	t.Run("AutoClaw path_not_found metadata is recognized without an OpenAI error bit", func(t *testing.T) {
+		turns := []Turn{
+			{Role: RoleUser, Text: "create the document"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{
+				ID: "read_autoclaw", Name: "Read", Arguments: `{"path":"随便看看.md"}`,
+			}}},
+			{
+				Role:       RoleTool,
+				ToolCallID: "read_autoclaw",
+				Text: "Path does not exist: 随便看看.md\n\n" +
+					`<meta>{"errorCode":"path_not_found","tool_result":{"success":false,"is_error":true,"error_code":"path_not_found"}}</meta>`,
+			},
+		}
+		observation, missing := (&Conversation{Turns: turns}).LatestMissingFileRead()
+		require.True(t, missing)
+		require.Equal(t, "read_autoclaw", observation.ToolCallID)
+		require.Equal(t, "随便看看.md", observation.Path)
+	})
+
+	t.Run("parallel reads stay available", func(t *testing.T) {
+		turns := []Turn{
+			{Role: RoleUser, Text: "inspect both"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{
+				{ID: "read_a", Name: "Read", Arguments: `{"file_path":"a.md"}`},
+				{ID: "read_b", Name: "Read", Arguments: `{"file_path":"b.md"}`},
+			}},
+			{Role: RoleTool, ToolCallID: "read_a", Text: "file not found"},
+			{Role: RoleTool, ToolCallID: "read_b", Text: "file not found"},
+		}
+		_, missing := (&Conversation{Turns: turns}).LatestMissingFileRead()
+		require.False(t, missing)
+	})
+
+	t.Run("non-read parallel tools do not delay recovery", func(t *testing.T) {
+		turns := []Turn{
+			{Role: RoleUser, Text: "create the document"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{
+				{ID: "read_5", Name: "Read", Arguments: `{"file_path":"doc.md"}`},
+				{ID: "task_1", Name: "TaskUpdate", Arguments: `{"taskId":"1"}`},
+				{ID: "task_2", Name: "TaskUpdate", Arguments: `{"taskId":"2"}`},
+			}},
+			{Role: RoleTool, ToolCallID: "read_5", Text: "file not found"},
+			{Role: RoleTool, ToolCallID: "task_1", Text: "updated"},
+			{Role: RoleTool, ToolCallID: "task_2", Text: "updated"},
+		}
+		observation, missing := (&Conversation{Turns: turns}).LatestMissingFileRead()
+		require.True(t, missing)
+		require.Equal(t, "read_5", observation.ToolCallID)
+		require.Equal(t, "doc.md", observation.Path)
+	})
+
+	t.Run("new user instruction ends the preflight window", func(t *testing.T) {
+		turns := []Turn{
+			{Role: RoleUser, Text: "inspect"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{
+				ID: "read_4", Name: "Read", Arguments: `{"file_path":"a.md"}`,
+			}}},
+			{Role: RoleTool, ToolCallID: "read_4", Text: "file not found"},
+			{Role: RoleUser, Text: "do not create it"},
+		}
+		_, missing := (&Conversation{Turns: turns}).LatestMissingFileRead()
+		require.False(t, missing)
 	})
 }
 

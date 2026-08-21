@@ -18,7 +18,6 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/singleflight"
 )
@@ -229,9 +228,10 @@ func (c *codexModelsManifestCache) set(key string, manifest *CodexModelsManifest
 // FetchCodexModelsManifest fetches the live Codex models manifest from either
 // the ChatGPT backend for OAuth accounts or a custom upstream for API key accounts.
 //
-// After validating the stable top-level envelope, OAuth response bodies are
-// passed through verbatim. Custom API key manifests receive only the narrowly
-// scoped compatibility adjustments required by custom-provider Codex clients.
+// After validating the stable top-level envelope, manifests are enriched so
+// GPT-5.6 entries advertise Pro thinking levels (max/ultra) and Fast when
+// those picker fields are missing. Custom API key manifests also receive the
+// narrowly scoped Responses Lite compatibility adjustments.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*CodexModelsManifest, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
@@ -243,7 +243,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 
 	clientVersion = strings.TrimSpace(clientVersion)
 	if clientVersion == "" {
-		clientVersion = openAICodexProbeVersion
+		clientVersion = CodexCanonicalClientVersion()
 	}
 
 	requestEndpoint := chatgptCodexModelsURL
@@ -305,9 +305,22 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		setOpenAIChatGPTAccountHeaders(headers, credAccount)
 	}
 	headers.Set("Accept", "application/json")
-	headers.Set("Originator", openai.CodexDefaultOriginator)
-	headers.Set("Version", clientVersion)
-	headers.Set("User-Agent", codexCLIUserAgent)
+	overrideUA := ""
+	if !useAPIKeyUpstream {
+		overrideUA = credAccount.GetOpenAIUserAgent()
+	}
+	identity := resolveCodexOutboundIdentity(overrideUA)
+	headers.Set("Originator", identity.originator)
+	headers.Set("User-Agent", identity.userAgent)
+	// Version 头优先与 client_version 查询参数同源：客户端自报版本合法且不低于上游
+	// 门槛时原样使用；否则回退规范版本，避免陈旧 version 触发上游 404（issue #3901）。
+	// client_version 查询参数本身始终按客户端原值透传（内容协商语义，契约见
+	// TestFetchCodexModelsManifestPassthrough）。
+	headerVersion := NormalizeCodexClientVersion(clientVersion)
+	if headerVersion == "" || CompareVersions(headerVersion, codexUpstreamMinVersion) < 0 {
+		headerVersion = identity.version
+	}
+	headers.Set("Version", headerVersion)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -533,13 +546,25 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			}
 		}
 	}
+	body, err = enrichCodexModelsManifest(body)
+	if err != nil {
+		return nil, &codexModelsManifestUpstreamError{
+			err: infraerrors.Newf(
+				http.StatusBadGateway,
+				"OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST",
+				"codex models manifest upstream could not be enriched: %v",
+				err,
+			),
+			retryable: true,
+		}
+	}
 	etag := resp.Header.Get("ETag")
 	manifest := &CodexModelsManifest{Body: body, ETag: etag}
 	if request.useAPIKeyUpstream {
 		manifest.upstreamETag = etag
-		if !bytes.Equal(body, upstreamBody) {
-			manifest.ETag = codexModelsManifestBodyETag(body)
-		}
+	}
+	if !bytes.Equal(body, upstreamBody) {
+		manifest.ETag = codexModelsManifestBodyETag(body)
 	}
 	return manifest, nil
 }

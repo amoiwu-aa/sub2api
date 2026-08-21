@@ -51,7 +51,25 @@ func (s *CursorGatewayService) quotaBlockReason(account *Account, modelID string
 		return ""
 	}
 	usage, ok := s.quotaReader.CursorQuotaSnapshot(account.ID)
-	if !ok || usage == nil || usage.CursorIsUnlimited {
+	if !ok || usage == nil {
+		return ""
+	}
+	if account.CursorAgentProfile() == cursor.AgentProfileSand {
+		if usage.CursorSandHasAvailableUsage != nil && !*usage.CursorSandHasAvailableUsage {
+			resetHint := ""
+			if usage.CursorSandUsage != nil && usage.CursorSandUsage.ResetsAt != nil {
+				resetHint = fmt.Sprintf(
+					" (%s reset)",
+					usage.CursorSandUsage.ResetsAt.Local().Format("2006-01-02 15:04"),
+				)
+			}
+			return "Grok Bot weekly usage is exhausted" + resetHint
+		}
+		// Grok Bot has its own weekly pool. Cursor Models / Other Models usage
+		// belongs to the IDE product and must not block a Sand account.
+		return ""
+	}
+	if usage.CursorIsUnlimited {
 		return ""
 	}
 

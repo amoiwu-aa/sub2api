@@ -45,14 +45,107 @@ type Model struct {
 	CursorCapabilities *ModelCapabilities `json:"cursor_capabilities,omitempty"`
 }
 
-const BridgeProtocolVersion = "1.0"
+const BridgeProtocolVersion = "1.1"
 
 // ModelCapabilities describes verified request-level controls for one model.
 type ModelCapabilities struct {
 	BridgeVersion string   `json:"bridge_version"`
 	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"default_effort,omitempty"`
 	Fast          bool     `json:"fast"`
+	DefaultFast   bool     `json:"default_fast"`
+	Thinking      bool     `json:"thinking"`
 	MaxMode       bool     `json:"max_mode"`
+}
+
+type modelControlSpec struct {
+	Efforts       []string
+	DefaultEffort string
+	Fast          bool
+	DefaultFast   bool
+	Thinking      bool
+	MaxMode       bool
+	DefaultParams []ModelParam
+}
+
+var modelControlSpecs = map[string]modelControlSpec{
+	"claude-fable-5": {
+		Efforts:       []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh, ModelEffortMax},
+		DefaultEffort: ModelEffortHigh,
+		Thinking:      true,
+		DefaultParams: []ModelParam{
+			{ID: "thinking", Value: "true"},
+			{ID: "effort", Value: ModelEffortHigh},
+		},
+	},
+	"claude-opus-4-8": {
+		Efforts:       []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh, ModelEffortMax},
+		DefaultEffort: ModelEffortHigh,
+		Fast:          true,
+		Thinking:      true,
+		DefaultParams: []ModelParam{
+			{ID: "thinking", Value: "true"},
+			{ID: "context", Value: "300k"},
+			{ID: "effort", Value: ModelEffortHigh},
+			{ID: "fast", Value: "false"},
+		},
+	},
+	"claude-sonnet-5": {
+		Efforts:       []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh, ModelEffortMax},
+		DefaultEffort: ModelEffortHigh,
+		Thinking:      true,
+		DefaultParams: []ModelParam{
+			{ID: "thinking", Value: "true"},
+			{ID: "effort", Value: ModelEffortHigh},
+		},
+	},
+	"gpt-5.6-sol": {
+		Efforts:       []string{ModelEffortNone, ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh, ModelEffortMax},
+		DefaultEffort: ModelEffortMedium,
+		Fast:          true,
+		DefaultParams: []ModelParam{
+			{ID: "effort", Value: ModelEffortMedium},
+			{ID: "fast", Value: "false"},
+		},
+	},
+	"gpt-5.6-terra": {
+		Efforts:       []string{ModelEffortNone, ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh, ModelEffortMax},
+		DefaultEffort: ModelEffortMedium,
+		Fast:          true,
+		DefaultParams: []ModelParam{
+			{ID: "effort", Value: ModelEffortMedium},
+			{ID: "fast", Value: "false"},
+		},
+	},
+	"grok-4.6": {
+		Efforts:       []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh},
+		DefaultEffort: ModelEffortHigh,
+		Fast:          true,
+		DefaultFast:   true,
+		MaxMode:       true,
+		DefaultParams: []ModelParam{
+			{ID: "effort", Value: ModelEffortHigh},
+			{ID: "fast", Value: "true"},
+		},
+	},
+	"grok-4.5": {
+		Efforts:       []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh},
+		DefaultEffort: ModelEffortHigh,
+		Fast:          true,
+		DefaultFast:   true,
+		MaxMode:       true,
+		DefaultParams: []ModelParam{
+			{ID: "effort", Value: ModelEffortHigh},
+			{ID: "fast", Value: "true"},
+		},
+	},
+	"composer-2.5": {
+		Fast:        true,
+		DefaultFast: true,
+		DefaultParams: []ModelParam{
+			{ID: "fast", Value: "true"},
+		},
+	},
 }
 
 // NativeToolCapability describes the canonical arguments emitted for one
@@ -132,17 +225,13 @@ func DefaultBridgeCapabilities(defaultMode string) BridgeCapabilities {
 func modelCapabilities(publicModel string) ModelCapabilities {
 	selection := ResolveModel(publicModel)
 	capabilities := ModelCapabilities{BridgeVersion: BridgeProtocolVersion}
-	switch selection.ModelID {
-	case "grok-4.6":
-		capabilities.Efforts = []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh, ModelEffortXHigh}
-		capabilities.Fast = true
-		capabilities.MaxMode = true
-	case "grok-4.5":
-		capabilities.Efforts = []string{ModelEffortLow, ModelEffortMedium, ModelEffortHigh}
-		capabilities.Fast = true
-		capabilities.MaxMode = true
-	case "composer-2.5":
-		capabilities.Fast = true
+	if spec, ok := modelControlSpecs[selection.ModelID]; ok {
+		capabilities.Efforts = append([]string(nil), spec.Efforts...)
+		capabilities.DefaultEffort = spec.DefaultEffort
+		capabilities.Fast = spec.Fast
+		capabilities.DefaultFast = spec.DefaultFast
+		capabilities.Thinking = spec.Thinking
+		capabilities.MaxMode = spec.MaxMode
 	}
 	return capabilities
 }
@@ -150,6 +239,60 @@ func modelCapabilities(publicModel string) ModelCapabilities {
 // DefaultModelIDs 返回内置模型的对外 ID 列表（含 cursor/ 前缀）。
 func DefaultModelIDs() []string {
 	models := DefaultModels()
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		ids = append(ids, model.ID)
+	}
+	return ids
+}
+
+// sandSupportedUpstreamModelIDs is the compact RingStar catalog verified
+// against Grok Bot's AgentService/GetUsableModels response. Sand returns many
+// effort/fast variants; the public bridge keeps the existing compact IDs and
+// expresses those controls through RequestedModel parameters.
+var sandSupportedUpstreamModelIDs = map[string]struct{}{
+	AutoModelID:       {},
+	"claude-fable-5":  {},
+	"claude-opus-4-8": {},
+	"claude-sonnet-5": {},
+	"gpt-5.6-sol":     {},
+	"gpt-5.6-terra":   {},
+	"grok-4.6":        {},
+	"grok-4.5":        {},
+	"composer-2.5":    {},
+}
+
+// IsSandModelSupported reports whether a public or bare Cursor model belongs
+// to the verified Grok Bot/Sand catalog. Unknown models are never allowed to
+// fall back to cursor/default for this check.
+func IsSandModelSupported(publicModel string) bool {
+	selection, err := ResolveModelStrict(publicModel)
+	if err != nil {
+		return false
+	}
+	_, ok := sandSupportedUpstreamModelIDs[selection.ModelID]
+	return ok
+}
+
+// SandDefaultModels returns the compact model catalog exposed for Grok Bot
+// accounts. IDs remain cursor/... so existing clients keep routing them to the
+// Cursor platform; the account profile selects the Sand transport.
+func SandDefaultModels() []Model {
+	defaults := DefaultModels()
+	models := make([]Model, 0, len(defaults))
+	for _, model := range defaults {
+		if !IsSandModelSupported(model.ID) {
+			continue
+		}
+		model.OwnedBy = "grok-bot"
+		model.DisplayName = strings.Replace(model.DisplayName, "Cursor ", "Grok Bot ", 1)
+		models = append(models, model)
+	}
+	return models
+}
+
+func SandDefaultModelIDs() []string {
+	models := SandDefaultModels()
 	ids := make([]string, 0, len(models))
 	for _, model := range models {
 		ids = append(ids, model.ID)
@@ -189,10 +332,12 @@ type ModelSelection struct {
 }
 
 const (
+	ModelEffortNone   = "none"
 	ModelEffortLow    = "low"
 	ModelEffortMedium = "medium"
 	ModelEffortHigh   = "high"
 	ModelEffortXHigh  = "xhigh"
+	ModelEffortMax    = "max"
 )
 
 // ModelOptions 是公共 API 对 Cursor RequestedModel 的可调覆盖项。
@@ -200,9 +345,10 @@ const (
 // Fast / MaxMode 用指针区分「没有指定」与显式 false。没有指定时保留模型目录的
 // 默认值，旧客户端只传 model 的行为因此完全不变。
 type ModelOptions struct {
-	Effort  *string `json:"effort,omitempty"`
-	Fast    *bool   `json:"fast,omitempty"`
-	MaxMode *bool   `json:"max_mode,omitempty"`
+	Effort   *string `json:"effort,omitempty"`
+	Fast     *bool   `json:"fast,omitempty"`
+	Thinking *bool   `json:"thinking,omitempty"`
+	MaxMode  *bool   `json:"max_mode,omitempty"`
 }
 
 // ResolveModel 把对外模型名解析成上游选型。
@@ -220,7 +366,7 @@ func ResolveModel(publicModel string) ModelSelection {
 	if rest, found := strings.CutSuffix(bare, MaxModeSuffix); found {
 		// 只有剥掉后缀能对上一个真实模型时才认它是 MAX 变体，
 		// 否则 "foo-max" 这种名字会被拆成一个并不存在的 "foo"。
-		if _, ok := knownUpstreamModelIDs[rest]; ok {
+		if spec, ok := modelControlSpecs[rest]; ok && spec.MaxMode {
 			bare, maxMode = rest, true
 		}
 	}
@@ -234,7 +380,7 @@ func ResolveModel(publicModel string) ModelSelection {
 		return ModelSelection{ModelID: AutoModelID, Params: []ModelParam{}}
 	}
 
-	selection := ModelSelection{ModelID: bare, Params: DefaultModelParams()}
+	selection := ModelSelection{ModelID: bare, Params: DefaultModelParamsFor(bare)}
 	if maxMode {
 		selection.MaxMode = &maxMode
 	}
@@ -253,7 +399,8 @@ func ResolveModelStrict(publicModel string) (ModelSelection, error) {
 		return ModelSelection{}, fmt.Errorf("cursor model is required")
 	}
 	if rest, found := strings.CutSuffix(bare, MaxModeSuffix); found {
-		if _, ok := knownUpstreamModelIDs[rest]; !ok {
+		spec, ok := modelControlSpecs[rest]
+		if !ok || !spec.MaxMode {
 			return ModelSelection{}, fmt.Errorf("unknown cursor model %q", publicModel)
 		}
 		return ResolveModel(publicModel), nil
@@ -279,7 +426,7 @@ func ResolveModelWithOptions(
 	options *ModelOptions,
 ) (ModelSelection, error) {
 	selection := ResolveModel(publicModel)
-	return applyModelOptions(selection, standardEffort, options)
+	return applyModelOptions(selection, modelOptionsWithEffort(standardEffort), options)
 }
 
 // ResolveModelWithOptionsStrict combines strict catalog validation with
@@ -293,116 +440,207 @@ func ResolveModelWithOptionsStrict(
 	if err != nil {
 		return ModelSelection{}, err
 	}
-	return applyModelOptions(selection, standardEffort, options)
+	return applyModelOptions(selection, modelOptionsWithEffort(standardEffort), options)
+}
+
+// ResolveModelWithStandardOptions applies protocol-standard effort, speed and
+// thinking controls before the RingStar cursor_options override.
+func ResolveModelWithStandardOptions(
+	publicModel string,
+	standardOptions *ModelOptions,
+	options *ModelOptions,
+) (ModelSelection, error) {
+	selection := ResolveModel(publicModel)
+	return applyModelOptions(selection, standardOptions, options)
+}
+
+// ResolveModelWithStandardOptionsStrict is the strict catalog variant used by
+// public gateways.
+func ResolveModelWithStandardOptionsStrict(
+	publicModel string,
+	standardOptions *ModelOptions,
+	options *ModelOptions,
+) (ModelSelection, error) {
+	selection, err := ResolveModelStrict(publicModel)
+	if err != nil {
+		return ModelSelection{}, err
+	}
+	return applyModelOptions(selection, standardOptions, options)
 }
 
 func applyModelOptions(
 	selection ModelSelection,
-	standardEffort *string,
+	standardOptions *ModelOptions,
 	options *ModelOptions,
 ) (ModelSelection, error) {
-	effort := ""
-	standardEffortValue := ""
-	customEffortValue := ""
-	hasEffort := false
-	if standardEffort != nil {
-		normalized, err := normalizeModelEffort(*standardEffort)
-		if err != nil {
-			return ModelSelection{}, err
-		}
-		standardEffortValue = normalized
-		effort = normalized
-		hasEffort = true
-	}
-	if options != nil {
-		if options.Effort != nil {
-			normalized, err := normalizeModelEffort(*options.Effort)
-			if err != nil {
-				return ModelSelection{}, err
-			}
-			customEffortValue = normalized
-			effort = normalized
-			hasEffort = true
-		}
-	}
-	hasOverrides := hasEffort || (options != nil && (options.Fast != nil || options.MaxMode != nil))
-	if !hasOverrides {
+	if !hasModelOptions(standardOptions) && !hasModelOptions(options) {
 		return selection, nil
 	}
 
 	if selection.ModelID == AutoModelID {
 		return ModelSelection{}, fmt.Errorf("cursor model options require a named model, not cursor/default")
 	}
-	if !supportsRequestModelOptions(selection.ModelID) {
-		return ModelSelection{}, fmt.Errorf(
-			"cursor model options are not verified for %q; supported models are cursor/grok-4.6, cursor/grok-4.5 and cursor/composer-2.5",
-			PublicModelID(selection.ModelID),
-		)
-	}
-	for _, explicitEffort := range []string{standardEffortValue, customEffortValue} {
-		if explicitEffort != "" && !supportsModelEffort(selection.ModelID, explicitEffort) {
-			return ModelSelection{}, fmt.Errorf(
-				"effort %q is not supported by %s",
-				explicitEffort,
-				PublicModelID(selection.ModelID),
-			)
-		}
+	if _, ok := modelControlSpecs[selection.ModelID]; !ok {
+		return ModelSelection{}, fmt.Errorf("cursor model options are not supported by %s", PublicModelID(selection.ModelID))
 	}
 
-	selection.Params = append([]ModelParam(nil), selection.Params...)
-	if effort != "" {
-		selection.Params = setModelParam(selection.Params, "effort", effort)
+	normalizedStandard, err := normalizeModelOptions(selection.ModelID, standardOptions)
+	if err != nil {
+		return ModelSelection{}, err
 	}
-	if options != nil {
-		if options.Fast != nil {
-			selection.Params = setModelParam(selection.Params, "fast", fmt.Sprintf("%t", *options.Fast))
-		}
-		if options.MaxMode != nil {
-			maxMode := *options.MaxMode
-			selection.MaxMode = &maxMode
-		}
+	normalizedCustom, err := normalizeModelOptions(selection.ModelID, options)
+	if err != nil {
+		return ModelSelection{}, err
+	}
+	effective := mergeModelOptions(normalizedStandard, normalizedCustom)
+
+	selection.Params = append([]ModelParam(nil), selection.Params...)
+	if effective.Effort != nil {
+		selection.Params = setModelParam(selection.Params, "effort", *effective.Effort)
+	}
+	if effective.Fast != nil {
+		selection.Params = setModelParam(selection.Params, "fast", fmt.Sprintf("%t", *effective.Fast))
+	}
+	if effective.Thinking != nil {
+		selection.Params = setModelParam(selection.Params, "thinking", fmt.Sprintf("%t", *effective.Thinking))
+	}
+	if effective.MaxMode != nil {
+		maxMode := *effective.MaxMode
+		selection.MaxMode = &maxMode
 	}
 	return selection, nil
 }
 
-func normalizeModelEffort(raw string) (string, error) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if normalized == "" {
-		return "", fmt.Errorf("effort must not be empty")
+func modelOptionsWithEffort(effort *string) *ModelOptions {
+	if effort == nil {
+		return nil
+	}
+	return &ModelOptions{Effort: effort}
+}
+
+func hasModelOptions(options *ModelOptions) bool {
+	return options != nil &&
+		(options.Effort != nil || options.Fast != nil || options.Thinking != nil || options.MaxMode != nil)
+}
+
+func normalizeModelOptions(modelID string, options *ModelOptions) (*ModelOptions, error) {
+	if options == nil {
+		return nil, nil
+	}
+	spec, ok := modelControlSpecs[modelID]
+	if !ok {
+		return nil, fmt.Errorf("cursor model options are not supported by %s", PublicModelID(modelID))
+	}
+	normalized := &ModelOptions{}
+	if options.Effort != nil {
+		effort, err := normalizeModelEffortForModel(modelID, *options.Effort)
+		if err != nil {
+			return nil, err
+		}
+		normalized.Effort = &effort
+	}
+	if options.Fast != nil {
+		if *options.Fast && !spec.Fast {
+			return nil, fmt.Errorf("fast mode is not supported by %s", PublicModelID(modelID))
+		}
+		if spec.Fast {
+			fast := *options.Fast
+			normalized.Fast = &fast
+		}
+	}
+	if options.Thinking != nil {
+		if *options.Thinking && !spec.Thinking {
+			return nil, fmt.Errorf("thinking mode is not supported by %s", PublicModelID(modelID))
+		}
+		if spec.Thinking {
+			thinking := *options.Thinking
+			normalized.Thinking = &thinking
+		}
+	}
+	if options.MaxMode != nil {
+		if *options.MaxMode && !spec.MaxMode {
+			return nil, fmt.Errorf("MAX mode is not supported by %s", PublicModelID(modelID))
+		}
+		if spec.MaxMode {
+			maxMode := *options.MaxMode
+			normalized.MaxMode = &maxMode
+		}
 	}
 	return normalized, nil
 }
 
-func supportsRequestModelOptions(modelID string) bool {
-	switch modelID {
-	case "grok-4.6", "grok-4.5":
-		return true
-	case "composer-2.5":
-		// composer 的默认参数就带 fast=true（见官方目录
-		// officialSelectedSubagentModels），fast 是它的合法参数。必须允许
-		// cursor_options.fast=false：composer 的 Fast 官方价是标准价的
-		// 3~7.5 倍，没有这个退出通道，标准档价格就是不可达的。
-		// effort 仍会被 supportsModelEffort 拒掉（composer 无档位）。
-		return true
-	default:
-		return false
+func mergeModelOptions(standardOptions, options *ModelOptions) ModelOptions {
+	var merged ModelOptions
+	for _, source := range []*ModelOptions{standardOptions, options} {
+		if source == nil {
+			continue
+		}
+		if source.Effort != nil {
+			value := *source.Effort
+			merged.Effort = &value
+		}
+		if source.Fast != nil {
+			value := *source.Fast
+			merged.Fast = &value
+		}
+		if source.Thinking != nil {
+			value := *source.Thinking
+			merged.Thinking = &value
+		}
+		if source.MaxMode != nil {
+			value := *source.MaxMode
+			merged.MaxMode = &value
+		}
 	}
+	return merged
 }
 
-func supportsModelEffort(modelID, effort string) bool {
-	switch modelID {
-	case "grok-4.6":
-		return effort == ModelEffortLow ||
-			effort == ModelEffortMedium ||
-			effort == ModelEffortHigh ||
-			effort == ModelEffortXHigh
-	case "grok-4.5":
-		return effort == ModelEffortLow ||
-			effort == ModelEffortMedium ||
-			effort == ModelEffortHigh
-	default:
-		return false
+func normalizeModelEffortForModel(modelID, raw string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if normalized == "" {
+		return "", fmt.Errorf("effort must not be empty")
 	}
+	switch normalized {
+	case "minimal":
+		normalized = ModelEffortNone
+	case "x-high", "extra-high", "extra_high":
+		normalized = ModelEffortXHigh
+	case "ultra":
+		normalized = ModelEffortMax
+	}
+
+	spec, ok := modelControlSpecs[modelID]
+	if !ok || len(spec.Efforts) == 0 {
+		return "", fmt.Errorf("effort %q is not supported by %s", strings.TrimSpace(raw), PublicModelID(modelID))
+	}
+	if stringSliceContains(spec.Efforts, normalized) {
+		return normalized, nil
+	}
+	if normalized == ModelEffortMax {
+		if stringSliceContains(spec.Efforts, ModelEffortXHigh) {
+			return ModelEffortXHigh, nil
+		}
+		if stringSliceContains(spec.Efforts, ModelEffortHigh) {
+			return ModelEffortHigh, nil
+		}
+	}
+	if normalized == ModelEffortXHigh && modelID == "grok-4.5" {
+		return ModelEffortHigh, nil
+	}
+	return "", fmt.Errorf("effort %q is not supported by %s", strings.TrimSpace(raw), PublicModelID(modelID))
+}
+
+func stringSliceContains(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneModelParams(params []ModelParam) []ModelParam {
+	return append([]ModelParam(nil), params...)
 }
 
 func setModelParam(params []ModelParam, id, value string) []ModelParam {

@@ -2,6 +2,7 @@ package cursor
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"strings"
 
@@ -23,6 +24,24 @@ type ModelParam struct {
 // DefaultModelParams 是反代对具名模型使用的默认参数。
 func DefaultModelParams() []ModelParam {
 	return []ModelParam{{ID: "effort", Value: "high"}, {ID: "fast", Value: "true"}}
+}
+
+// DefaultModelParamsFor returns the verified defaults for one compact model.
+func DefaultModelParamsFor(modelID string) []ModelParam {
+	bare := strings.TrimSpace(modelID)
+	bare = strings.TrimPrefix(bare, PublicModelPrefix)
+	if bare == AutoModelID {
+		return []ModelParam{}
+	}
+	if spec, ok := modelControlSpecs[bare]; ok {
+		return cloneModelParams(spec.DefaultParams)
+	}
+	if rest, found := strings.CutSuffix(bare, MaxModeSuffix); found {
+		if spec, ok := modelControlSpecs[rest]; ok {
+			return cloneModelParams(spec.DefaultParams)
+		}
+	}
+	return DefaultModelParams()
 }
 
 // encodeModelParam 编码 RequestedModel.params（field 3）。
@@ -58,14 +77,9 @@ func EncodeRequestedModel(model RequestedModel) []byte {
 func officialSelectedSubagentModels() []RequestedModel {
 	return []RequestedModel{
 		{ModelID: "default"},
-		{ModelID: "grok-4.5", Params: DefaultModelParams()},
-		{ModelID: "composer-2.5", Params: []ModelParam{{ID: "fast", Value: "true"}}},
-		{ModelID: "claude-opus-4-8", Params: []ModelParam{
-			{ID: "thinking", Value: "true"},
-			{ID: "context", Value: "300k"},
-			{ID: "effort", Value: "high"},
-			{ID: "fast", Value: "false"},
-		}},
+		{ModelID: "grok-4.5", Params: DefaultModelParamsFor("grok-4.5")},
+		{ModelID: "composer-2.5", Params: DefaultModelParamsFor("composer-2.5")},
+		{ModelID: "claude-opus-4-8", Params: DefaultModelParamsFor("claude-opus-4-8")},
 	}
 }
 
@@ -114,21 +128,48 @@ func DefaultRequestContextEnv(projectName string) RequestContextEnv {
 	}
 }
 
+// InlineImageRequestContextEnv omits synthetic filesystem paths. Cursor's
+// runtime otherwise materializes inline images under ProjectFolder and tells
+// the model that those files exist, although bridge clients cannot access it.
+func InlineImageRequestContextEnv(projectName string) RequestContextEnv {
+	env := DefaultRequestContextEnv(projectName)
+	env.WorkspacePaths = nil
+	env.TerminalsPath = ""
+	env.ProjectFolder = ""
+	env.TranscriptPath = ""
+	return env
+}
+
 // EncodeRequestContextEnv 编码 RequestContext.env。
 //
 // 字段的出现与否本身是信号：官方在 sandbox_enabled 为 false 时直接省略 field 5，
 // 补一个 0 反而与真实客户端不一致。
 func EncodeRequestContextEnv(env RequestContextEnv) []byte {
-	parts := [][]byte{EncodeStringField(1, env.OSVersion)}
+	var parts [][]byte
+	if env.OSVersion != "" {
+		parts = append(parts, EncodeStringField(1, env.OSVersion))
+	}
 	for _, path := range env.WorkspacePaths {
-		parts = append(parts, EncodeStringField(2, path))
+		if path != "" {
+			parts = append(parts, EncodeStringField(2, path))
+		}
+	}
+	if env.Shell != "" {
+		parts = append(parts, EncodeStringField(3, env.Shell))
+	}
+	if env.TerminalsPath != "" {
+		parts = append(parts, EncodeStringField(7, env.TerminalsPath))
+	}
+	if env.Timezone != "" {
+		parts = append(parts, EncodeStringField(10, env.Timezone))
+	}
+	if env.ProjectFolder != "" {
+		parts = append(parts, EncodeStringField(11, env.ProjectFolder))
+	}
+	if env.TranscriptPath != "" {
+		parts = append(parts, EncodeStringField(12, env.TranscriptPath))
 	}
 	parts = append(parts,
-		EncodeStringField(3, env.Shell),
-		EncodeStringField(7, env.TerminalsPath),
-		EncodeStringField(10, env.Timezone),
-		EncodeStringField(11, env.ProjectFolder),
-		EncodeStringField(12, env.TranscriptPath),
 		EncodeBoolField(14, false), // sandbox_supported
 		EncodeBoolField(16, true),  // sandbox_network_has_defaults
 		EncodeBoolField(19, false), // computer_use_supported
@@ -183,9 +224,9 @@ type RunRequestInput struct {
 	MessageID string
 }
 
-// encodeSelectedContext encodes agent.v1.SelectedContext with inline images:
-// SelectedContext.selected_images = field 1 (repeated SelectedImage)
-// SelectedImage.data = field 8, uuid = field 2, mime_type = field 7.
+// encodeSelectedContext mirrors Cursor's primary composer image shape:
+// SelectedImage.blob_id_with_data = field 9, uuid = field 2,
+// dimension = field 4, mime_type = field 7.
 func encodeSelectedContext(images []AttachedImage) []byte {
 	var selectedContext []byte
 	for _, image := range images {
@@ -200,11 +241,25 @@ func encodeSelectedContext(images []AttachedImage) []byte {
 		if mimeType == "" {
 			mimeType = "image/png"
 		}
-		selectedImage := concat(
-			EncodeBytesField(8, image.Data),
-			EncodeStringField(2, imageID),
-			EncodeStringField(7, mimeType),
+
+		blobID := sha256.Sum256(image.Data)
+		blobIDWithData := concat(
+			EncodeBytesField(1, blobID[:]),
+			EncodeBytesField(2, image.Data),
 		)
+		selectedImageParts := [][]byte{
+			EncodeBytesField(9, blobIDWithData),
+			EncodeStringField(2, imageID),
+		}
+		if image.Width > 0 && image.Height > 0 {
+			dimension := concat(
+				EncodeVarintField(1, uint64(image.Width)),
+				EncodeVarintField(2, uint64(image.Height)),
+			)
+			selectedImageParts = append(selectedImageParts, EncodeBytesField(4, dimension))
+		}
+		selectedImageParts = append(selectedImageParts, EncodeStringField(7, mimeType))
+		selectedImage := concat(selectedImageParts...)
 		selectedContext = append(selectedContext, EncodeBytesField(1, selectedImage)...)
 	}
 	return selectedContext
@@ -284,7 +339,7 @@ func EncodeRunRequest(input RunRequestInput) ([]byte, error) {
 	}
 	params := input.ModelParams
 	if params == nil {
-		params = DefaultModelParams()
+		params = DefaultModelParamsFor(modelID)
 	}
 	requestedModel := EncodeRequestedModel(RequestedModel{
 		ModelID: modelID,

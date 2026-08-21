@@ -104,6 +104,7 @@
       <button
         v-if="canSyncUpstream"
         type="button"
+        data-testid="sync-upstream-models"
         @click="syncUpstreamModels"
         :disabled="isSyncingUpstream"
         class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
@@ -120,7 +121,7 @@
     </div>
 
     <!-- Custom Model Input -->
-    <div class="mb-3">
+    <div v-if="allowCustom !== false" class="mb-3">
       <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.accounts.customModelName') }}</label>
       <div class="flex gap-2">
         <input
@@ -162,6 +163,7 @@ const props = defineProps<{
   platform?: string
   platforms?: string[]
   accountId?: number
+  allowCustom?: boolean
   syncCredentials?: {
     platform: string
     type: string
@@ -199,7 +201,17 @@ const normalizedPlatforms = computed(() => {
   )
 })
 
-const upstreamSyncPlatforms = new Set(['anthropic', 'openai', 'gemini', 'antigravity', 'grok'])
+const upstreamSyncPlatforms = new Set([
+  'anthropic',
+  'openai',
+  'gemini',
+  'antigravity',
+  'cursor',
+  'grok',
+  'kimi',
+  'zhipu',
+  'deepseek'
+])
 const canSyncUpstream = computed(() => {
   if (props.accountId) {
     if (normalizedPlatforms.value.length === 0) return true

@@ -153,6 +153,12 @@ type SystemSettings struct {
 	SiteSubtitle                string           `json:"site_subtitle"`
 	APIBaseURL                  string           `json:"api_base_url"`
 	ContactInfo                 string           `json:"contact_info"`
+	CustomerServiceEnabled      bool             `json:"customer_service_enabled"`
+	CustomerServiceButtonText   string           `json:"customer_service_button_text"`
+	CustomerServiceTitle        string           `json:"customer_service_title"`
+	CustomerServiceDescription  string           `json:"customer_service_description"`
+	CustomerServiceWeChatID     string           `json:"customer_service_wechat_id"`
+	CustomerServiceQRImage      string           `json:"customer_service_qr_image"`
 	DocURL                      string           `json:"doc_url"`
 	HomeContent                 string           `json:"home_content"`
 	CompactHomeEnabled          bool             `json:"compact_home_enabled"`
@@ -267,25 +273,25 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string  `json:"openai_advanced_scheduler_effective_weight_session_sticky"`
 
 	// Payment configuration
-	PaymentEnabled                   bool     `json:"payment_enabled"`
-	PaymentMinAmount                 float64  `json:"payment_min_amount"`
-	PaymentMaxAmount                 float64  `json:"payment_max_amount"`
-	PaymentDailyLimit                float64  `json:"payment_daily_limit"`
-	PaymentOrderTimeoutMin           int      `json:"payment_order_timeout_minutes"`
-	PaymentMaxPendingOrders          int      `json:"payment_max_pending_orders"`
-	PaymentEnabledTypes              []string `json:"payment_enabled_types"`
-	PaymentBalanceDisabled           bool     `json:"payment_balance_disabled"`
-	PaymentBalanceRechargeMultiplier float64  `json:"payment_balance_recharge_multiplier"`
-	PaymentSubscriptionUSDToCNYRate  float64  `json:"payment_subscription_usd_to_cny_rate"`
-	PaymentRechargeFeeRate           float64  `json:"payment_recharge_fee_rate"`
-	PaymentLoadBalanceStrat          string   `json:"payment_load_balance_strategy"`
-	PaymentProductNamePrefix         string   `json:"payment_product_name_prefix"`
-	PaymentProductNameSuffix         string   `json:"payment_product_name_suffix"`
-	PaymentHelpImageURL              string   `json:"payment_help_image_url"`
-	PaymentHelpText                  string   `json:"payment_help_text"`
-	PaymentExternalRedeemPurchaseEnabled bool   `json:"payment_external_redeem_purchase_enabled"`
-	PaymentExternalRedeemPurchaseURL     string `json:"payment_external_redeem_purchase_url"`
-	PaymentExternalRedeemPurchaseLabel   string `json:"payment_external_redeem_purchase_label"`
+	PaymentEnabled                       bool     `json:"payment_enabled"`
+	PaymentMinAmount                     float64  `json:"payment_min_amount"`
+	PaymentMaxAmount                     float64  `json:"payment_max_amount"`
+	PaymentDailyLimit                    float64  `json:"payment_daily_limit"`
+	PaymentOrderTimeoutMin               int      `json:"payment_order_timeout_minutes"`
+	PaymentMaxPendingOrders              int      `json:"payment_max_pending_orders"`
+	PaymentEnabledTypes                  []string `json:"payment_enabled_types"`
+	PaymentBalanceDisabled               bool     `json:"payment_balance_disabled"`
+	PaymentBalanceRechargeMultiplier     float64  `json:"payment_balance_recharge_multiplier"`
+	PaymentSubscriptionUSDToCNYRate      float64  `json:"payment_subscription_usd_to_cny_rate"`
+	PaymentRechargeFeeRate               float64  `json:"payment_recharge_fee_rate"`
+	PaymentLoadBalanceStrat              string   `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix             string   `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix             string   `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL                  string   `json:"payment_help_image_url"`
+	PaymentHelpText                      string   `json:"payment_help_text"`
+	PaymentExternalRedeemPurchaseEnabled bool     `json:"payment_external_redeem_purchase_enabled"`
+	PaymentExternalRedeemPurchaseURL     string   `json:"payment_external_redeem_purchase_url"`
+	PaymentExternalRedeemPurchaseLabel   string   `json:"payment_external_redeem_purchase_label"`
 
 	// Cancel rate limit
 	PaymentCancelRateLimitEnabled bool   `json:"payment_cancel_rate_limit_enabled"`
@@ -312,6 +318,7 @@ type SystemSettings struct {
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`
 	ChannelMonitorHideThroughput         bool   `json:"channel_monitor_hide_throughput"`
+	ChannelMonitorShowQuota              bool   `json:"channel_monitor_show_quota"`
 
 	// Grok model mapping policy (admin settings; empty account mapping falls back to these).
 	GrokDefaultTextModel           string `json:"grok_default_text_model"`
@@ -384,6 +391,12 @@ type PublicSettings struct {
 	SiteSubtitle                        string                   `json:"site_subtitle"`
 	APIBaseURL                          string                   `json:"api_base_url"`
 	ContactInfo                         string                   `json:"contact_info"`
+	CustomerServiceEnabled              bool                     `json:"customer_service_enabled"`
+	CustomerServiceButtonText           string                   `json:"customer_service_button_text"`
+	CustomerServiceTitle                string                   `json:"customer_service_title"`
+	CustomerServiceDescription          string                   `json:"customer_service_description"`
+	CustomerServiceWeChatID             string                   `json:"customer_service_wechat_id"`
+	CustomerServiceQRImage              string                   `json:"customer_service_qr_image"`
 	DocURL                              string                   `json:"doc_url"`
 	HomeContent                         string                   `json:"home_content"`
 	CompactHomeEnabled                  bool                     `json:"compact_home_enabled"`
@@ -408,7 +421,6 @@ type PublicSettings struct {
 	OIDCOAuthProviderName               string                   `json:"oidc_oauth_provider_name"`
 	GitHubOAuthEnabled                  bool                     `json:"github_oauth_enabled"`
 	GoogleOAuthEnabled                  bool                     `json:"google_oauth_enabled"`
-	SoraClientEnabled                   bool                     `json:"sora_client_enabled"`
 	BackendModeEnabled                  bool                     `json:"backend_mode_enabled"`
 	PaymentEnabled                      bool                     `json:"payment_enabled"`
 	Version                             string                   `json:"version"`
@@ -425,6 +437,7 @@ type PublicSettings struct {
 	ChannelMonitorMode                   string `json:"channel_monitor_mode"`
 	ChannelMonitorDefaultIntervalSeconds int    `json:"channel_monitor_default_interval_seconds"`
 	ChannelMonitorHideThroughput         bool   `json:"channel_monitor_hide_throughput"`
+	ChannelMonitorShowQuota              bool   `json:"channel_monitor_show_quota"`
 
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 

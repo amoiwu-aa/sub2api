@@ -108,6 +108,22 @@ func TestChecksumMatchesNodeReference(t *testing.T) {
 	}
 }
 
+func TestSandChecksumMatchesNodeReference(t *testing.T) {
+	const machineID = "machine-123"
+
+	cases := map[int64]string{
+		0:                 "paaoq6-0",
+		1:                 "paaoq6-0",
+		1_000_000:         "paWnqq60",
+		1_769_000_000_000: "W3R2b5XC",
+		1_774_519_200_000: "tgIEIjWH",
+		2_000_000_000_000: "IaKkvT3C",
+	}
+	for unixMilli, prefix := range cases {
+		require.Equal(t, prefix+machineID, SandChecksum(machineID, time.UnixMilli(unixMilli)))
+	}
+}
+
 func TestChecksumIsStableWithinTheSameMillionMillisecondBucket(t *testing.T) {
 	ids := DeriveTelemetryIDs("account-42")
 	// 取一个正好落在桶边界上的时刻（1774519 × 1e6）。

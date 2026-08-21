@@ -123,7 +123,16 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	if effortEnvelope.Reasoning != nil {
 		standardEffort = effortEnvelope.Reasoning.Effort
 	}
-	selection, err := resolveCursorModelSelection(body, publicModel, standardEffort)
+	standardFast, err := cursorFastFromServiceTier(responsesReq.ServiceTier)
+	if err != nil {
+		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	selection, err := resolveCursorAccountModelSelectionWithStandardOptions(
+		account,
+		body,
+		publicModel,
+		&cursor.ModelOptions{Effort: standardEffort, Fast: standardFast},
+	)
 	if err != nil {
 		return nil, s.writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -142,7 +151,7 @@ func (s *CursorGatewayService) forwardResponsesOnce(
 	input := cursor.AgentTurnInput{
 		Text:                     prompt,
 		ConversationID:           resolveCursorConversationID(c, account, conversation, responsesReq.ID),
-		Images:                   conversation.Images(),
+		Images:                   conversation.CurrentInputImages(),
 		ModelID:                  selection.ModelID,
 		ModelParams:              selection.Params,
 		MaxMode:                  selection.MaxMode,

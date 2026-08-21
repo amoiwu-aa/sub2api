@@ -26,7 +26,26 @@ const (
 	PlatformGrok        = "grok"
 	PlatformCursor      = "cursor"
 	PlatformKiro        = "kiro"
+	PlatformKimi        = "kimi"
+	PlatformZhipu       = "zhipu"
+	PlatformDeepseek    = "deepseek"
 	PlatformComposite   = "composite"
+)
+
+// Account mode constants distinguish pay-as-you-go balance accounts from
+// coding-plan accounts for domestic providers.
+const (
+	AccountModePayG   = "payg"
+	AccountModeCoding = "coding"
+)
+
+// API protocol constants are independent from account mode. Adaptive accounts
+// select the native upstream protocol from the incoming request.
+const (
+	APIProtocolChatCompletions = "chat_completions"
+	APIProtocolAnthropic       = "anthropic"
+	APIProtocolResponses       = "responses"
+	APIProtocolAdaptive        = "adaptive"
 )
 
 // Account type constants

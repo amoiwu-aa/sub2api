@@ -101,6 +101,43 @@ func TestQuotaBlockReasonForceUseBypassesLocalQuotaGate(t *testing.T) {
 	require.Empty(t, gateWith(full, true).quotaBlockReason(account, cursor.AutoModelID))
 }
 
+func TestQuotaBlockReasonStopsAllModelsWhenSandWeeklyUsageIsUnavailable(t *testing.T) {
+	available := false
+	resetAt := time.Now().Add(6 * 24 * time.Hour)
+	usage := &UsageInfo{
+		CursorSandHasAvailableUsage: &available,
+		CursorSandUsage:             &UsageProgress{Utilization: 100, ResetsAt: &resetAt},
+		CursorAutoUsage:             &UsageProgress{Utilization: 10},
+		CursorAPIUsage:              &UsageProgress{Utilization: 10},
+	}
+	s := gateWith(usage, true)
+	account := cursorParkAccount()
+	account.Credentials = map[string]any{CursorAgentProfileCredentialKey: "sand"}
+	account.Extra = map[string]any{CursorForceUseExtraKey: true}
+
+	for _, model := range []string{cursor.AutoModelID, "claude-sonnet-5", "grok-4.6"} {
+		reason := s.quotaBlockReason(account, model)
+		require.Contains(t, reason, "Grok Bot weekly usage is exhausted")
+		require.Contains(t, reason, resetAt.Local().Format("2006-01-02"))
+	}
+}
+
+func TestQuotaBlockReasonSandIgnoresCursorIDEQuotaPools(t *testing.T) {
+	available := true
+	usage := &UsageInfo{
+		CursorSandHasAvailableUsage: &available,
+		CursorSandUsage:             &UsageProgress{Utilization: 12},
+		CursorAutoUsage:             &UsageProgress{Utilization: 100},
+		CursorAPIUsage:              &UsageProgress{Utilization: 100},
+	}
+	account := cursorParkAccount()
+	account.Credentials = map[string]any{CursorAgentProfileCredentialKey: "sand"}
+
+	for _, model := range []string{cursor.AutoModelID, "claude-sonnet-5", "grok-4.6"} {
+		require.Empty(t, gateWith(usage, true).quotaBlockReason(account, model))
+	}
+}
+
 // 配额 429 的错误体必须与各入口的协议一致：Anthropic 客户端解析的是
 // {"type":"error","error":{...}}，塞给它 OpenAI 形状会显示不出错误详情。
 func TestEnsureModelQuotaUsesProtocolSpecificErrorBody(t *testing.T) {

@@ -568,6 +568,7 @@ describe('UseKeyModal', () => {
       expect(models[model]).toBeDefined()
       expect(models[model].variants).toHaveProperty('max')
       expect(models[model].variants).toHaveProperty('xhigh')
+      expect(models[model].variants).toHaveProperty('ultra')
     }
     expect(models['gpt-5.6'].name).toBe('GPT-5.6 (Sol)')
   })
