@@ -97,6 +97,25 @@ func TestAnthropicControlsMapToCursorOptions(t *testing.T) {
 	require.Equal(t, "true", cursorModelParamValue(selection.Params, "fast"))
 }
 
+func TestClaudeCodeAdaptiveThinkingIsIgnoredForGrok46(t *testing.T) {
+	thinking, err := cursorThinkingFromAnthropic([]byte(`{"type":"adaptive"}`))
+	require.NoError(t, err)
+	effort := cursor.ModelEffortHigh
+
+	selection, err := resolveCursorModelSelectionWithStandardOptions(
+		[]byte(`{
+			"model":"cursor/grok-4.6",
+			"thinking":{"type":"adaptive"},
+			"output_config":{"effort":"high"}
+		}`),
+		"cursor/grok-4.6",
+		&cursor.ModelOptions{Effort: &effort, Thinking: thinking},
+	)
+	require.NoError(t, err)
+	require.Equal(t, cursor.ModelEffortHigh, cursorModelParamValue(selection.Params, "effort"))
+	require.Empty(t, cursorModelParamValue(selection.Params, "thinking"))
+}
+
 func TestAnthropicFastBetaAndThinkingVariants(t *testing.T) {
 	fast, err := cursorFastFromAnthropic("", claude.BetaFastMode+",other-beta")
 	require.NoError(t, err)

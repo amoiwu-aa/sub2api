@@ -484,11 +484,11 @@ func applyModelOptions(
 		return ModelSelection{}, fmt.Errorf("cursor model options are not supported by %s", PublicModelID(selection.ModelID))
 	}
 
-	normalizedStandard, err := normalizeModelOptions(selection.ModelID, standardOptions)
+	normalizedStandard, err := normalizeModelOptions(selection.ModelID, standardOptions, true)
 	if err != nil {
 		return ModelSelection{}, err
 	}
-	normalizedCustom, err := normalizeModelOptions(selection.ModelID, options)
+	normalizedCustom, err := normalizeModelOptions(selection.ModelID, options, false)
 	if err != nil {
 		return ModelSelection{}, err
 	}
@@ -523,7 +523,11 @@ func hasModelOptions(options *ModelOptions) bool {
 		(options.Effort != nil || options.Fast != nil || options.Thinking != nil || options.MaxMode != nil)
 }
 
-func normalizeModelOptions(modelID string, options *ModelOptions) (*ModelOptions, error) {
+func normalizeModelOptions(
+	modelID string,
+	options *ModelOptions,
+	ignoreUnsupportedStandardThinking bool,
+) (*ModelOptions, error) {
 	if options == nil {
 		return nil, nil
 	}
@@ -550,7 +554,9 @@ func normalizeModelOptions(modelID string, options *ModelOptions) (*ModelOptions
 	}
 	if options.Thinking != nil {
 		if *options.Thinking && !spec.Thinking {
-			return nil, fmt.Errorf("thinking mode is not supported by %s", PublicModelID(modelID))
+			if !ignoreUnsupportedStandardThinking {
+				return nil, fmt.Errorf("thinking mode is not supported by %s", PublicModelID(modelID))
+			}
 		}
 		if spec.Thinking {
 			thinking := *options.Thinking

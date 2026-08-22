@@ -347,6 +347,27 @@ func TestResolveModelWithStandardOptionsMapsThinkingAndFast(t *testing.T) {
 		"cursor_options must override protocol-standard Fast")
 }
 
+func TestResolveModelWithStandardOptionsIgnoresClaudeThinkingForGrok(t *testing.T) {
+	effort := ModelEffortHigh
+	thinking := true
+	selection, err := ResolveModelWithStandardOptionsStrict(
+		"cursor/grok-4.6",
+		&ModelOptions{Effort: &effort, Thinking: &thinking},
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, ModelEffortHigh, modelParamValue(selection.Params, "effort"))
+	require.Empty(t, modelParamValue(selection.Params, "thinking"))
+
+	_, err = ResolveModelWithStandardOptionsStrict(
+		"cursor/grok-4.6",
+		nil,
+		&ModelOptions{Thinking: &thinking},
+	)
+	require.ErrorContains(t, err, "thinking mode is not supported",
+		"explicit cursor_options.thinking must remain strict")
+}
+
 func TestDefaultModelParamsForUsesPerModelDefaults(t *testing.T) {
 	require.Equal(t, ModelEffortMedium, modelParamValue(DefaultModelParamsFor("gpt-5.6-sol"), "effort"))
 	require.Equal(t, "false", modelParamValue(DefaultModelParamsFor("gpt-5.6-sol"), "fast"))

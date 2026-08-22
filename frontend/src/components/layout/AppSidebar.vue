@@ -11,7 +11,7 @@
       <!-- Custom Logo or Default Logo -->
       <router-link
         :to="homePath"
-        class="sidebar-logo flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl transition-opacity hover:opacity-80"
+        class="sidebar-logo flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl transition-opacity hover:opacity-80"
         @click="handleMenuItemClick(homePath)"
       >
         <img v-if="settingsLoaded" :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
@@ -1043,14 +1043,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .sidebar-logo {
-  flex: 0 0 2.5rem;
-  min-width: 2.5rem;
+  flex: 0 0 3.5rem;
+  min-width: 3.5rem;
 }
 
 .sidebar-header-collapsed {
   gap: 0;
-  padding-left: 1rem;
-  padding-right: 1rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
 }
 
 .sidebar-brand {
